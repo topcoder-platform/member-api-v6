@@ -6,7 +6,6 @@ install_dependency: &install_dependency
   name: Installation of build and deployment dependencies.
   command: |
     pip3 install awscli --upgrade
-    # sudo pip3 install docker-compose
 install_deploysuite: &install_deploysuite
   name: Installation of install_deploysuite.
   command: |
@@ -16,10 +15,10 @@ install_deploysuite: &install_deploysuite
     cp ./../buildscript/awsconfiguration.sh .
     cp ./../buildscript/psvar-processor.sh .
 restore_cache_settings_for_build: &restore_cache_settings_for_build
-  key: docker-node-modules-{{ checksum "yarn.lock" }}
+  key: docker-node-modules-v6-{{ checksum "yarn.lock" }}
 
 save_cache_settings: &save_cache_settings
-  key: docker-node-modules-{{ checksum "yarn.lock" }}
+  key: docker-node-modules-v6-{{ checksum "yarn.lock" }}
   paths:
   - node_modules
 
