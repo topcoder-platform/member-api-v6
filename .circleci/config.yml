@@ -9,7 +9,7 @@ install_dependency: &install_dependency
 install_deploysuite: &install_deploysuite
   name: Installation of install_deploysuite.
   command: |
-    git clone --branch v1.4.17 https://github.com/topcoder-platform/tc-deploy-scripts ../buildscript
+    git clone --branch v1.4.19 https://github.com/topcoder-platform/tc-deploy-scripts ../buildscript
     cp ./../buildscript/master_deploy.sh .
     cp ./../buildscript/buildenv.sh .
     cp ./../buildscript/awsconfiguration.sh .
@@ -28,14 +28,14 @@ builddeploy_steps: &builddeploy_steps
 - run: *install_dependency
 - run: *install_deploysuite
 - run: ./build.sh ${APPNAME}
-- deploy:
+- run:
     name: Running MasterScript.
     command: |
       ./awsconfiguration.sh $DEPLOY_ENV
       source awsenvconf
       ./psvar-processor.sh -t appenv -p /config/${APPNAME}/deployvar
       source deployvar_env
-      ./master_deploy.sh -d ECS -e $DEPLOY_ENV -t latest -j /config/common/global-appvar,/config/${APPNAME}/appvar -i ${APPNAME} -p FARGATE
+      ./master_deploy.sh -d ECS -e $DEPLOY_ENV -t latest -j /config/${APPNAME}/appvar,/config/common/global-appvar -i ${APPNAME} -p FARGATE
       
 
 jobs:
