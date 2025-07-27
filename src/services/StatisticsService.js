@@ -1139,6 +1139,12 @@ async function partiallyUpdateMemberStats (currentUser, handle, data) {
     // update maxRating
     if (data.maxRating) {
       await prismaHelper.updateOrCreateModel(data.maxRating, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
+      const updatedMaxRating = await tx.memberMaxRating.findFirst({
+        where: {
+          userId: member.userId
+        }
+      })
+      member.maxRating = updatedMaxRating
     }
 
     // update DEVELOP
