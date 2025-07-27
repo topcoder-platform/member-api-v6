@@ -86,7 +86,7 @@ The following parameters can be set in config files or in env variables:
 - BUSAPI_URL: Bus API URL
 - KAFKA_ERROR_TOPIC: Kafka error topic used by bus API wrapper
 - GROUPS_API_URL: Groups API URL
-- AMAZON.AWS_ACCESS_KEY_ID: The Amazon certificate key to use when connecting. 
+- AMAZON.AWS_ACCESS_KEY_ID: The Amazon certificate key to use when connecting.
 - AMAZON.AWS_SECRET_ACCESS_KEY: The Amazon certificate access key to use when connecting.
 - AMAZON.AWS.SESSION_TOKEN: The user session token, used when developing locally against the TC dev AWS services
 - AMAZON.AWS_REGION: The Amazon certificate region to use when connecting.
@@ -167,7 +167,7 @@ These commands will set auth0 and event bus api to local mock server.
 ## Tests
 
 
-Make sure you have followed above steps to 
+Make sure you have followed above steps to
 - setup db and config db url
 - setup local mock api and set local configs
   - it will really call service and mock api

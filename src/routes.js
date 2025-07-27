@@ -125,6 +125,18 @@ module.exports = {
       auth: 'jwt',
       allowNoToken: true,
       scopes: [MEMBERS.READ, MEMBERS.ALL]
+    },
+    post: {
+      controller: 'StatisticsController',
+      method: 'createHistoryStats',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    },
+    patch: {
+      controller: 'StatisticsController',
+      method: 'partiallyUpdateHistoryStats',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
     }
   },
   '/members/:handle/stats': {
@@ -134,6 +146,18 @@ module.exports = {
       auth: 'jwt',
       allowNoToken: true,
       scopes: [MEMBERS.READ, MEMBERS.ALL]
+    },
+    post: {
+      controller: 'StatisticsController',
+      method: 'createMemberStats',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    },
+    patch: {
+      controller: 'StatisticsController',
+      method: 'partiallyUpdateMemberStats',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
     }
   },
   '/members/:handle/skills': {

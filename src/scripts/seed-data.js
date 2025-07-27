@@ -328,7 +328,9 @@ async function importMember (handle) {
     }
   })
 
-  await createStats(memberData, member.maxRating.id)
+  if (handle !== 'iamtong' && handle !== 'jiangliwu') {
+    await createStats(memberData, member.maxRating.id)
+  }
   await createSkills(memberData)
   console.log(`Import member data complete for ${handle}`)
 }
@@ -357,6 +359,9 @@ async function importDistributions () {
 
 async function importStatsHistory () {
   for (let handle of handleList) {
+    if (handle === 'iamtong' || handle === 'jiangliwu') {
+      continue
+    }
     console.log(`Import stats history for member ${handle}`)
     const filename = path.join(statsHistoryDir, `${handle}.json`)
     const rawData = fs.readFileSync(filename, 'utf8')
@@ -402,7 +407,6 @@ async function importStatsHistory () {
       _.forEach(srmHistory, t => {
         dataScienceItems.push({
           subTrack: 'SRM',
-          subTrackId: 0,
           createdBy,
           ..._.pick(t, ['challengeId', 'challengeName', 'rating', 'placement', 'percentile']),
           date: new Date(t.date)
@@ -413,7 +417,6 @@ async function importStatsHistory () {
       _.forEach(marathonHistory, t => {
         dataScienceItems.push({
           subTrack: 'MARATHON_MATCH',
-          subTrackId: 0,
           createdBy,
           ..._.pick(t, ['challengeId', 'challengeName', 'rating', 'placement', 'percentile']),
           date: new Date(t.date)
@@ -468,7 +471,6 @@ async function mockPrivateStatsHistory () {
             placement: 1,
             percentile: 100,
             subTrack: 'SRM',
-            subTrackId: 0,
             createdBy
           }, {
             challengeId: 99997,
@@ -478,7 +480,6 @@ async function mockPrivateStatsHistory () {
             placement: 1,
             percentile: 100,
             subTrack: 'MARATHON_MATCH',
-            subTrackId: 0,
             createdBy
           }]
         }
