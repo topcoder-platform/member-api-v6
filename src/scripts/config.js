@@ -2,6 +2,7 @@
 module.exports = {
   apiUrl: 'https://api.topcoder-dev.com/v5/members',
   fileLocation: '../member_data',
+  migrateLocation: '../migrate-data',
   handleList: [
     // data science
     'ACRush',

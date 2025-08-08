@@ -8,10 +8,8 @@ const config = require('config')
 const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
-const constants = require('../../app-constants')
 const prisma = require('../common/prisma').getClient()
 const prismaHelper = require('../common/prismaHelper')
-const string = require('joi/lib/types/string')
 const { v4: uuidv4 } = require('uuid')
 
 const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', 'updatedAt',
@@ -23,9 +21,6 @@ const HISTORY_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'DEV
 const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxRating',
   'challenges', 'wins', 'DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT', 'createdAt',
   'updatedAt', 'createdBy', 'updatedBy']
-
-const MEMBER_SKILL_FIELDS = ['userId', 'handle', 'handleLower', 'skills',
-  'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
 
 /**
  * Get distribution statistics.
@@ -244,7 +239,7 @@ getMemberSkills.schema = {
  * Check create/update member skill data
  * @param {Object} data request body
  */
-async function validateMemberSkillData(data) {
+async function validateMemberSkillData (data) {
   // Check displayMode
   if (data.displayModeId) {
     const modeCount = await prisma.displayMode.count({
@@ -263,7 +258,6 @@ async function validateMemberSkillData(data) {
     }
   }
 }
-
 
 async function createMemberSkills (currentUser, handle, data) {
   // get member by handle
@@ -288,14 +282,14 @@ async function createMemberSkills (currentUser, handle, data) {
     id: uuidv4(),
     userId: member.userId,
     skillId: data.skillId,
-    createdBy,
+    createdBy
   }
   if (data.displayModeId) {
     memberSkillData.displayModeId = data.displayModeId
   }
   if (data.levels && data.levels.length > 0) {
     memberSkillData.levels = {
-      createMany: { data: 
+      createMany: { data:
         _.map(data.levels, levelId => ({
           skillLevelId: levelId,
           createdBy
@@ -346,7 +340,7 @@ async function partiallyUpdateMemberSkills (currentUser, handle, data) {
 
   const updatedBy = currentUser.handle || currentUser.sub
   const memberSkillData = {
-    updatedBy,
+    updatedBy
   }
   if (data.displayModeId) {
     memberSkillData.displayModeId = data.displayModeId
@@ -356,7 +350,7 @@ async function partiallyUpdateMemberSkills (currentUser, handle, data) {
       where: { memberSkillId: existing.id }
     })
     memberSkillData.levels = {
-      createMany: { data: 
+      createMany: { data:
         _.map(data.levels, levelId => ({
           skillLevelId: levelId,
           createdBy: updatedBy,

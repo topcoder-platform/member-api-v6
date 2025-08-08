@@ -21,7 +21,7 @@ const prismaHelper = require('../common/prismaHelper')
 const prisma = require('../common/prisma').getClient()
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
-  'addresses', 'description', 'email', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
+  'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
   'skillScoreDeduction', 'namesAndHandleAppearance']
 
@@ -415,6 +415,7 @@ updateMember.schema = {
       type: Joi.string()
     })),
     verified: Joi.bool(),
+    country: Joi.string(),
     homeCountryCode: Joi.string(),
     competitionCountryCode: Joi.string(),
     photoURL: Joi.string().uri().allow('').allow(null),
