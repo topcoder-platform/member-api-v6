@@ -470,7 +470,7 @@ async function verifyEmail (currentUser, handle, query) {
   // update member in db
   const result = await prisma.member.update({
     where: { userId: member.userId },
-    data: member
+    data: _.omit(member, ['maxRating'])
   })
   prismaHelper.convertMember(result)
   await helper.postBusEvent(constants.TOPICS.MemberUpdated, result)

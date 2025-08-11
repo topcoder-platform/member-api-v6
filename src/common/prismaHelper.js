@@ -1,5 +1,6 @@
 const _ = require('lodash')
 const helper = require('./helper')
+const errors = require('./errors')
 
 const designBasicFields = [
   'name', 'numInquiries', 'submissions', 'passedScreening', 'avgPlacement',
@@ -331,6 +332,427 @@ const skillsIncludeParams = {
   displayMode: true
 }
 
+/**
+ * Convert number to date
+ * @param {Number} dateNum date number
+ * @returns date instance or undefined
+ */
+function convertDate (dateNum) {
+  return dateNum ? new Date(dateNum) : undefined
+}
+
+/**
+ * Update or Create item.
+ * @param {Array} updateItems items to be updated
+ * @param {Array} existingItems existing items in db
+ * @param {Object} txModel the tx model
+ * @param {Object} parentId the parent Id object
+ * @param {String} operatorId the operator Id
+ * @returns new created item data or undefined
+ */
+async function updateOrCreateModel (itemData, existingData, txModel, parentId, operatorId) {
+  if (existingData) {
+    await txModel.update({
+      where: {
+        id: existingData.id
+      },
+      data: {
+        ...itemData,
+        updatedBy: operatorId
+      }
+    })
+  } else {
+    const newItemData = await txModel.create({
+      data: {
+        ...itemData,
+        ...parentId,
+        createdBy: operatorId
+      }
+    })
+    return newItemData
+  }
+}
+
+/**
+ * Validate subTrack items data
+ * @param {Array} updateItems the subTrack data to update
+ * @param {Array} existingItems the existing subTrack data
+ * @param {String} modelName the model name
+ * @returns subTrack items data to create
+ */
+function validateSubTrackData (updateItems, existingItems, modelName) {
+  const itemIds = []
+  const itemNames = []
+  const toCreateItems = []
+
+  updateItems.forEach(item => {
+    if (_.find(itemIds, id => id === item.id)) {
+      throw new errors.BadRequestError(`${modelName} items contains duplicate id: '${item.id}'`)
+    }
+    if (item.name && _.find(itemNames, name => name === item.name)) {
+      throw new errors.BadRequestError(`${modelName} items contains duplicate name: '${item.name}'`)
+    }
+    itemIds.push(item.id)
+    if (item.name) {
+      itemNames.push(item.name)
+    }
+    const foundItem = existingItems.find(eItem => eItem.subTrackId === item.id)
+    const nameItem = existingItems.find(eItem => {
+      if (eItem.subTrack) {
+        return eItem.subTrackId !== item.id && eItem.subTrack === item.name
+      }
+      return eItem.subTrackId !== item.id && eItem.name === item.name
+    })
+
+    if (foundItem && (item.name && (foundItem.subTrack ? item.name !== foundItem.subTrack : item.name !== foundItem.name))) {
+      throw new errors.BadRequestError(`${modelName} item with name '${item.name}' is not same as the DB one with same id`)
+    }
+    if (nameItem) {
+      throw new errors.BadRequestError(`${modelName} item has duplicated name '${item.name}' in DB`)
+    }
+    if (!foundItem && !(item.id && item.name)) {
+      throw new errors.BadRequestError(`${modelName} new item must have id and name both`)
+    }
+    if (!foundItem) {
+      toCreateItems.push(item)
+    }
+  })
+
+  return toCreateItems
+}
+
+/**
+ * Validate level items data
+ * @param {Array} updateItems the level data to update
+ * @param {Array} existingItems the level subTrack data
+ * @param {String} modelName the model name
+ * @param {String} itemName the item name
+ * @param {Object} schema the joi schema
+ * @returns level items data to create
+ */
+function validateLevelItemsData (updateItems, existingItems, modelName, itemName, schema) {
+  const itemLevelNames = []
+  const toCreateItems = []
+  updateItems.forEach(item => {
+    if (_.find(itemLevelNames, ln => ln === item.levelName)) {
+      throw new errors.BadRequestError(`${modelName} ${itemName} items contains duplicate level name: '${item.levelName}'`)
+    }
+    itemLevelNames.push(item.levelName)
+
+    const foundItem = existingItems.find(eItem => {
+      if (itemName === 'challengeDetail') {
+        return eItem.levelName === item.levelName
+      } else {
+        return eItem.levelName === item.levelName && eItem.divisionName === itemName
+      }
+    })
+    if (!foundItem) {
+      toCreateItems.push(item)
+    }
+  })
+
+  if (toCreateItems.length > 0) {
+    const validateRes = schema.validate(toCreateItems)
+
+    if (validateRes.error) {
+      throw new errors.BadRequestError(validateRes.error.error)
+    }
+  }
+}
+
+/**
+ * Validate history items data
+ * @param {Array} updateItems the history data to update
+ * @param {Array} existingItems the existing history data
+ * @param {String} modelName the model name
+ * @returns history items data to create
+ */
+function validateHistoryData (updateItems, existingItems, modelName) {
+  const itemIds = []
+  const toCreateItems = []
+  updateItems.forEach(item => {
+    if (_.find(itemIds, id => id === item.challengeId)) {
+      throw new errors.BadRequestError(`${modelName} items contains duplicate id: '${item.challengeId}'`)
+    }
+    itemIds.push(item.challengeId)
+
+    const foundItem = existingItems.find(eItem => helper.bigIntToNumber(eItem.challengeId) === item.challengeId && eItem.subTrack === item.subTrack)
+
+    if (!foundItem) {
+      toCreateItems.push(item)
+    }
+  })
+
+  return toCreateItems
+}
+
+/**
+ * Update array items.
+ * @param {Array} updateItems items to be updated
+ * @param {Array} existingItems existing items in db
+ * @param {Object} txModel the tx model
+ * @param {Object} parentId the parent Id object
+ * @param {String} operatorId the operator Id
+ */
+async function updateArrayItems (updateItems, existingItems, txModel, parentId, operatorId) {
+  const toUpdate = []
+  const toCreate = []
+  if (updateItems.length === 0) {
+    return
+  }
+
+  updateItems.forEach(item => {
+    const foundItem = existingItems.find(eItem => eItem.subTrackId === item.subTrackId)
+    if (foundItem) {
+      item.id = foundItem.id
+      toUpdate.push(item)
+    } else {
+      toCreate.push(item)
+    }
+  })
+  const toDeleteIds = []
+  existingItems.forEach(item => {
+    const found = toUpdate.find(item2 => item2.id === item.id)
+    if (!found) {
+      toDeleteIds.push(item.id)
+    }
+  })
+
+  for (let i = 0; i < toUpdate.length; i++) {
+    const elem = toUpdate[i]
+    await txModel.update({
+      where: {
+        id: elem.id
+      },
+      data: {
+        ..._.omit(elem, ['id', 'subTrackId', 'name']),
+        updatedBy: operatorId
+      }
+    })
+  }
+
+  await txModel.createMany({
+    data: toCreate.map(item => ({
+      ...item,
+      ...parentId,
+      createdBy: operatorId
+    }))
+  })
+
+  await txModel.deleteMany({
+    where: {
+      id: {
+        in: toDeleteIds
+      }
+    }
+  })
+}
+
+/**
+ * Update array level items.
+ * @param {Array} updateItems items to be updated
+ * @param {Array} existingItems existing items in db
+ * @param {Object} txModel the tx model
+ * @param {Object} parentId the parent Id object
+ * @param {String} operatorId the operator Id
+ */
+async function updateArrayLevelItems (updateItems, existingItems, txModel, parentId, operatorId) {
+  const toUpdate = []
+  const toCreate = []
+  if (updateItems.length === 0) {
+    return
+  }
+
+  updateItems.forEach(item => {
+    const foundItem = existingItems.find(eItem => eItem.levelName === item.levelName)
+    if (foundItem) {
+      item.id = foundItem.id
+      toUpdate.push(item)
+    } else {
+      toCreate.push(item)
+    }
+  })
+  const toDeleteIds = []
+  existingItems.forEach(item => {
+    const found = toUpdate.find(item2 => item2.id === item.id)
+    if (!found) {
+      toDeleteIds.push(item.id)
+    }
+  })
+
+  for (let i = 0; i < toUpdate.length; i++) {
+    const elem = toUpdate[i]
+    await txModel.update({
+      where: {
+        id: elem.id
+      },
+      data: {
+        ..._.omit(elem, ['id']),
+        updatedBy: operatorId
+      }
+    })
+  }
+
+  await txModel.createMany({
+    data: toCreate.map(item => ({
+      ...item,
+      ...parentId,
+      createdBy: operatorId
+    }))
+  })
+
+  await txModel.deleteMany({
+    where: {
+      id: {
+        in: toDeleteIds
+      }
+    }
+  })
+}
+
+/**
+ * Update array division items.
+ * @param {Array} updateD1Items division1 items to be updated
+ * @param {Array} updateD2Items division2 items to be updated
+ * @param {Array} existingItems existing items in db
+ * @param {Object} txModel the tx model
+ * @param {Object} parentId the parent Id object
+ * @param {String} operatorId the operator Id
+ */
+async function updateArrayDivisionItems (updateD1Items, updateD2Items, existingItems, txModel, parentId, operatorId) {
+  const toUpdate = []
+  const toCreate = []
+  if ((!updateD1Items || updateD1Items.length === 0) && (!updateD2Items || updateD2Items.length === 0)) {
+    return
+  }
+
+  if (updateD1Items) {
+    updateD1Items.forEach(item => {
+      const foundItem = existingItems.find(eItem => eItem.levelName === item.levelName && eItem.divisionName === 'division1')
+      if (foundItem) {
+        item.id = foundItem.id
+        toUpdate.push(item)
+      } else {
+        item.divisionName = 'division1'
+        toCreate.push(item)
+      }
+    })
+  }
+
+  if (updateD2Items) {
+    updateD2Items.forEach(item => {
+      const foundItem = existingItems.find(eItem => eItem.levelName === item.levelName && eItem.divisionName === 'division2')
+      if (foundItem) {
+        item.id = foundItem.id
+        toUpdate.push(item)
+      } else {
+        item.divisionName = 'division2'
+        toCreate.push(item)
+      }
+    })
+  }
+
+  const toDeleteIds = []
+  existingItems.forEach(item => {
+    const found = toUpdate.find(item2 => item2.id === item.id)
+    if (!found) {
+      toDeleteIds.push(item.id)
+    }
+  })
+
+  for (let i = 0; i < toUpdate.length; i++) {
+    const elem = toUpdate[i]
+    await txModel.update({
+      where: {
+        id: elem.id
+      },
+      data: {
+        ..._.omit(elem, ['id']),
+        updatedBy: operatorId
+      }
+    })
+  }
+
+  await txModel.createMany({
+    data: toCreate.map(item => ({
+      ...item,
+      ...parentId,
+      createdBy: operatorId
+    }))
+  })
+
+  await txModel.deleteMany({
+    where: {
+      id: {
+        in: toDeleteIds
+      }
+    }
+  })
+}
+
+/**
+ * Update history items.
+ * @param {Array} updateItems items to be updated
+ * @param {Array} existingItems existing items in db
+ * @param {Object} txModel the tx model
+ * @param {Object} parentId the parent Id object
+ * @param {String} operatorId the operator Id
+ */
+async function updateHistoryItems (updateItems, existingItems, txModel, parentId, operatorId) {
+  const toUpdate = []
+  const toCreate = []
+
+  if (updateItems.length === 0) {
+    return
+  }
+
+  updateItems.forEach(item => {
+    const foundItem = existingItems.find(eItem => eItem.subTrack === item.subTrack && helper.bigIntToNumber(eItem.challengeId) === item.challengeId)
+    if (foundItem) {
+      item.id = foundItem.id
+      toUpdate.push(item)
+    } else {
+      toCreate.push(item)
+    }
+  })
+  const toDeleteIds = []
+  existingItems.forEach(item => {
+    const found = toUpdate.find(item2 => item2.id === item.id)
+    if (!found) {
+      toDeleteIds.push(item.id)
+    }
+  })
+
+  for (let i = 0; i < toUpdate.length; i++) {
+    const elem = toUpdate[i]
+    await txModel.update({
+      where: {
+        id: elem.id
+      },
+      data: {
+        ..._.omit(elem, ['id', 'subTrackId', 'subTrack', 'challengeId']),
+        updatedBy: operatorId
+      }
+    })
+  }
+
+  await txModel.createMany({
+    data: toCreate.map(item => ({
+      ...item,
+      ...parentId,
+      createdBy: operatorId
+    }))
+  })
+
+  await txModel.deleteMany({
+    where: {
+      id: {
+        in: toDeleteIds
+      }
+    }
+  })
+}
+
 module.exports = {
   convertMember,
   buildMemberSkills,
@@ -338,5 +760,14 @@ module.exports = {
   buildSearchMemberFilter,
   buildStatsHistoryResponse,
   statsIncludeParams,
-  skillsIncludeParams
+  skillsIncludeParams,
+  convertDate,
+  updateOrCreateModel,
+  validateSubTrackData,
+  validateLevelItemsData,
+  validateHistoryData,
+  updateArrayItems,
+  updateArrayLevelItems,
+  updateArrayDivisionItems,
+  updateHistoryItems
 }

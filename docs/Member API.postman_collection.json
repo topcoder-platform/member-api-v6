@@ -634,6 +634,300 @@
 					"response": []
 				},
 				{
+					"name": "Create History Stats",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIiwiQ29ubmVjdCBTdXBwb3J0IiwiYWRtaW5pc3RyYXRvciIsInRlc3RSb2xlIiwiYWFhIiwidG9ueV90ZXN0XzEiLCJDb25uZWN0IE1hbmFnZXIiLCJDb25uZWN0IEFkbWluIiwiY29waWxvdCIsIkNvbm5lY3QgQ29waWxvdCBNYW5hZ2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJUb255SiIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiODU0Nzg5OSIsImlhdCI6MTU0OTc5MTYxMSwiZW1haWwiOiJ0amVmdHMrZml4QHRvcGNvZGVyLmNvbSIsImp0aSI6ImY5NGQxZTI2LTNkMGUtNDZjYS04MTE1LTg3NTQ1NDRhMDhmMSJ9.q_Db9Gw8bn54xlythrZZUrJQyak-XrdOwPsj6ddgZ4M",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"DEVELOP\": {\n        \"subTracks\": [\n            {\n                \"id\": \"112\",\n                \"name\": \"DESIGN\",\n                \"history\": [\n                    {\n                        \"challengeId\": 30022821,\n                        \"challengeName\": \"Review Management updated\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 30023283,\n                        \"challengeName\": \"Upgrade Java Object Cache\",\n                        \"ratingDate\": 1316774640000,\n                        \"newRating\": 484\n                    },\n                    {\n                        \"challengeId\": 30029681,\n                        \"challengeName\": \"FMS Front End Validation Attribute and Report\",\n                        \"ratingDate\": 1351292700000,\n                        \"newRating\": 525\n                    },\n                    {\n                        \"challengeId\": 30031028,\n                        \"challengeName\": \"TMAN System Thick Client Back End Synchronization Services\",\n                        \"ratingDate\": 1351505100000,\n                        \"newRating\": 539\n                    },\n                    {\n                        \"challengeId\": 99999821,\n                        \"challengeName\": \"New challenge name\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            },\n            {\n                \"id\": \"113\",\n                \"name\": \"DEVELOPMENT\",\n                \"history\": [\n                    {\n                        \"challengeId\": 30017719,\n                        \"challengeName\": \"Object Factory and Plugins Update\",\n                        \"ratingDate\": 1307855100000,\n                        \"newRating\": 1023\n                    },\n                    {\n                        \"challengeId\": 30017701,\n                        \"challengeName\": \"Component - QMATS Chromosome Spring Controllers\",\n                        \"ratingDate\": 1308996300000,\n                        \"newRating\": 958\n                    },\n                    {\n                        \"challengeId\": 99999822,\n                        \"challengeName\": \"New challenge name 2\",\n                        \"newRating\": 777,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            },\n            {\n                \"id\": \"888\",\n                \"name\": \"NEW_DEVELOPMENT\",\n                \"history\": [\n                    {\n                        \"challengeId\": 99999850,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 01\",\n                        \"newRating\": 999,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 99999851,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 02\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            }\n        ]\n    },\n    \"DATA_SCIENCE\": {\n        \"SRM\": {\n            \"history\": [\n                {\n                    \"challengeId\": 14437,\n                    \"challengeName\": \"SRM 508 updated\",\n                    \"rating\": 1888,\n                    \"placement\": 111,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332800000\n                },\n                {\n                    \"challengeId\": 14438,\n                    \"challengeName\": \"SRM 509\",\n                    \"date\": 1307491200000,\n                    \"rating\": 1408,\n                    \"placement\": 1785,\n                    \"percentile\": 79.174\n                },\n                {\n                    \"challengeId\": 14560,\n                    \"challengeName\": \"TCO11 Round 1\",\n                    \"date\": 1308355200000,\n                    \"rating\": 1367,\n                    \"placement\": 1931,\n                    \"percentile\": 76.8076\n                },\n                {\n                    \"challengeId\": 88881,\n                    \"challengeName\": \"NEW SRM 506\",\n                    \"rating\": 1888,\n                    \"placement\": 666,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332000000\n                }\n            ]\n        },\n        \"MARATHON_MATCH\": {\n            \"history\": [\n                {\n                    \"challengeId\": 88891,\n                    \"challengeName\": \"NEW MM 101\",\n                    \"rating\": 1888,\n                    \"placement\": 666,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332000000\n                },\n                {\n                    \"challengeId\": 88892,\n                    \"challengeName\": \"NEW MM 102\",\n                    \"rating\": 1777,\n                    \"placement\": 777,\n                    \"percentile\": 77.77,\n                    \"date\": 1333332000000\n                }\n            ]\n        }\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/iamtong/stats/history",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"iamtong",
+								"stats",
+								"history"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create History Stats with empty data",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIiwiQ29ubmVjdCBTdXBwb3J0IiwiYWRtaW5pc3RyYXRvciIsInRlc3RSb2xlIiwiYWFhIiwidG9ueV90ZXN0XzEiLCJDb25uZWN0IE1hbmFnZXIiLCJDb25uZWN0IEFkbWluIiwiY29waWxvdCIsIkNvbm5lY3QgQ29waWxvdCBNYW5hZ2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJUb255SiIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiODU0Nzg5OSIsImlhdCI6MTU0OTc5MTYxMSwiZW1haWwiOiJ0amVmdHMrZml4QHRvcGNvZGVyLmNvbSIsImp0aSI6ImY5NGQxZTI2LTNkMGUtNDZjYS04MTE1LTg3NTQ1NDRhMDhmMSJ9.q_Db9Gw8bn54xlythrZZUrJQyak-XrdOwPsj6ddgZ4M",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"DEVELOP\": {\n        \"subTracks\": [\n            {\n                \"id\": \"112\",\n                \"name\": \"DESIGN\",\n                \"history\": []\n            },\n            {\n                \"id\": \"113\",\n                \"name\": \"DEVELOPMENT\",\n                \"history\": []\n            },\n            {\n                \"id\": \"888\",\n                \"name\": \"NEW_DEVELOPMENT\",\n                \"history\": []\n            }\n        ]\n    },\n    \"DATA_SCIENCE\": {\n        \"SRM\": {\n            \"history\": []\n        },\n        \"MARATHON_MATCH\": {\n            \"history\": []\n        }\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/jiangliwu/stats/history",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"jiangliwu",
+								"stats",
+								"history"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update History Stats",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"DEVELOP\": {\n        \"subTracks\": [\n            {\n                \"id\": \"112\",\n                \"name\": \"DESIGN\",\n                \"history\": [\n                    {\n                        \"challengeId\": 30022821,\n                        \"challengeName\": \"Review Management updated\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 30023283,\n                        \"challengeName\": \"Upgrade Java Object Cache updated\"\n                    },\n                    {\n                        \"challengeId\": 30029681,\n                        \"newRating\": 888\n                    },\n                    {\n                        \"challengeId\": 30031028,\n                        \"ratingDate\": 1333335100000\n                    },\n                    {\n                        \"challengeId\": 99999921,\n                        \"challengeName\": \"New challenge name\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            },\n            {\n                \"id\": \"113\",\n                \"name\": \"DEVELOPMENT\",\n                \"history\": [\n                    {\n                        \"challengeId\": 30010833,\n                        \"challengeName\": \"Data formatting from List to CSV via XML updated\",\n                        \"newRating\": 999\n                    },\n                    {\n                        \"challengeId\": 30011015,\n                        \"challengeName\": \"Log History Trim Utility updated\"\n                    },\n                    {\n                        \"challengeId\": 99999922,\n                        \"challengeName\": \"New challenge name 2\",\n                        \"newRating\": 777,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            },\n            {\n                \"id\": \"888\",\n                \"name\": \"NEW_DEVELOPMENT\",\n                \"history\": [\n                    {\n                        \"challengeId\": 99999950,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 01\",\n                        \"newRating\": 999,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 99999951,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 02\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            }\n        ]\n    },\n    \"DATA_SCIENCE\": {\n        \"SRM\": {\n            \"history\": [\n                {\n                    \"challengeId\": 14437,\n                    \"challengeName\": \"SRM 508 updated\",\n                    \"rating\": 1888,\n                    \"placement\": 111,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332800000\n                },\n                {\n                    \"challengeId\": 14438,\n                    \"challengeName\": \"SRM 509 updated\"\n                },\n                {\n                    \"challengeId\": 14560,\n                    \"rating\": 888\n                },\n                {\n                    \"challengeId\": 14531,\n                    \"placement\": 888\n                },\n                {\n                    \"challengeId\": 14530,\n                    \"percentile\": 88.88\n                },\n                {\n                    \"challengeId\": 14278,\n                    \"date\": 1333339200000\n                },\n                {\n                    \"challengeId\": 88881,\n                    \"challengeName\": \"NEW SRM 506\",\n                    \"rating\": 1888,\n                    \"placement\": 666,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332000000\n                }\n            ]\n        },\n        \"MARATHON_MATCH\": {\n            \"history\": [\n                {\n                    \"challengeId\": 88891,\n                    \"challengeName\": \"NEW MM 101\",\n                    \"rating\": 1888,\n                    \"placement\": 666,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332000000\n                },\n                {\n                    \"challengeId\": 88892,\n                    \"challengeName\": \"NEW MM 102\",\n                    \"rating\": 1777,\n                    \"placement\": 777,\n                    \"percentile\": 77.77,\n                    \"date\": 1333332000000\n                }\n            ]\n        }\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats/history",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats",
+								"history"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update History Stats with empty array",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"DEVELOP\": {\n        \"subTracks\": [\n            {\n                \"id\": \"112\",\n                \"name\": \"DESIGN\",\n                \"history\": [\n                ]\n            },\n            {\n                \"id\": \"113\",\n                \"name\": \"DEVELOPMENT\",\n                \"history\": [\n                ]\n            }\n        ]\n    },\n    \"DATA_SCIENCE\": {\n        \"SRM\": {\n            \"history\": [\n            ]\n        },\n        \"MARATHON_MATCH\": {\n            \"history\": [\n            ]\n        }\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats/history",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats",
+								"history"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update History Stats with duplicate subTrack Id",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"DEVELOP\": {\n        \"subTracks\": [\n            {\n                \"id\": \"112\",\n                \"name\": \"DESIGN\",\n                \"history\": [\n                    {\n                        \"challengeId\": 30022821,\n                        \"challengeName\": \"Review Management updated\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 30023283,\n                        \"challengeName\": \"Upgrade Java Object Cache updated\"\n                    },\n                    {\n                        \"challengeId\": 30029681,\n                        \"newRating\": 888\n                    },\n                    {\n                        \"challengeId\": 30031028,\n                        \"ratingDate\": 1333335100000\n                    },\n                    {\n                        \"challengeId\": 99999921,\n                        \"challengeName\": \"New challenge name\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            },\n            {\n                \"id\": \"112\",\n                \"name\": \"NEW_DEVELOPMENT\",\n                \"history\": [\n                    {\n                        \"challengeId\": 99999950,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 01\",\n                        \"newRating\": 999,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 99999951,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 02\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            }\n        ]\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats/history",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats",
+								"history"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update History Stats with duplicate subTrack Name",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"DEVELOP\": {\n        \"subTracks\": [\n            {\n                \"id\": \"112\",\n                \"name\": \"DESIGN\",\n                \"history\": [\n                    {\n                        \"challengeId\": 30022821,\n                        \"challengeName\": \"Review Management updated\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 30023283,\n                        \"challengeName\": \"Upgrade Java Object Cache updated\"\n                    },\n                    {\n                        \"challengeId\": 30029681,\n                        \"newRating\": 888\n                    },\n                    {\n                        \"challengeId\": 30031028,\n                        \"ratingDate\": 1333335100000\n                    },\n                    {\n                        \"challengeId\": 99999921,\n                        \"challengeName\": \"New challenge name\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            },\n            {\n                \"id\": \"888\",\n                \"name\": \"DESIGN\",\n                \"history\": [\n                    {\n                        \"challengeId\": 99999950,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 01\",\n                        \"newRating\": 999,\n                        \"ratingDate\": 1333332260000\n                    },\n                    {\n                        \"challengeId\": 99999951,\n                        \"challengeName\": \"NEW_DEVELOPMENT challenge 02\",\n                        \"newRating\": 888,\n                        \"ratingDate\": 1333332260000\n                    }\n                ]\n            }\n        ]\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats/history",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats",
+								"history"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update History Stats with duplicate challenge Id",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"DATA_SCIENCE\": {\n        \"SRM\": {\n            \"history\": [\n                {\n                    \"challengeId\": 14437,\n                    \"challengeName\": \"SRM 508 updated\",\n                    \"rating\": 1888,\n                    \"placement\": 111,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332800000\n                },\n                {\n                    \"challengeId\": 14437,\n                    \"challengeName\": \"SRM 509 updated\"\n                },\n                {\n                    \"challengeId\": 88881,\n                    \"challengeName\": \"NEW SRM 506\",\n                    \"rating\": 1888,\n                    \"placement\": 666,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332000000\n                }\n            ]\n        },\n        \"MARATHON_MATCH\": {\n            \"history\": [\n                {\n                    \"challengeId\": 88891,\n                    \"challengeName\": \"NEW MM 101\",\n                    \"rating\": 1888,\n                    \"placement\": 666,\n                    \"percentile\": 88.88,\n                    \"date\": 1333332000000\n                },\n                {\n                    \"challengeId\": 88892,\n                    \"challengeName\": \"NEW MM 102\",\n                    \"rating\": 1777,\n                    \"placement\": 777,\n                    \"percentile\": 77.77,\n                    \"date\": 1333332000000\n                }\n            ]\n        }\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats/history",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats",
+								"history"
+							]
+						}
+					},
+					"response": []
+				},
+				{
 					"name": "Get Stats",
 					"request": {
 						"auth": {
@@ -691,6 +985,293 @@
 									"key": "groupIds",
 									"value": "20000000,20000001"
 								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Stats",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIiwiQ29ubmVjdCBTdXBwb3J0IiwiYWRtaW5pc3RyYXRvciIsInRlc3RSb2xlIiwiYWFhIiwidG9ueV90ZXN0XzEiLCJDb25uZWN0IE1hbmFnZXIiLCJDb25uZWN0IEFkbWluIiwiY29waWxvdCIsIkNvbm5lY3QgQ29waWxvdCBNYW5hZ2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJUb255SiIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiODU0Nzg5OSIsImlhdCI6MTU0OTc5MTYxMSwiZW1haWwiOiJ0amVmdHMrZml4QHRvcGNvZGVyLmNvbSIsImp0aSI6ImY5NGQxZTI2LTNkMGUtNDZjYS04MTE1LTg3NTQ1NDRhMDhmMSJ9.q_Db9Gw8bn54xlythrZZUrJQyak-XrdOwPsj6ddgZ4M",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"maxRating\": {\n        \"rating\": 1122,\n        \"ratingColor\": \"#9D9FA0\",\n        \"track\": \"DATA_SCIENCE_CREATED\",\n        \"subTrack\": \"SRM CREATED\"\n    },\n    \"challenges\": 666,\n    \"wins\": 222,\n    \"DEVELOP\": {\n        \"challenges\": 100,\n        \"wins\": 50,\n        \"mostRecentSubmission\": 1133615980000,\n        \"mostRecentEventDate\": 1144618321000,\n        \"subTracks\": [\n            {\n                \"challenges\": 222,\n                \"wins\": 2,\n                \"id\": 112,\n                \"name\": \"DESIGN\",\n                \"mostRecentSubmission\": 1133615980000,\n                \"mostRecentEventDate\": 1144618321000,\n                \"submissions\": {\n                    \"appealSuccessRate\": 0.55,\n                    \"minScore\": 70.27,\n                    \"avgPlacement\": 2.307692307692307,\n                    \"reviewSuccessRate\": 0.9230769230769231,\n                    \"maxScore\": 98.88,\n                    \"avgScore\": 86.10692307692308,\n                    \"screeningSuccessRate\": 1,\n                    \"submissionRate\": 0.07142857142857142,\n                    \"winPercent\": 0.2307692307692308,\n                    \"numInquiries\": 222,\n                    \"submissions\": 22,\n                    \"passedScreening\": 13,\n                    \"passedReview\": 12,\n                    \"appeals\": 64\n                },\n                \"rank\": {\n                    \"overallPercentile\": 66.66,\n                    \"activeRank\": 11,\n                    \"overallCountryRank\": 146,\n                    \"reliability\": 11.11,\n                    \"rating\": 666,\n                    \"minRating\": 333,\n                    \"volatility\": 235,\n                    \"overallSchoolRank\": 11,\n                    \"overallRank\": 446,\n                    \"activeSchoolRank\": 11,\n                    \"activeCountryRank\":11,\n                    \"maxRating\": 888,\n                    \"activePercentile\": 11.11\n                }\n            },\n            {\n                \"id\": 666,\n                \"name\": \"NEW_SUBTRACK3\"\n            }\n        ]\n    },\n    \"DESIGN\": {\n        \"challenges\": 659,\n        \"wins\": 271,\n        \"mostRecentSubmission\": 1133615980000,\n        \"mostRecentEventDate\": 1144618321000,\n        \"subTracks\": [\n            {\n                \"id\": 17,\n                \"name\": \"WEB_DESIGNS\",\n                \"numInquiries\": 781,\n                \"challenges\": 416,\n                \"wins\": 189,\n                \"winPercent\": 0.2639664804469274,\n                \"avgPlacement\": 4.068627450980392,\n                \"submissions\": 716,\n                \"submissionRate\": 0.9167733674775929,\n                \"passedScreening\": 710,\n                \"screeningSuccessRate\": 0.9916201117318436,\n                \"mostRecentEventDate\": 1422298803000,\n                \"mostRecentSubmission\": 1422447360000\n            },\n            {\n                \"id\": 18,\n                \"name\": \"WIREFRAMES\",\n                \"numInquiries\": 2,\n                \"challenges\": 2,\n                \"wins\": 1,\n                \"winPercent\": 0.5,\n                \"avgPlacement\": 1,\n                \"submissions\": 2,\n                \"submissionRate\": 1,\n                \"passedScreening\": 2,\n                \"screeningSuccessRate\": 1,\n                \"mostRecentEventDate\": 1289984400000,\n                \"mostRecentSubmission\": 1290150540000\n            },\n            {\n                \"id\": 31,\n                \"name\": \"FRONT_END_FLASH\",\n                \"numInquiries\": 7,\n                \"challenges\": 2,\n                \"wins\": 1,\n                \"winPercent\": 0.16666666666666666,\n                \"avgPlacement\": 5,\n                \"submissions\": 6,\n                \"submissionRate\": 0.8571428571428571,\n                \"passedScreening\": 6,\n                \"screeningSuccessRate\": 1,\n                \"mostRecentEventDate\": 1245452400000,\n                \"mostRecentSubmission\": 1246449960000\n            },\n            {\n                \"id\": 21,\n                \"name\": \"PRINT_OR_PRESENTATION\",\n                \"numInquiries\": 41,\n                \"challenges\": 24,\n                \"wins\": 8,\n                \"winPercent\": 0.2222222222222222,\n                \"avgPlacement\": 3.5625,\n                \"submissions\": 36,\n                \"submissionRate\": 0.8780487804878049,\n                \"passedScreening\": 36,\n                \"screeningSuccessRate\": 1,\n                \"mostRecentEventDate\": 1412790489000,\n                \"mostRecentSubmission\": 1383722820000\n            }\n        ]\n    },\n    \"DATA_SCIENCE\": {\n        \"challenges\": 41,\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1333333964247,\n        \"mostRecentEventDate\": 1308355200000,\n        \"mostRecentEventName\": \"created data science\",\n        \"SRM\": {\n            \"challenges\": 40,\n            \"wins\": 22,\n            \"mostRecentSubmission\": 1333333964247,\n            \"mostRecentEventDate\": 1308355200000,\n            \"mostRecentEventName\": \"TCO11 Round 1 created\",\n            \"rank\": {\n                \"rating\": 1367,\n                \"percentile\": 22,\n                \"rank\": 22,\n                \"countryRank\": 22,\n                \"schoolRank\": 22,\n                \"volatility\": 390,\n                \"maximumRating\": 1459,\n                \"minimumRating\": 1015,\n                \"defaultLanguage\": \"Java\",\n                \"competitions\": 38\n            },\n            \"challengeDetails\": [\n                {\n                    \"challenges\": 33,\n                    \"levelName\": \"Level One\",\n                    \"failedChallenges\": 22\n                },\n                {\n                    \"challenges\": 55,\n                    \"levelName\": \"Level Two\",\n                    \"failedChallenges\": 11\n                },\n                {\n                    \"challenges\": 66,\n                    \"levelName\": \"Level Three\",\n                    \"failedChallenges\": 6\n                }\n            ],\n            \"division1\": [\n                {\n                    \"problemsSubmitted\": 88,\n                    \"problemsSysByTest\": 8,\n                    \"problemsFailed\": 8,\n                    \"levelName\": \"Level One\"\n                },\n                {\n                    \"problemsSubmitted\": 11,\n                    \"problemsSysByTest\": 22,\n                    \"problemsFailed\": 11,\n                    \"levelName\": \"Level Two\"\n                },\n                {\n                    \"problemsSubmitted\": 11,\n                    \"problemsSysByTest\": 11,\n                    \"problemsFailed\": 11,\n                    \"levelName\": \"Level Four\"\n                }\n            ],\n            \"division2\": [\n                {\n                    \"problemsSubmitted\": 22,\n                    \"problemsSysByTest\": 22,\n                    \"problemsFailed\": 22,\n                    \"levelName\": \"Level One\"\n                },\n                {\n                    \"problemsSubmitted\": 44,\n                    \"problemsSysByTest\": 44,\n                    \"problemsFailed\": 44,\n                    \"levelName\": \"Level Two\"\n                }\n            ]\n        },\n        \"MARATHON_MATCH\": {\n            \"challenges\": 1,\n            \"wins\": 22,\n            \"mostRecentSubmission\": 1333333964247,\n            \"mostRecentEventName\": \"created marathon match\",\n            \"rank\": {\n                \"rating\": 111,\n                \"competitions\": 22,\n                \"avgRank\": 111,\n                \"avgNumSubmissions\": 22,\n                \"bestRank\": 22,\n                \"topFiveFinishes\": 22,\n                \"topTenFinishes\": 22,\n                \"rank\": 111,\n                \"percentile\": 22,\n                \"volatility\": 22,\n                \"minimumRating\": 111,\n                \"maximumRating\": 111,\n                \"countryRank\": 22,\n                \"schoolRank\": 22,\n                \"defaultLanguage\": \"Java\"\n            }\n        }\n    },\n    \"COPILOT\": {\n        \"contests\": 11,\n        \"projects\": 11,\n        \"failures\": 11,\n        \"reposts\": 11,\n        \"activeContests\": 11,\n        \"activeProjects\": 11,\n        \"fulfillment\": 111.11\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/iamtong/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"iamtong",
+								"stats"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Stats with empty data",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIiwiQ29ubmVjdCBTdXBwb3J0IiwiYWRtaW5pc3RyYXRvciIsInRlc3RSb2xlIiwiYWFhIiwidG9ueV90ZXN0XzEiLCJDb25uZWN0IE1hbmFnZXIiLCJDb25uZWN0IEFkbWluIiwiY29waWxvdCIsIkNvbm5lY3QgQ29waWxvdCBNYW5hZ2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJUb255SiIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiODU0Nzg5OSIsImlhdCI6MTU0OTc5MTYxMSwiZW1haWwiOiJ0amVmdHMrZml4QHRvcGNvZGVyLmNvbSIsImp0aSI6ImY5NGQxZTI2LTNkMGUtNDZjYS04MTE1LTg3NTQ1NDRhMDhmMSJ9.q_Db9Gw8bn54xlythrZZUrJQyak-XrdOwPsj6ddgZ4M",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/jiangliwu/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"jiangliwu",
+								"stats"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Stats",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"groupId\": \"10\",\n    \"maxRating\": {\n        \"rating\": 1111,\n        \"track\": \"DATA_SCIENCE_UPDATED\",\n        \"subTrack\": \"SRM UPDATED\",\n        \"ratingColor\": \"#111111\"\n    },\n    \"challenges\": 1111,\n    \"wins\": 11,\n    \"DEVELOP\": {\n        \"challenges\": 2222,\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1111615980000,\n        \"mostRecentEventDate\": 1122630019000,\n        \"subTracks\": [\n            {\n                \"id\": 112,\n                \"challenges\": 222,\n                \"wins\": 2,\n                \"name\": \"DESIGN\",\n                \"mostRecentSubmission\": 1133615980000,\n                \"mostRecentEventDate\": 1144618321000,\n                \"submissions\": {\n                    \"appealSuccessRate\": 0.55,\n                    \"maxScore\": 98.88,\n                    \"numInquiries\": 222,\n                    \"submissions\": 22\n                },\n                \"rank\": {\n                    \"overallPercentile\": 66.66,\n                    \"rating\": 666,\n                    \"minRating\": 333,\n                    \"maxRating\": 888\n                }\n            },\n            {\n                \"id\": 333,\n                \"challenges\": 250,\n                \"wins\": 25,\n                \"name\": \"NEW_SUBTRACK\",\n                \"mostRecentSubmission\": 1111111110000,\n                \"submissions\": {\n                    \"minScore\": 50,\n                    \"reviewSuccessRate\": 0.777,\n                    \"maxScore\": 99,\n                    \"avgScore\": 77.77,\n                    \"passedScreening\": 77,\n                    \"passedReview\": 77,\n                    \"appeals\": 22\n                },\n                \"rank\": {\n                    \"activeRank\": 111,\n                    \"overallCountryRank\": 155,\n                    \"rating\": 999,\n                    \"volatility\": 333,\n                    \"overallRank\": 777\n                }\n            },\n            {\n                \"id\": 125\n            },\n            {\n                \"id\": 666,\n                \"name\": \"NEW_SUBTRACK3\"\n            }\n        ]\n    },\n    \"DESIGN\": {\n        \"challenges\": 23,\n        \"wins\": 10,\n        \"mostRecentSubmission\": 1144615980000,\n        \"mostRecentEventDate\": 1155630019000,\n        \"subTracks\": [\n            {\n              \"id\": 22,\n              \"name\": \"IDEA_GENERATION\",\n              \"challenges\": 6,\n              \"wins\": 6,\n              \"mostRecentSubmission\": 1144615980000,\n              \"mostRecentEventDate\": 1155630019000,\n              \"numInquiries\": 6,\n              \"winPercent\": 6,\n              \"avgPlacement\": 6,\n              \"submissions\": 6,\n              \"submissionRate\": 6,\n              \"passedScreening\": 6,\n              \"screeningSuccessRate\": 6\n\n            },\n            {\n              \"id\": 34,\n              \"name\": \"STUDIO_OTHER\",\n              \"numInquiries\": 1,\n              \"winPercent\": 1,\n              \"avgPlacement\": 1,\n              \"submissions\": 1,\n              \"submissionRate\": 1,\n              \"passedScreening\": 1,\n              \"screeningSuccessRate\": 1\n            }\n        ]\n    },\n    \"DATA_SCIENCE\": {\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1333333964247,\n        \"mostRecentEventName\": \"updated data science\",\n        \"SRM\": {\n            \"wins\": 22,\n            \"mostRecentSubmission\": 1333333964247,\n            \"mostRecentEventName\": \"TCO11 Round 1 updated\",\n            \"rank\": {\n                \"percentile\": 22,\n                \"rank\": 22,\n                \"countryRank\": 22,\n                \"schoolRank\": 22\n            },\n            \"challengeDetails\": [\n                {\n                    \"challenges\": 33,\n                    \"levelName\": \"Level One\",\n                    \"failedChallenges\": 22\n                },\n                {\n                    \"challenges\": 55,\n                    \"levelName\": \"Level Two\"\n                },\n                {\n                    \"challenges\": 66,\n                    \"levelName\": \"Level Four Updated\",\n                    \"failedChallenges\": 6\n                }\n            ],\n            \"division1\": [\n                {\n                    \"problemsSubmitted\": 88,\n                    \"problemsSysByTest\": 8,\n                    \"problemsFailed\": 8,\n                    \"levelName\": \"Level One\"\n                },\n                {\n                    \"problemsSysByTest\": 22,\n                    \"levelName\": \"Level Two\"\n                },\n                {\n                    \"problemsSubmitted\": 11,\n                    \"problemsSysByTest\": 11,\n                    \"problemsFailed\": 11,\n                    \"levelName\": \"Level Four\"\n                }\n            ],\n            \"division2\": [\n                {\n                    \"problemsSubmitted\": 22,\n                    \"problemsSysByTest\": 22,\n                    \"problemsFailed\": 22,\n                    \"levelName\": \"Level One\"\n                },\n                {\n                    \"problemsSubmitted\": 44,\n                    \"problemsSysByTest\": 44,\n                    \"problemsFailed\": 44,\n                    \"levelName\": \"Level Four updated\"\n                }\n            ]\n        },\n         \"MARATHON_MATCH\": {\n            \"wins\": 22,\n            \"mostRecentSubmission\": 1333333964247,\n            \"mostRecentEventName\": \"updated marathon match\",\n            \"rank\": {\n                \"rating\": 111,\n                \"avgRank\": 111,\n                \"rank\": 111,\n                \"minimumRating\": 111,\n                \"maximumRating\": 111\n            }\n         }\n    },\n    \"COPILOT\": {\n        \"contests\": 2222,\n        \"projects\": 11,\n        \"failures\": 111,\n        \"reposts\": 111,\n        \"activeContests\": 11,\n        \"activeProjects\": 11,\n        \"fulfillment\": 88.99\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Stats with empty array",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"challenges\": 1111,\n    \"wins\": 11,\n    \"DEVELOP\": {\n        \"challenges\": 2222,\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1111615980000,\n        \"mostRecentEventDate\": 1122630019000,\n        \"subTracks\": [\n        ]\n    },\n    \"DESIGN\": {\n        \"challenges\": 23,\n        \"wins\": 10,\n        \"mostRecentSubmission\": 1144615980000,\n        \"mostRecentEventDate\": 1155630019000,\n        \"subTracks\": [\n        ]\n    },\n    \"DATA_SCIENCE\": {\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1333333964247,\n        \"mostRecentEventName\": \"updated data science\",\n        \"SRM\": {\n            \"wins\": 22,\n            \"mostRecentSubmission\": 1333333964247,\n            \"mostRecentEventName\": \"TCO11 Round 1 updated\",\n            \"rank\": {\n                \"percentile\": 22,\n                \"rank\": 22,\n                \"countryRank\": 22,\n                \"schoolRank\": 22\n            },\n            \"challengeDetails\": [\n            ],\n            \"division2\": [\n            ]\n        },\n         \"MARATHON_MATCH\": {\n            \"wins\": 22,\n            \"mostRecentSubmission\": 1333333964247,\n            \"mostRecentEventName\": \"updated marathon match\",\n            \"rank\": {\n                \"rating\": 111,\n                \"avgRank\": 111,\n                \"rank\": 111,\n                \"minimumRating\": 111,\n                \"maximumRating\": 111\n            }\n         }\n    },\n    \"COPILOT\": {\n        \"contests\": 2222,\n        \"projects\": 11,\n        \"failures\": 111,\n        \"reposts\": 111,\n        \"activeContests\": 11,\n        \"activeProjects\": 11,\n        \"fulfillment\": 88.99\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Stats with duplicate subTrack Id",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"groupId\": \"10\",\n    \"maxRating\": {\n        \"rating\": 1111,\n        \"track\": \"DATA_SCIENCE_UPDATED\",\n        \"subTrack\": \"SRM UPDATED\",\n        \"ratingColor\": \"#111111\"\n    },\n    \"challenges\": 1111,\n    \"wins\": 11,\n    \"DEVELOP\": {\n        \"challenges\": 2222,\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1111615980000,\n        \"mostRecentEventDate\": 1122630019000,\n        \"subTracks\": [\n            {\n                \"id\": 112,\n                \"challenges\": 222,\n                \"wins\": 2,\n                \"name\": \"DESIGN\",\n                \"mostRecentSubmission\": 1133615980000,\n                \"mostRecentEventDate\": 1144618321000,\n                \"submissions\": {\n                    \"appealSuccessRate\": 0.55,\n                    \"maxScore\": 98.88,\n                    \"numInquiries\": 222,\n                    \"submissions\": 22\n                },\n                \"rank\": {\n                    \"overallPercentile\": 66.66,\n                    \"rating\": 666,\n                    \"minRating\": 333,\n                    \"maxRating\": 888\n                }\n            },\n            {\n                \"id\": 112,\n                \"challenges\": 250,\n                \"wins\": 25,\n                \"name\": \"NEW_SUBTRACK\",\n                \"mostRecentSubmission\": 1111111110000,\n                \"submissions\": {\n                    \"minScore\": 50,\n                    \"reviewSuccessRate\": 0.777,\n                    \"maxScore\": 99,\n                    \"avgScore\": 77.77,\n                    \"passedScreening\": 77,\n                    \"passedReview\": 77,\n                    \"appeals\": 22\n                },\n                \"rank\": {\n                    \"activeRank\": 111,\n                    \"overallCountryRank\": 155,\n                    \"rating\": 999,\n                    \"volatility\": 333,\n                    \"overallRank\": 777\n                }\n            },\n            {\n                \"id\": 125\n            },\n            {\n                \"id\": 666,\n                \"name\": \"NEW_SUBTRACK3\"\n            }\n        ]\n    },\n    \"DESIGN\": {\n        \"challenges\": 23,\n        \"wins\": 10,\n        \"mostRecentSubmission\": 1144615980000,\n        \"mostRecentEventDate\": 1155630019000,\n        \"subTracks\": [\n            {\n              \"id\": 22,\n              \"name\": \"IDEA_GENERATION\",\n              \"challenges\": 6,\n              \"wins\": 6,\n              \"mostRecentSubmission\": 1144615980000,\n              \"mostRecentEventDate\": 1155630019000,\n              \"numInquiries\": 6,\n              \"winPercent\": 6,\n              \"avgPlacement\": 6,\n              \"submissions\": 6,\n              \"submissionRate\": 6,\n              \"passedScreening\": 6,\n              \"screeningSuccessRate\": 6\n\n            },\n            {\n              \"id\": 34,\n              \"name\": \"STUDIO_OTHER\",\n              \"numInquiries\": 1,\n              \"winPercent\": 1,\n              \"avgPlacement\": 1,\n              \"submissions\": 1,\n              \"submissionRate\": 1,\n              \"passedScreening\": 1,\n              \"screeningSuccessRate\": 1\n            }\n        ]\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Stats with duplicate subTrack name",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"groupId\": \"10\",\n    \"challenges\": 1111,\n    \"wins\": 11,\n    \"DEVELOP\": {\n        \"challenges\": 2222,\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1111615980000,\n        \"mostRecentEventDate\": 1122630019000,\n        \"subTracks\": [\n            {\n                \"id\": 112,\n                \"challenges\": 222,\n                \"wins\": 2,\n                \"name\": \"DESIGN\",\n                \"mostRecentSubmission\": 1133615980000,\n                \"mostRecentEventDate\": 1144618321000,\n                \"submissions\": {\n                    \"appealSuccessRate\": 0.55,\n                    \"maxScore\": 98.88,\n                    \"numInquiries\": 222,\n                    \"submissions\": 22\n                },\n                \"rank\": {\n                    \"overallPercentile\": 66.66,\n                    \"rating\": 666,\n                    \"minRating\": 333,\n                    \"maxRating\": 888\n                }\n            },\n            {\n                \"id\": 333,\n                \"challenges\": 250,\n                \"wins\": 25,\n                \"name\": \"NEW_SUBTRACK\",\n                \"mostRecentSubmission\": 1111111110000,\n                \"submissions\": {\n                    \"minScore\": 50,\n                    \"reviewSuccessRate\": 0.777,\n                    \"maxScore\": 99,\n                    \"avgScore\": 77.77,\n                    \"passedScreening\": 77,\n                    \"passedReview\": 77,\n                    \"appeals\": 22\n                },\n                \"rank\": {\n                    \"activeRank\": 111,\n                    \"overallCountryRank\": 155,\n                    \"rating\": 999,\n                    \"volatility\": 333,\n                    \"overallRank\": 777\n                }\n            },\n            {\n                \"id\": 125\n            },\n            {\n                \"id\": 666,\n                \"name\": \"NEW_SUBTRACK\"\n            }\n        ]\n    },\n    \"DESIGN\": {\n        \"challenges\": 23,\n        \"wins\": 10,\n        \"mostRecentSubmission\": 1144615980000,\n        \"mostRecentEventDate\": 1155630019000,\n        \"subTracks\": [\n            {\n              \"id\": 22,\n              \"name\": \"IDEA_GENERATION\",\n              \"challenges\": 6,\n              \"wins\": 6,\n              \"mostRecentSubmission\": 1144615980000,\n              \"mostRecentEventDate\": 1155630019000,\n              \"numInquiries\": 6,\n              \"winPercent\": 6,\n              \"avgPlacement\": 6,\n              \"submissions\": 6,\n              \"submissionRate\": 6,\n              \"passedScreening\": 6,\n              \"screeningSuccessRate\": 6\n\n            },\n            {\n              \"id\": 34,\n              \"name\": \"STUDIO_OTHER\",\n              \"numInquiries\": 1,\n              \"winPercent\": 1,\n              \"avgPlacement\": 1,\n              \"submissions\": 1,\n              \"submissionRate\": 1,\n              \"passedScreening\": 1,\n              \"screeningSuccessRate\": 1\n            }\n        ]\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Stats with duplicate level name",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PATCH",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"groupId\": \"10\",\n    \"challenges\": 1111,\n    \"wins\": 11,\n    \"DATA_SCIENCE\": {\n        \"wins\": 22,\n        \"mostRecentSubmission\": 1333333964247,\n        \"mostRecentEventName\": \"updated data science\",\n        \"SRM\": {\n            \"wins\": 22,\n            \"mostRecentSubmission\": 1333333964247,\n            \"mostRecentEventName\": \"TCO11 Round 1 updated\",\n            \"challengeDetails\": [\n                {\n                    \"challenges\": 33,\n                    \"levelName\": \"Level One\",\n                    \"failedChallenges\": 22\n                },\n                {\n                    \"challenges\": 55,\n                    \"levelName\": \"Level Two\"\n                },\n                {\n                    \"challenges\": 66,\n                    \"levelName\": \"Level Two\",\n                    \"failedChallenges\": 6\n                }\n            ],\n            \"division1\": [\n                {\n                    \"problemsSubmitted\": 88,\n                    \"problemsSysByTest\": 8,\n                    \"problemsFailed\": 8,\n                    \"levelName\": \"Level One\"\n                },\n                {\n                    \"problemsSysByTest\": 22,\n                    \"levelName\": \"Level Two\"\n                },\n                {\n                    \"problemsSubmitted\": 11,\n                    \"problemsSysByTest\": 11,\n                    \"problemsFailed\": 11,\n                    \"levelName\": \"Level Four\"\n                }\n            ],\n            \"division2\": [\n                {\n                    \"problemsSubmitted\": 22,\n                    \"problemsSysByTest\": 22,\n                    \"problemsFailed\": 22,\n                    \"levelName\": \"Level One\"\n                },\n                {\n                    \"problemsSubmitted\": 44,\n                    \"problemsSysByTest\": 44,\n                    \"problemsFailed\": 44,\n                    \"levelName\": \"Level Four updated\"\n                }\n            ]\n        }\n    }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/stats",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"stats"
 							]
 						}
 					},

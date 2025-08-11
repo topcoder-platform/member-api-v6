@@ -96,8 +96,8 @@ model memberMaxRating {
   id      BigInt @id @default(autoincrement())
   userId  BigInt
   rating  Int
-  track   String
-  subTrack  String
+  track   String?
+  subTrack  String?
   ratingColor String
 
   createdAt   DateTime @default(now())
@@ -233,7 +233,6 @@ model memberDataScienceHistoryStats {
   placement     Int
   percentile    Float
   subTrack      String
-  subTrackId    Int
 
   historyStats memberHistoryStats @relation(fields: [historyStatsId], references: [id], onDelete: Cascade)
 
