@@ -72,7 +72,7 @@ model member {
 
 model memberAddress {
   id    BigInt  @id @default(autoincrement())
-  userId  BigInt 
+  userId  BigInt
   streetAddr1 String?
   streetAddr2 String?
   city        String?
@@ -94,8 +94,8 @@ model memberMaxRating {
   id      BigInt @id @default(autoincrement())
   userId  BigInt
   rating  Int
-  track   String
-  subTrack  String
+  track   String?
+  subTrack  String?
   ratingColor String
 
   createdAt   DateTime @default(now())
@@ -156,7 +156,7 @@ model distributionStats {
   ratingRange3700To3799 Int
   ratingRange3800To3899 Int
   ratingRange3900To3999 Int
-  
+
 
   createdAt   DateTime @default(now())
   createdBy   String
@@ -216,7 +216,7 @@ model memberDevelopHistoryStats {
   createdBy   String
   updatedAt   DateTime? @updatedAt
   updatedBy   String?
-	
+
   @@index([historyStatsId])
 }
 
@@ -231,7 +231,6 @@ model memberDataScienceHistoryStats {
   placement     Int
   percentile    Float
   subTrack      String
-  subTrackId    Int
 
   historyStats memberHistoryStats @relation(fields: [historyStatsId], references: [id], onDelete: Cascade)
 
@@ -239,17 +238,17 @@ model memberDataScienceHistoryStats {
   createdBy   String
   updatedAt   DateTime? @updatedAt
   updatedBy   String?
-	
+
   @@index([historyStatsId])
 }
 
 model memberStats {
   id      BigInt @id @default(autoincrement())
   userId  BigInt
-  
+
   memberRatingId  BigInt?
   maxRating   memberMaxRating?  @relation(fields: [memberRatingId], references: [id], onDelete: NoAction)
-  
+
   challenges  Int?
   wins        Int?
   develop     memberDevelopStats?
@@ -367,7 +366,7 @@ model memberDevelopStatsItem {
 
 model memberDesignStats {
   id    BigInt  @id @default(autoincrement())
-  memberStatsId  BigInt  
+  memberStatsId  BigInt
   challenges  BigInt?
   wins        BigInt?
   mostRecentSubmission  DateTime?
@@ -441,7 +440,7 @@ model memberDataScienceStats {
 
 model memberSrmStats {
   id    BigInt @id @default(autoincrement())
-  dataScienceStatsId  BigInt 
+  dataScienceStatsId  BigInt
 
   challenges  BigInt?
   wins        BigInt?
@@ -591,7 +590,7 @@ enum DeviceType {
 model memberTraitDevice {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   deviceType  DeviceType
   manufacturer  String
@@ -619,7 +618,7 @@ enum SoftwareType {
 model memberTraitSoftware {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   softwareType  SoftwareType
   name          String
@@ -645,7 +644,7 @@ enum ServiceProviderType {
 model memberTraitServiceProvider {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   type  ServiceProviderType
   name  String
@@ -676,7 +675,7 @@ enum WorkIndustryType {
 model memberTraitWork {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   industry  WorkIndustryType?
   companyName   String
@@ -698,7 +697,7 @@ model memberTraitWork {
 model memberTraitEducation {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   collegeName String
   degree      String
@@ -717,7 +716,7 @@ model memberTraitEducation {
 model memberTraitBasicInfo {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   userId      BigInt
   country     String
@@ -743,7 +742,7 @@ model memberTraitBasicInfo {
 model memberTraitLanguage {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   language  String
   spokenLevel String?
@@ -763,7 +762,7 @@ model memberTraitLanguage {
 model memberTraitOnboardChecklist {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   listItemType  String  // Like 'profile_completed'
   date          DateTime
@@ -784,7 +783,7 @@ model memberTraitOnboardChecklist {
 model memberTraitPersonalization {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   key     String?
   value   Json?
@@ -802,7 +801,7 @@ model memberTraitPersonalization {
 model memberTraitCommunity {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   communityName String
   status        Boolean
