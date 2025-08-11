@@ -16,7 +16,7 @@ const TRAIT_IDS = ['basic_info', 'education', 'work', 'communities', 'languages'
 
 const TRAIT_FIELDS = ['userId', 'traitId', 'categoryName', 'traits', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
 
-const DeviceType = ['Console', 'Desktop', 'Laptop', 'Smartphone', 'Tablet', 'Wearable']
+const DeviceType = ['Console', 'Desktop', 'Laptop', 'Smartphone', 'Tablet', 'Wearable', 'Other']
 const SoftwareType = ['DeveloperTools', 'Browser', 'Productivity', 'GraphAndDesign', 'Utilities']
 const ServiceProviderType = ['InternetServiceProvider', 'MobileCarrier', 'Television', 'FinancialInstitution', 'Other']
 const WorkIndustryType = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
@@ -358,7 +358,9 @@ const traitSchemas = {
     deviceType: Joi.string().valid(...DeviceType).required(),
     manufacturer: Joi.string().required(),
     model: Joi.string().required(),
-    operatingSystem: Joi.string().required()
+    operatingSystem: Joi.string().required(),
+    osLanguage: Joi.string(),
+    osVersion: Joi.string()
   })),
   software: Joi.array().items(Joi.object({
     softwareType: Joi.string().valid(...SoftwareType).required(),
