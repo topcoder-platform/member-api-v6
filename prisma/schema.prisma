@@ -233,6 +233,7 @@ model memberDataScienceHistoryStats {
   placement     Int
   percentile    Float
   subTrack      String
+  subTrackId    Int
 
   historyStats memberHistoryStats @relation(fields: [historyStatsId], references: [id], onDelete: Cascade)
 
