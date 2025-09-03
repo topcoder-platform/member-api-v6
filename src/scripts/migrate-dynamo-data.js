@@ -959,7 +959,7 @@ async function fixMemberUpdateData (memberItem, dbItem) {
         const traitData = memberItem.traits.data[0][checkKey]
         if (traitData.date && traitData.status) {
           memberItemUpdate.memberTraits.checklist.push({
-            listItemType: 'onboarding_wizard',
+            listItemType: checkKey,
             date: _convert2Date(traitData.date) || new Date(),
             message: traitData.message || '',
             status: traitData.status,
