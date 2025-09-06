@@ -1,7 +1,7 @@
 const path = require('path')
 const fs = require('fs')
 const readline = require('readline')
-const { concat, isArray, isBoolean, isEmpty, isEqual, isInteger, find, omit, pick, isNumber, forEach, map, uniqBy, isString } = require('lodash')
+const { concat, isArray, isBoolean, isEmpty, isEqual, isInteger, find, omit, pick, isNumber, forEach, map, uniqBy, isString, cloneDeep } = require('lodash')
 const { v4: uuidv4 } = require('uuid')
 const config = require('./config')
 const prisma = require('../common/prisma').getClient()
@@ -795,7 +795,7 @@ function fixDynamoMemberStatHistoryData (dataItem) {
           let historyItems = item.history.map(item2 => ({
             ...item2,
             ratingDate: _convert2Date(item2.ratingDate),
-            subTrackId: item.id,
+            subTrackId: item.id || DEFAULT_SRM_ID,
             subTrack: item.name,
             createdBy: CREATED_BY
           }))
@@ -1161,17 +1161,17 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
         })
 
         if (existMaxRating) {
-            // update current maxRating
-            await tx.memberMaxRating.update({
-              where: {
-                id: existMaxRating.id
-              },
-              data: {
-                ...memberObj.maxRating,
-                userId: memberObj.userId,
-                updatedBy: CREATED_BY
-              }
-            })
+          // update current maxRating
+          await tx.memberMaxRating.update({
+            where: {
+              id: existMaxRating.id
+            },
+            data: {
+              ...memberObj.maxRating,
+              userId: memberObj.userId,
+              updatedBy: CREATED_BY
+            }
+          })
         } else {
           // create new maxRating
           await tx.memberMaxRating.create({
@@ -1183,7 +1183,6 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
             }
           })
         }
-
       }
 
       if (memberObj.addresses && memberObj.addresses.length > 0) {
@@ -2025,6 +2024,107 @@ async function updateMemberStat (data, member, operatorId) {
   })
 }
 
+/**
+ * import distribution stats.
+ */
+async function importDistributionStats () {
+  return prisma.$transaction(async (tx) => {
+    const total = await tx.memberMaxRating.count({})
+    console.log(`There are ${total} maxRating records`)
+
+    let current = 0
+    const uniqueMap = new Map()
+    const distributionStat = {
+      ratingRange0To099: 0,
+      ratingRange100To199: 0,
+      ratingRange200To299: 0,
+      ratingRange300To399: 0,
+      ratingRange400To499: 0,
+      ratingRange500To599: 0,
+      ratingRange600To699: 0,
+      ratingRange700To799: 0,
+      ratingRange800To899: 0,
+      ratingRange900To999: 0,
+      ratingRange1000To1099: 0,
+      ratingRange1100To1199: 0,
+      ratingRange1200To1299: 0,
+      ratingRange1300To1399: 0,
+      ratingRange1400To1499: 0,
+      ratingRange1500To1599: 0,
+      ratingRange1600To1699: 0,
+      ratingRange1700To1799: 0,
+      ratingRange1800To1899: 0,
+      ratingRange1900To1999: 0,
+      ratingRange2000To2099: 0,
+      ratingRange2100To2199: 0,
+      ratingRange2200To2299: 0,
+      ratingRange2300To2399: 0,
+      ratingRange2400To2499: 0,
+      ratingRange2500To2599: 0,
+      ratingRange2600To2699: 0,
+      ratingRange2700To2799: 0,
+      ratingRange2800To2899: 0,
+      ratingRange2900To2999: 0,
+      ratingRange3000To3099: 0,
+      ratingRange3100To3199: 0,
+      ratingRange3200To3299: 0,
+      ratingRange3300To3399: 0,
+      ratingRange3400To3499: 0,
+      ratingRange3500To3599: 0,
+      ratingRange3600To3699: 0,
+      ratingRange3700To3799: 0,
+      ratingRange3800To3899: 0,
+      ratingRange3900To3999: 0
+    }
+
+    while (current <= total) {
+      const records = await tx.memberMaxRating.findMany({
+        where: {},
+        orderBy: { id: 'asc' },
+        take: BATCH_SIZE,
+        skip: current
+      })
+      console.log(`Counting ${current} maxRating record`)
+
+      records.forEach(record => {
+        const mapKey = record.track.toUpperCase() + '-' + record.subTrack.toUpperCase()
+        let distributionValue
+        if (uniqueMap.has(mapKey)) {
+          distributionValue = uniqueMap.get(mapKey)
+        } else {
+          distributionValue = cloneDeep(distributionStat)
+        }
+
+        const idxVal = Math.floor(record.rating / 100)
+        const ratingKey = idxVal === 0 ? 'ratingRange0To099' : `ratingRange${idxVal}00To${idxVal}99`
+        distributionValue[ratingKey] += 1
+        uniqueMap.set(mapKey, distributionValue)
+      })
+
+      current += BATCH_SIZE
+    }
+
+    if (uniqueMap.size > 0) {
+      const dataArray = []
+      uniqueMap.forEach((value, key) => {
+        const tracks = key.split('-')
+        const data = {
+          ...value,
+          track: tracks[0],
+          subTrack: tracks[1],
+          createdBy: CREATED_BY
+        }
+        dataArray.push(data)
+      })
+      await tx.distributionStats.createMany({
+        data: dataArray
+      })
+    }
+
+    console.log(`Finished counted ${uniqueMap.size} distributionStats records\n`)
+  })
+}
+
 async function main () {
   console.log('This script is migrating data into DB')
   console.log('The data number is huge, about 5,000,000 ~ 10,000,000 lines for each file')
@@ -2037,6 +2137,7 @@ async function main () {
   console.log('3. Import Dynamo MemberStat')
   console.log('4. Update ElasticSearch MemberStat')
   console.log('5. Import Dynamo MemberStatHistory')
+  console.log('6. Import Distribution Stats')
   console.log('')
 
   const rl = readline.createInterface({
@@ -2044,8 +2145,8 @@ async function main () {
     output: process.stdout
   })
 
-  rl.question('Please select your step to run (0-5): ', async (step) => {
-    if (step !== '0' && step !== '1' && step !== '2' && step !== '3' && step !== '4' && step !== '5') {
+  rl.question('Please select your step to run (0-6): ', async (step) => {
+    if (step !== '0' && step !== '1' && step !== '2' && step !== '3' && step !== '4' && step !== '5' && step !== '6') {
       rl.close()
     } else {
       console.log(`Running step ${step} ...`)
@@ -2117,6 +2218,11 @@ async function main () {
 
             const memberStatePrivateDynamoFilename = 'MemberStatsHistory_Private_dynamo_data.json'
             await importDynamoMemberStatHistoryPrivate(memberStatePrivateDynamoFilename)
+          } else if (step === '6') {
+            console.log('Clearing distribution stats data...')
+            await prisma.distributionStats.deleteMany()
+
+            await importDistributionStats()
           }
         }
 

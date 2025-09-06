@@ -15,6 +15,8 @@ const { v4: uuidv4 } = require('uuid')
 const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', 'updatedAt',
   'createdBy', 'updatedBy']
 
+const DISTRIBUTION_FIELDS_NO_DATE = ['track', 'subTrack', 'distribution']
+
 const HISTORY_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'DEVELOP', 'DATA_SCIENCE',
   'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
 
@@ -29,7 +31,7 @@ const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxR
  */
 async function getDistribution (query) {
   // validate and parse query parameter
-  const fields = helper.parseCommaSeparatedString(query.fields, DISTRIBUTION_FIELDS) || DISTRIBUTION_FIELDS
+  const fields = helper.parseCommaSeparatedString(query.fields, DISTRIBUTION_FIELDS_NO_DATE) || DISTRIBUTION_FIELDS_NO_DATE
 
   // find matched distribution records
   const prismaFilter = { where: {} }
