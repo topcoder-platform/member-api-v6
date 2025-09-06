@@ -5,4 +5,4 @@
 
 */
 -- AlterTable
-ALTER TABLE "members"."memberDataScienceHistoryStats" ADD COLUMN     "subTrackId" INTEGER NOT NULL;
+ALTER TABLE "memberDataScienceHistoryStats" ADD COLUMN     "subTrackId" INTEGER NOT NULL;
