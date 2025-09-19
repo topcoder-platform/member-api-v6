@@ -651,6 +651,41 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  "/members/autocomplete/{term}":
+    get:
+      tags:
+        - Search
+      description: >
+        Returns members whose handle starts with the provided prefix. This endpoint
+        is restricted to logged in users with copilot or administrator roles, or
+        M2M tokens that include the `read:user_profiles` scope.
+      security:
+        - bearer: []
+      parameters:
+        - name: term
+          in: path
+          required: true
+          type: string
+          description: Handle prefix to match (case insensitive).
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberHandleAutocompleteItem'
+        '401':
+          description: Authentication token is missing or invalid
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/searchBySkills':
     get:
       tags:
@@ -1539,6 +1574,30 @@ definitions:
         type: string
       lastName:
         type: string
+  MemberHandleAutocompleteItem:
+    properties:
+      userId:
+        type: number
+      handle:
+        type: string
+      photoURL:
+        type: string
+      firstName:
+        type: string
+      lastName:
+        type: string
+      maxRating:
+        type: object
+        properties:
+          rating:
+            type: number
+            format: int64
+          track:
+            type: string
+          subTrack:
+            type: string
+          ratingColor:
+            type: string
   MemberProfileTrait:
     properties:
       traitId:

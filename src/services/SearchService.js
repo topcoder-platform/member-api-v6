@@ -12,6 +12,23 @@ const errors = require('../common/errors')
 const prismaHelper = require('../common/prismaHelper')
 const prisma = require('../common/prisma').getClient()
 
+const stringifyForLog = (value) => {
+  try {
+    const serialized = JSON.stringify(value, (_, val) => {
+      if (typeof val === 'bigint') {
+        return val.toString()
+      }
+      if (val instanceof Date) {
+        return val.toISOString()
+      }
+      return val
+    })
+    return serialized === undefined ? 'undefined' : serialized
+  } catch (err) {
+    return '[unserializable payload]'
+  }
+}
+
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName',
   'status', 'addresses', 'photoURL', 'homeCountryCode', 'competitionCountryCode',
   'description', 'email', 'tracks', 'maxRating', 'wins', 'createdAt', 'createdBy',
@@ -50,6 +67,22 @@ function omitMemberAttributes (currentUser, query, allowedValues) {
 async function searchMembers (currentUser, query) {
   const fields = omitMemberAttributes(currentUser, query, MEMBER_FIELDS)
 
+  const logContext = _.omitBy({
+    handle: query.handle,
+    handleLower: query.handleLower,
+    handlesCount: _.isArray(query.handles) ? query.handles.length : undefined,
+    handlesLowerCount: _.isArray(query.handlesLower) ? query.handlesLower.length : undefined,
+    userId: query.userId,
+    userIdsCount: _.isArray(query.userIds) ? query.userIds.length : undefined,
+    emailProvided: _.has(query, 'email') ? !!query.email : undefined,
+    term: query.term,
+    page: query.page,
+    perPage: query.perPage,
+    sort: query.sort,
+    includeStats: query.includeStats
+  }, _.isUndefined)
+  logger.debug(`searchMembers: received query ${stringifyForLog(logContext)}`)
+
   if (query.email != null && query.email.length > 0) {
     if (currentUser == null) {
       throw new errors.UnauthorizedError('Authentication token is required to query users by email')
@@ -61,6 +94,7 @@ async function searchMembers (currentUser, query) {
 
   // search for the members based on query
   const prismaFilter = prismaHelper.buildSearchMemberFilter(query)
+  logger.debug(`searchMembers: prisma filter ${stringifyForLog(prismaFilter)}`)
   const searchData = await fillMembers(prismaFilter, query, fields)
 
   // secure address data
@@ -69,6 +103,8 @@ async function searchMembers (currentUser, query) {
     searchData.result = _.map(searchData.result, res => helper.secureMemberAddressData(res))
     searchData.result = _.map(searchData.result, res => helper.truncateLastName(res))
   }
+
+  logger.debug(`searchMembers: returning total=${searchData.total} resultCount=${_.size(searchData.result)} page=${searchData.page} perPage=${searchData.perPage}`)
 
   return searchData
 }
@@ -446,6 +482,72 @@ async function autocomplete (currentUser, query) {
   return { total, page: query.page, perPage: query.perPage, result: records }
 }
 
+/**
+ * Autocomplete members using handle prefix from path parameter.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} term the handle prefix
+ * @returns {Array<Object>} autocomplete results
+ */
+async function autocompleteByHandlePrefix (currentUser, term) {
+  if (!currentUser) {
+    throw new errors.UnauthorizedError('Authentication token is required to access autocomplete')
+  }
+
+  if (currentUser.isMachine) {
+    const allowedScopes = [config.SCOPES.MEMBERS.READ, config.SCOPES.MEMBERS.ALL]
+    if (!helper.checkIfExists(allowedScopes, currentUser.scopes || [])) {
+      throw new errors.ForbiddenError('read:user_profiles scope is required to access autocomplete')
+    }
+  } else {
+    const hasCopilotRole = helper.checkIfExists(['copilot'], currentUser.roles || [])
+    const hasAdminRole = helper.checkIfExists(['administrator', 'admin'], currentUser.roles || [])
+
+    if (!hasCopilotRole && !hasAdminRole) {
+      throw new errors.ForbiddenError('Copilot or administrator role is required to access autocomplete')
+    }
+  }
+
+  const normalizedTerm = _.trim(term || '')
+  if (!normalizedTerm) {
+    return []
+  }
+
+  const members = await prisma.member.findMany({
+    where: {
+      handleLower: {
+        startsWith: normalizedTerm.toLowerCase()
+      },
+    },
+    select: {
+      userId: true,
+      handle: true,
+      firstName: true,
+      lastName: true,
+      photoURL: true,
+      maxRating: {
+        select: {
+          rating: true,
+          track: true,
+          subTrack: true,
+          ratingColor: true
+        }
+      }
+    },
+    orderBy: {
+      handleLower: 'asc'
+    }
+  })
+
+  return _.map(members, member => ({
+    userId: helper.bigIntToNumber(member.userId),
+    handle: member.handle,
+    photoURL: member.photoURL || '',
+    firstName: member.firstName || '',
+    lastName: member.lastName || '',
+    maxRating: member.maxRating ? _.pick(member.maxRating, ['rating', 'track', 'subTrack', 'ratingColor']) : null
+  }))
+}
+
 autocomplete.schema = {
   currentUser: Joi.any(),
   query: Joi.object().keys({
@@ -458,10 +560,16 @@ autocomplete.schema = {
   })
 }
 
+autocompleteByHandlePrefix.schema = {
+  currentUser: Joi.any(),
+  term: Joi.string().allow('').required()
+}
+
 module.exports = {
   searchMembers,
   searchMembersBySkills,
-  autocomplete
+  autocomplete,
+  autocompleteByHandlePrefix
 }
 
 logger.buildService(module.exports)

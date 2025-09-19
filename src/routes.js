@@ -38,6 +38,15 @@ module.exports = {
       scopes: [MEMBERS.READ, MEMBERS.ALL]
     }
   },
+  '/members/autocomplete/:term': {
+    get: {
+      controller: 'SearchController',
+      method: 'autocompleteByHandlePrefix',
+      auth: 'jwt',
+      scopes: [MEMBERS.READ, MEMBERS.ALL],
+      access: ['copilot', 'administrator', 'admin']
+    }
+  },
   '/members/uid-signature': {
     get: {
       controller: 'MemberController',
