@@ -1,6 +1,6 @@
 swagger: '2.0'
 info:
-  version: V5
+  version: V6
   title: Topcoder Member API
   description: >
     Services that provide access and interaction with all sorts of member profile details.
@@ -35,14 +35,13 @@ info:
 
     ## User roles:
 
-      + `administrator` - administrator
-      + `admin` - administrator
-      + `connect manager` - connect manager
-      + `connect admin` - connect administrator
-      + `copilot` - copilot
-      + `client manager` - client manager
-      + `connect account manager` - connect account manager
-      + `connect copilot manager` - connect copilot manager
+      + `administrator`
+      + `Connect Manager` 
+      + `Connect Admin` 
+      + `copilot`
+      + `Client Manager` 
+      + `Connect Account Manager`
+      + `Connect Copilot Manager`
 
     # Personally Identifiable Information
 
@@ -135,8 +134,7 @@ info:
   license:
     name: MIT
     url: 'http://github.com/gruntjs/grunt/blob/master/LICENSE-MIT'
-host: api.topcoder.com
-basePath: /v5
+basePath: /v6
 schemes:
   - https
   - http
@@ -176,11 +174,15 @@ paths:
     get:
       tags:
         - Basic
-      description:
+      description: |-
         Get member profile with a specified member handle. You may filter on member response fields.
-        
-        
-        The authentication credential is optional, will allow secured fields in the response.
+
+        The authentication credential is optional and allows secured fields in the response.
+
+        Authorization:
+          - Public: Without a token responses omit secure and communication fields.
+          - JWT roles: The profile owner or `administrator`/`admin` roles may view secure fields. Autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`) may view communication fields.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -281,11 +283,14 @@ paths:
     put:
       tags:
         - Basic
-      description: 
+      description: |-
         Update the member profile by handle.
-        
-        
-        If the email has been changed, email change process will start and a verification email will be sent to the new and old email address.
+
+        If the email has been changed, the email change process starts and a verification email is sent to the new and old email address.
+
+        Authorization:
+          - JWT roles: Only the profile owner or users with `administrator`/`admin` roles may update member data.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -327,18 +332,64 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/profileCompleteness':
+    get:
+      tags:
+        - Basic
+      description: >
+        Compute profile completeness metadata for the specified member, including
+        which profile sections are complete and the next suggested item to finish.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or users with `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: query
+          name: toast
+          required: false
+          type: string
+          description: Override the suggested toast item in the response.
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/ProfileCompleteness'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}/verify':
     get:
       tags:
         - Basic
-      description: 
-        Verify members new email address.
-        
-        
-        When the email has been changed, email change process will start and a verification email will be sent to the new and old email address. The link from the email will redirect member to this api.
-        
-        
-        Both the old and new email address need to verified by the member to sucessfully complete the process.
+      description: |-
+        Verify a member's new email address.
+
+        When the email has been changed, the email change process starts and a verification email is sent to the new and old addresses. The link from each email redirects the member to this API.
+
+        Both the old and new email address must be verified by the member to successfully complete the process.
+
+        Authorization:
+          - JWT roles: Only the profile owner or `administrator`/`admin` may verify the email change.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -376,7 +427,12 @@ paths:
     post:
       tags:
         - Basic
-      description: Upload members photo. The service will save the file from the request into AWS S3 and will update the member profile to change the members photo URL.
+      description: |-
+        Upload a member's photo. The service saves the file from the request into AWS S3 and updates the member profile with the new photo URL.
+
+        Authorization:
+          - JWT roles: Only the profile owner or `administrator`/`admin` may upload a photo.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       consumes:
@@ -420,14 +476,17 @@ paths:
     get:
       tags:
         - Search
-      description: 
-        Search members by userId, userIds, handle, handles, handleLower, handlesLower and  retrive member profile details with stats and skills.
-        
-        
-        While searching with handle a like match will be conducted where as handleLower will conduct and exact match from the data store
-        
-        
-        Authentication credential is optional. If API is called by Admin or M2M, then secured fields will be included otherwise excluded from the response.
+      description: |-
+        Search members by `userId`, `userIds`, `handle`, `handles`, `handleLower`, or `handlesLower`, and retrieve profile details with stats and skills.
+
+        Searching by `handle` performs a like match, whereas `handleLower` performs an exact match against the data store.
+
+        Authentication credentials are optional. If the API is called by Admin or M2M, secured fields are included; otherwise they are excluded from the response.
+
+        Authorization:
+          - Public: Allowed without a token; responses omit secure and communication fields.
+          - JWT roles: Any authenticated member can query basic data. Secure fields require the caller to own the profile or hold `administrator`/`admin`. Email searches additionally require `administrator`, `admin`, or `tgadmin`. Communication fields (firstName, lastName, email) require autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`).
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -579,12 +638,18 @@ paths:
     get:
       tags:
         - Search
-      description: 
-        Search members by term, the term is mactehd with handle. Based on which userId, handle, firstName, lastName of members profile are provided.
-        
-        This services is best used for autocomplete features, where response payload is light and fast in searching through members.
-        
-        The service does a like macth and sorts based on string coming before, or after, or is the same as the given string in sort order.
+      description: |-
+        Search members by a term that matches their handle. Matching profiles return `userId`, `handle`, `firstName`, and `lastName`.
+
+        This service is best suited for autocomplete features where the payload should be lightweight and fast.
+
+        The service performs a like match and sorts results by whether the string appears before, after, or equals the given term in sort order.
+
+        Authorization:
+          - JWT roles: Requires an authenticated member. Communication fields (firstName, lastName, email) are returned only for autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`).
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
       parameters:
         - name: term
           in: query
@@ -657,8 +722,8 @@ paths:
         - Search
       description: >
         Returns members whose handle starts with the provided prefix. This endpoint
-        is restricted to logged in users with copilot or administrator roles, or
-        M2M tokens that include the `read:user_profiles` scope.
+        is restricted to logged-in users with copilot or administrator/admin roles, or
+        M2M tokens that include the `read:user_profiles` or `all:user_profiles` scope.
       security:
         - bearer: []
       parameters:
@@ -686,12 +751,60 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/uid-signature':
+    get:
+      tags:
+        - Basic
+      description: >
+        Generates a deterministic HMAC signature for the calling member's userId,
+        enabling downstream integrations (such as Userflow) to verify identity.
+        
+        Authorization:
+          - JWT roles: Any authenticated member may request their own signature.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`; the token must include a `userId` claim.
+      security:
+        - bearer: []
+      parameters:
+        - in: query
+          name: type
+          required: true
+          type: string
+          enum:
+            - userflow
+          description: Integration identifier used to choose the configured HMAC secret.
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/UidSignature'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/searchBySkills':
     get:
       tags:
         - Search
-      description: 
-        Search members by EMSI skill id(s) provided.  This API is used for the talent search.  By default, the results are sorted by the number of challenges won.
+      description: |-
+        Search members by EMSI skill ID(s). This API powers the talent search. Results default to sorting by the number of challenges won.
+
+        Authorization:
+          - JWT roles: Any authenticated member can query basic data. Secure and communication fields are visible only to the profile owner or `administrator`/`admin`, while autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`) may view contact fields.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
       parameters:
         - name: skillID
           in: query
@@ -774,7 +887,14 @@ paths:
     get:
       tags:
         - Traits
-      description: get member profile traits
+      description: >
+        Retrieve detailed member trait data (education, work history, personalization,
+        etc.).
+        
+        Authorization:
+          - Public: Anonymous callers receive only public trait categories (`education`, `languages`, `personalization`, `work`).
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure audit fields; other authenticated members see non-secure data only.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -862,7 +982,12 @@ paths:
     post:
       tags:
         - Traits
-      description: create member profile traits
+      description: >
+        Create new trait entries for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `create:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -903,7 +1028,12 @@ paths:
     put:
       tags:
         - Traits
-      description: update member profile traits
+      description: >
+        Replace existing trait entries for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -944,7 +1074,12 @@ paths:
     delete:
       tags:
         - Traits
-      description: delete member profile traits
+      description: >
+        Delete one or more trait entries for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `delete:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -995,7 +1130,13 @@ paths:
     get:
       tags:
         - Statistics
-      description: get member stats
+      description: >
+        Retrieve member statistics, optionally filtered by group.
+        
+        Authorization:
+          - Public: Anonymous callers receive only public statistics.
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure statistics and group-specific data.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
       parameters:
         - in: path
           name: handle
@@ -1064,11 +1205,109 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+    post:
+      tags:
+        - Statistics
+      description: >
+        Create or replace the aggregate statistics record for the member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    patch:
+      tags:
+        - Statistics
+      description: >
+        Partially update the member statistics record (only provided fields are changed).
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}/stats/history':
     get:
       tags:
         - Statistics
-      description: Get member history statistics, by default only returns the public topcoder history statistics.
+      description: >
+        Get member history statistics, by default only returns the public Topcoder history statistics.
+        
+        Authorization:
+          - Public: Anonymous callers receive only public history statistics.
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure history data.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
       parameters:
         - in: path
           name: handle
@@ -1124,11 +1363,109 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+    post:
+      tags:
+        - Statistics
+      description: >
+        Create or replace member history statistics for the specified group(s).
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    patch:
+      tags:
+        - Statistics
+      description: >
+        Partially update member history statistics for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}/skills':
     get:
       tags:
         - Statistics
-      description: get member skills.
+      description: >
+        Get member skills, including self-entered data and aggregated values.
+        
+        Authorization:
+          - Public: Anonymous callers receive public skill summaries.
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure metadata and audit fields.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
       parameters:
         - in: path
           name: handle
@@ -1162,7 +1499,12 @@ paths:
     post:
       tags:
         - Statistics
-      description: create member skills
+      description: >
+        Create or replace the member's self-entered skills dataset.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `create:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -1203,7 +1545,12 @@ paths:
     patch:
       tags:
         - Statistics
-      description: update member entered skills
+      description: >
+        Partially update the member's self-entered skills dataset.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
       security:
         - bearer: []
       parameters:
@@ -1245,7 +1592,11 @@ paths:
     get:
       tags:
         - Statistics
-      description: Get member distribution statistics
+      description: >
+        Get member distribution statistics grouped by track and sub-track.
+        
+        Authorization:
+          - Public: Endpoint is unauthenticated.
       parameters:
         - name: track
           in: query
@@ -1294,137 +1645,6 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
-  '/members/{handle}/financial':
-    get:
-      tags:
-        - Miscellaneous
-      description: Get member financial information
-      security:
-        - bearer: []
-      parameters:
-        - in: path
-          name: handle
-          required: true
-          type: string
-        - name: fields
-          in: query
-          required: false
-          type: string
-          description: >
-            fields=fieldName1,fieldName2,...,fieldN
-            
-            parameter for choosing which fields of MemberFinancial that will be included in response.
-            
-            + userId - Select the field userId
-            
-            + amount - Select the field amount
-            
-            + status - Select the field status
-            
-            + updatedAt - Select the field updatedAt
-            
-            + createdAt - Select the field createdAt
-            
-            + createdBy - Select the field createdBy
-            
-            + updatedBy - Select the field updatedBy
-      responses:
-        '200':
-          description: OK
-          schema:
-            $ref: '#/definitions/MemberFinancial'
-        '400':
-          description: Bad request data
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '401':
-          description: Miss or wrong authentication credentials
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '403':
-          description: No permission
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '404':
-          description: Not found
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '500':
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/ErrorModel'
-  '/members/{handle}/gamification/rewards':
-    get:
-      tags:
-        - Gamification
-      description: Get member gamification rewards
-      security:
-        - bearer: []
-      parameters:
-        - in: path
-          name: handle
-          required: true
-          type: string
-        - name: site
-          in: query
-          required: false
-          type: string
-          description: The site for which to make the request. Defaults to `topcoder` if not specified.
-        - name: tags
-          in: query
-          required: false
-          type: string
-          description: >
-            tags=tag1,tag2,...,tagN
-            
-            The tags by which to filter the activities retrieved. Leave empty for no tag filtering.
-        - name: tagsJoin
-          in: query
-          required: false
-          type: string
-          description: >
-            Whether the tags should be found using hasAnyOf / hasAllOf.
-
-            + hasAnyOf
-
-            + hasAllOf
-      responses:
-        '200':
-          description: OK
-          schema:
-            type: array
-            items:
-              $ref: '#/definitions/MemberRewards'
-        '400':
-          description: Bad request data
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '401':
-          description: Miss or wrong authentication credentials
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '403':
-          description: No permission
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '404':
-          description: Not found
-          schema:
-            $ref: '#/definitions/ErrorModel'
-        '500':
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/ErrorModel'
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -1529,6 +1749,42 @@ definitions:
     properties:
       photoURL:
         type: string
+  ProfileCompleteness:
+    type: object
+    properties:
+      userId:
+        type: number
+        format: int64
+      handle:
+        type: string
+      data:
+        type: object
+        properties:
+          skills:
+            type: boolean
+          gigAvailability:
+            type: boolean
+          bio:
+            type: boolean
+          profilePicture:
+            type: boolean
+          workHistory:
+            type: boolean
+          education:
+            type: boolean
+          percentComplete:
+            type: number
+            format: double
+            description: Value between 0 and 1 representing completion percent.
+      showToast:
+        type: string
+        description: Suggested profile element to prompt the user about (e.g. `skills`).
+  UidSignature:
+    type: object
+    properties:
+      uid_signature:
+        type: string
+        description: Hex encoded HMAC-SHA256 signature derived from the caller's userId.
   MemberSearchDataItem:
     properties:
       userId:
