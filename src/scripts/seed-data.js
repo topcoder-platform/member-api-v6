@@ -126,7 +126,8 @@ function buildDevelopStatsData (jsonData) {
   const itemData = jsonData.subTracks
   const items = _.map(itemData, t => ({
     name: t.name,
-    subTrackId: t.id,
+    // subTrackId: t.id,
+    subTrackId: 999,
     challenges: t.challenges,
     wins: t.wins,
     mostRecentSubmission: readDate(t.mostRecentSubmission),
@@ -156,7 +157,8 @@ function buildDesignStatsData (jsonData) {
   }
   const itemData = jsonData.subTracks
   const items = _.map(itemData, t => ({
-    subTrackId: t.id,
+    // subTrackId: t.id,
+    subTrackId: 999,
     mostRecentSubmission: readDate(t.mostRecentSubmission),
     mostRecentEventDate: readDate(t.mostRecentEventDate),
     ..._.pick(t, designStatsItemFields),
@@ -407,6 +409,8 @@ async function importStatsHistory () {
       _.forEach(srmHistory, t => {
         dataScienceItems.push({
           subTrack: 'SRM',
+          // subTrackId:t.id,
+          subTrackId: 999,
           createdBy,
           ..._.pick(t, ['challengeId', 'challengeName', 'rating', 'placement', 'percentile']),
           date: new Date(t.date)
@@ -417,6 +421,8 @@ async function importStatsHistory () {
       _.forEach(marathonHistory, t => {
         dataScienceItems.push({
           subTrack: 'MARATHON_MATCH',
+          // subTrackId:t.id,
+          subTrackId: 999,
           createdBy,
           ..._.pick(t, ['challengeId', 'challengeName', 'rating', 'placement', 'percentile']),
           date: new Date(t.date)
@@ -471,6 +477,7 @@ async function mockPrivateStatsHistory () {
             placement: 1,
             percentile: 100,
             subTrack: 'SRM',
+            subTrackId: 999,
             createdBy
           }, {
             challengeId: 99997,
@@ -480,6 +487,7 @@ async function mockPrivateStatsHistory () {
             placement: 1,
             percentile: 100,
             subTrack: 'MARATHON_MATCH',
+            subTrackId: 999,
             createdBy
           }]
         }

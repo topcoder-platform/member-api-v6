@@ -158,6 +158,7 @@ These commands will set auth0 and event bus api to local mock server.
 ## Local Deployment
 
 - Make sure you have started db and set `DATABASE_URL`.
+- To easily, configure local env variables, update `local.env.sh` and execute it using `source local.env.sh`.
 - Make sure you have create db structure. Seed data is optional.
 - Install dependencies `npm install`
 - Start app `npm start`
@@ -171,11 +172,43 @@ Make sure you have followed above steps to
 - setup db and config db url
 - setup local mock api and set local configs
   - it will really call service and mock api
+- Run postgres database (check above for details)
+- Download Seed data.
+```bash
+node src/scripts/download.js
+```
 
 
+- Create DB and Run seeds. 
+
+
+```bash
+# create db tables
+npm run init-db
+
+
+node src/scripts/seed-data.js
+```
+
+### Unit tests
 Then you can run:
 ```bash
 npm run test
+```
+
+To create coverage report
+```bash
+npm run test:cov
+```
+
+### E2E tests
+```bash
+npm run e2e
+```
+
+To create coverage report
+```bash
+npm run e2e:cov
 ```
 
 ## Verification
