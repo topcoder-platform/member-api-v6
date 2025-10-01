@@ -27,10 +27,8 @@ const MAX_RATING_FIELDS = ['rating', 'track', 'subTrack', 'ratingColor']
 const ADDRESS_FIELDS = ['streetAddr1', 'streetAddr2', 'city', 'zip', 'stateCode', 'type']
 
 const TRAIT_BASIC_INFO = ['userId', 'country', 'primaryInterestInTopcoder', 'tshirtSize', 'gender', 'shortBio', 'birthDate', 'currentLocation']
-const TRAIT_WORK = ['industry', 'companyName', 'position', 'startDate', 'endDate', 'working']
 const TRAIT_LANGUAGE = ['language', 'spokenLevel', 'writtenLevel']
 const TRAIT_SERVICE_PROVIDER = ['serviceProviderType', 'name']
-const TRAIT_EDUCATION = ['schoolCollegeName', 'major', 'timePeriodTo']
 const TRAIT_DEVICE = ['deviceType', 'manufacturer', 'model', 'operatingSystem', 'osVersion', 'osLanguage']
 
 /**
@@ -100,9 +98,28 @@ async function clearDB () {
  * @param {Number} dateNum the date number
  * @returns the date instance
  */
-function _convert2Date (dateNum) {
-  if (dateNum && dateNum >= 0) {
-    return new Date(dateNum)
+function _convert2Date (dateValue) {
+  if (dateValue === null || dateValue === undefined) {
+    return undefined
+  }
+
+  if (dateValue instanceof Date) {
+    return dateValue
+  }
+
+  if (isNumber(dateValue) && dateValue >= 0) {
+    return new Date(dateValue)
+  }
+
+  if (isString(dateValue) && dateValue.length > 0) {
+    const parsed = new Date(dateValue)
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed
+    }
+    const numericValue = Number(dateValue)
+    if (!Number.isNaN(numericValue) && numericValue >= 0) {
+      return new Date(numericValue)
+    }
   }
 
   return undefined
@@ -999,17 +1016,25 @@ async function fixMemberUpdateData (memberItem, dbItem) {
         }]
       }
     } else if (memberItem.traits.traitId === 'education') {
-      const traitData = pick(memberItem.traits.data[0], TRAIT_EDUCATION)
-      if (traitData.schoolCollegeName && traitData.major) {
-        let endYear
-        if (traitData.timePeriodTo) {
-          endYear = _convert2Date(traitData.timePeriodTo).getFullYear()
+      const educationTraits = []
+      forEach(memberItem.traits.data, traitData => {
+        if (traitData && traitData.schoolCollegeName && traitData.major) {
+          let endYear
+          const normalizedEndDate = _convert2Date(traitData.timePeriodTo)
+          if (normalizedEndDate) {
+            endYear = normalizedEndDate.getFullYear()
+          } else if (isNumber(traitData.endYear)) {
+            endYear = traitData.endYear
+          }
+          educationTraits.push({
+            collegeName: traitData.schoolCollegeName,
+            degree: traitData.major,
+            endYear
+          })
         }
-        memberItemUpdate.memberTraits.education = [{
-          collegeName: traitData.schoolCollegeName,
-          degree: traitData.major,
-          endYear
-        }]
+      })
+      if (!isEmpty(educationTraits)) {
+        memberItemUpdate.memberTraits.education = educationTraits
       }
     } else if (memberItem.traits.traitId === 'service_provider') {
       const traitData = pick(memberItem.traits.data[0], TRAIT_SERVICE_PROVIDER)
@@ -1075,13 +1100,37 @@ async function fixMemberUpdateData (memberItem, dbItem) {
         }
       })
     } else if (memberItem.traits.traitId === 'work') {
-      const traitData = pick(memberItem.traits.data[0], TRAIT_WORK)
-      if (traitData.companyName && traitData.position) {
-        memberItemUpdate.memberTraits.work = [{
-          ...traitData,
-          startDate: _convert2Date(traitData.startDate),
-          endDate: _convert2Date(traitData.endDate)
-        }]
+      const workTraits = []
+      forEach(memberItem.traits.data, traitData => {
+        if (!traitData) {
+          return
+        }
+        const companyName = traitData.companyName || traitData.company
+        if (!(companyName && traitData.position)) {
+          return
+        }
+        const workTrait = {
+          companyName,
+          position: traitData.position
+        }
+        if (traitData.industry) {
+          workTrait.industry = traitData.industry
+        }
+        if (isBoolean(traitData.working)) {
+          workTrait.working = traitData.working
+        }
+        const normalizedStartDate = _convert2Date(traitData.startDate || traitData.timePeriodFrom)
+        if (normalizedStartDate) {
+          workTrait.startDate = normalizedStartDate
+        }
+        const normalizedEndDate = _convert2Date(traitData.endDate || traitData.timePeriodTo)
+        if (normalizedEndDate) {
+          workTrait.endDate = normalizedEndDate
+        }
+        workTraits.push(workTrait)
+      })
+      if (!isEmpty(workTraits)) {
+        memberItemUpdate.memberTraits.work = workTraits
       }
     } else if (memberItem.traits.traitId === 'skill') {
       // Ignore, we do not have skill traits, and there are only 3 data in files
