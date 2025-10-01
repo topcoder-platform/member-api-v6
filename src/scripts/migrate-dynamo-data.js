@@ -30,6 +30,7 @@ const TRAIT_BASIC_INFO = ['userId', 'country', 'primaryInterestInTopcoder', 'tsh
 const TRAIT_LANGUAGE = ['language', 'spokenLevel', 'writtenLevel']
 const TRAIT_SERVICE_PROVIDER = ['serviceProviderType', 'name']
 const TRAIT_DEVICE = ['deviceType', 'manufacturer', 'model', 'operatingSystem', 'osVersion', 'osLanguage']
+const WORK_INDUSTRY_TYPES = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
 
 /**
  * Clear All DB.
@@ -1430,11 +1431,22 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
  */
 async function updateTraitElement (objArr, txObject, memberTraitId, createdBy) {
   if (objArr && objArr.length > 0) {
-    const toUpdateArr = objArr.map(elemItem => ({
-      ...elemItem,
-      memberTraitId,
-      createdBy
-    }))
+    const toUpdateArr = objArr.map(elemItem => {
+      const traitItem = { ...(elemItem || {}) }
+
+      if (Object.prototype.hasOwnProperty.call(traitItem, 'industry')) {
+        const { industry } = traitItem
+        if (!WORK_INDUSTRY_TYPES.includes(industry)) {
+          traitItem.industry = null
+        }
+      }
+
+      return {
+        ...traitItem,
+        memberTraitId,
+        createdBy
+      }
+    })
 
     await txObject.deleteMany({
       where: {
