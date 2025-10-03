@@ -93,7 +93,10 @@ async function searchMembers (currentUser, query) {
   }
 
   // search for the members based on query
-  const prismaFilter = prismaHelper.buildSearchMemberFilter(query)
+  const canBypassStatusRestriction = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const prismaFilter = prismaHelper.buildSearchMemberFilter(query, {
+    restrictStatus: !canBypassStatusRestriction
+  })
   logger.debug(`searchMembers: prisma filter ${stringifyForLog(prismaFilter)}`)
   const searchData = await fillMembers(prismaFilter, query, fields)
 

@@ -93,13 +93,16 @@ function buildMemberSkills (skillList) {
  * @param {Object} query request query parameters
  * @returns member filter used in prisma
  */
-function buildSearchMemberFilter (query) {
+function buildSearchMemberFilter (query, options = {}) {
   const handles = _.isArray(query.handles) ? query.handles : []
   const handlesLower = _.isArray(query.handlesLower) ? query.handlesLower : []
   const userIds = _.isArray(query.userIds) ? query.userIds : []
 
   const filterList = []
-  filterList.push({ status: 'ACTIVE' })
+  const restrictStatus = _.get(options, 'restrictStatus', true)
+  if (restrictStatus) {
+    filterList.push({ status: 'ACTIVE' })
+  }
   if (query.userId) {
     filterList.push({ userId: query.userId })
   }
