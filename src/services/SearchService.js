@@ -191,13 +191,20 @@ async function addSkills (results) {
 
 async function addSkillScore (results, query) {
   // Pull out availableForGigs to add to the search results, for talent search
-  let resultsWithScores = _.map(results, function (item) {
+  const monthsAgo = (n) => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - n)
+    return d
+  }
+
+  const resultsWithScores = _.map(results, function (item) {
     if (!item.skills) {
       item.skillScore = 0
       return item
     }
+
     let score = 0.0
-    let foundSkills = _.filter(item.skills, function (skill) { return query.skillIds.includes(skill.id) })
+    const foundSkills = _.filter(item.skills, function (skill) { return query.skillIds.includes(skill.id) })
     for (const skill of foundSkills) {
       let challengeWin = false
       let selfPicked = false
@@ -216,8 +223,53 @@ async function addSkillScore (results, query) {
         score = score + 0.5
       }
     }
-    // Final score is percentage match to searched skills
-    item.skillScore = Math.round((score / query.skillIds.length) * 100) / 100
+
+    // Base score is percentage match to searched skills (0..1)
+    let finalScore = (score / query.skillIds.length)
+
+    // Apply additional deductions per requirements
+    // 1) availableForGigs is null
+    if (item.availableForGigs == null) {
+      finalScore -= 0.01
+    }
+    // 2) description is null
+    if (item.description == null) {
+      finalScore -= 0.01
+    }
+    // 3) photoURL is null
+    if (item.photoURL == null) {
+      finalScore -= 0.04
+    }
+    // 4) last login date thresholds
+    if (item.lastLoginDate) {
+      const lastLogin = (item.lastLoginDate instanceof Date) ? item.lastLoginDate : new Date(item.lastLoginDate)
+      if (lastLogin < monthsAgo(5)) {
+        finalScore -= 0.05
+      } else if (lastLogin < monthsAgo(4)) {
+        finalScore -= 0.04
+      } else if (lastLogin < monthsAgo(3)) {
+        finalScore -= 0.03
+      } else if (lastLogin < monthsAgo(2)) {
+        finalScore -= 0.02
+      } else if (lastLogin < monthsAgo(1)) {
+        finalScore -= 0.01
+      }
+    } else {
+      // If lastLoginDate is null apply the maximum penalty (5+ months)
+      finalScore -= 0.05
+    }
+
+    // 5) incorporate skillScoreDeduction (negative or 0). If null, subtract 0.04
+    if (item.skillScoreDeduction != null) {
+      finalScore += item.skillScoreDeduction
+    } else {
+      finalScore -= 0.04
+    }
+
+    // Clamp to minimum of 0, and round to 2 decimals
+    if (finalScore < 0) finalScore = 0
+    item.skillScore = Math.round(finalScore * 100) / 100
+
     // Default names and handle appearance
     // https://topcoder.atlassian.net/browse/MP-325
     if (!item.namesAndHandleAppearance) {
