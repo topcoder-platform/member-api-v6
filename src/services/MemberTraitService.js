@@ -411,8 +411,7 @@ const traitSchemas = {
   }))
 }
 
-const traitSchemaSwitch = _.map(_.keys(traitSchemas,
-  k => ({ is: k, then: traitSchemas[k] })))
+const traitSchemaSwitch = _.keys(traitSchemas).map(k => ({ is: k, then: traitSchemas[k] }))
 
 createTraits.schema = {
   currentUser: Joi.any(),
@@ -463,7 +462,8 @@ async function updateTraits (currentUser, handle, data) {
   await prisma.$transaction(async (tx) => {
     // clear existing traits
     const traitIdList = _.map(data, item => item.traitId)
-    const models = _.map(traitIdList, t => traitIdModelMap[t])
+    // map trait ids to relational models and drop non-relational ones (e.g., subscription, hobby)
+    const models = _.uniq(_.compact(_.map(traitIdList, t => traitIdModelMap[t])))
     // clear models data
     if (queryResult.id) {
       await Promise.all(_.map(models, m => tx[m].deleteMany({
@@ -514,7 +514,7 @@ async function removeTraits (currentUser, handle, query) {
   if (queryResult.id) {
     await prisma.$transaction(async (tx) => {
       // clear existing traits
-      const models = _.map(traitIds, t => traitIdModelMap[t])
+      const models = _.uniq(_.compact(_.map(traitIds, t => traitIdModelMap[t])))
       // clear models data
       await Promise.all(_.map(models, m => tx[m].deleteMany({
         where: { memberTraitId: queryResult.id }
