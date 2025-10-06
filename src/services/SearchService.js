@@ -296,31 +296,142 @@ function skillSearchOrder (results, query) {
 }
 
 async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
-  // get the total
+  // get the total (may be overridden for skillSearch with DB-computed scores)
   let total = await prisma.member.count(prismaFilter)
 
   let results = []
-  if (total === 0) {
-    return { total: total, page: query.page, perPage: query.perPage, result: [] }
+  if (skillSearch && query.sortBy === 'skillScore') {
+    // For skill searches, compute scores and sort/paginate at the DB layer
+    const memberIds = _.get(prismaFilter, 'where.userId.in', []) || []
+    const skillIds = query.skillIds || []
+
+    if (!_.isArray(memberIds) || memberIds.length === 0 || !_.isArray(skillIds) || skillIds.length === 0) {
+      return { total: 0, page: query.page, perPage: query.perPage, result: [] }
+    }
+
+    // Compute total after excluding unavailable-for-gigs members (false)
+    const totalRows = await prisma.$queryRaw`
+      SELECT COUNT(*)::int AS total
+      FROM "members"."member" m
+      WHERE m."userId" IN (${Prisma.join(memberIds)})
+        AND (m."availableForGigs" IS NULL OR m."availableForGigs" = TRUE)
+    `
+    total = _.get(totalRows, '[0].total', 0) || 0
+
+    if (total === 0) {
+      return { total: 0, page: query.page, perPage: query.perPage, result: [] }
+    }
+
+    // DB-side computation of skillScore per member, ordered and paginated
+    const pageOffset = (query.page - 1) * query.perPage
+    const scored = await prisma.$queryRaw`
+      WITH candidates AS (
+        SELECT m."userId", m."availableForGigs", m."description", m."photoURL", m."lastLoginDate", m."skillScoreDeduction"
+        FROM "members"."member" m
+        WHERE m."userId" IN (${Prisma.join(memberIds)})
+          AND (m."availableForGigs" IS NULL OR m."availableForGigs" = TRUE)
+      ),
+      skill_list AS (
+        SELECT UNNEST(ARRAY[${Prisma.join(skillIds)}])::text AS skill_id
+      ),
+      weights AS (
+        SELECT c."userId",
+               sl.skill_id,
+               MAX(
+                 CASE
+                   WHEN LOWER(usl.name) = 'verified' THEN 1.0
+                   WHEN LOWER(usl.name) = 'self-declared' THEN 0.5
+                   ELSE 0.0
+                 END
+               ) AS weight
+        FROM candidates c
+        CROSS JOIN skill_list sl
+        LEFT JOIN "skills"."user_skill" us
+          ON us."user_id" = c."userId" AND us."skill_id"::text = sl.skill_id
+        LEFT JOIN "skills"."user_skill_level" usl
+          ON usl.id = us."user_skill_level_id"
+        GROUP BY c."userId", sl.skill_id
+      ),
+      base_scores AS (
+        SELECT c."userId",
+               SUM(COALESCE(w.weight, 0)) AS base_sum,
+               c."availableForGigs", c."description", c."photoURL", c."lastLoginDate", c."skillScoreDeduction"
+        FROM candidates c
+        JOIN weights w ON w."userId" = c."userId"
+        GROUP BY c."userId", c."availableForGigs", c."description", c."photoURL", c."lastLoginDate", c."skillScoreDeduction"
+      ),
+      scored AS (
+        SELECT bs."userId",
+               GREATEST(
+                 ((bs.base_sum / ${skillIds.length})::double precision
+                   + COALESCE(bs."skillScoreDeduction", -0.04)
+                   - (CASE WHEN bs."availableForGigs" IS NULL THEN 0.01 ELSE 0 END)
+                   - (CASE WHEN bs."description" IS NULL THEN 0.01 ELSE 0 END)
+                   - (CASE WHEN bs."photoURL" IS NULL THEN 0.04 ELSE 0 END)
+                   - (CASE WHEN bs."lastLoginDate" IS NULL THEN 0.05
+                           WHEN bs."lastLoginDate" < NOW() - interval '5 months' THEN 0.05
+                           WHEN bs."lastLoginDate" < NOW() - interval '4 months' THEN 0.04
+                           WHEN bs."lastLoginDate" < NOW() - interval '3 months' THEN 0.03
+                           WHEN bs."lastLoginDate" < NOW() - interval '2 months' THEN 0.02
+                           WHEN bs."lastLoginDate" < NOW() - interval '1 months' THEN 0.01
+                           ELSE 0 END)
+               ), 0) AS score_raw
+        FROM base_scores bs
+      )
+      SELECT s."userId" AS "userId",
+             ROUND(s.score_raw::numeric, 2) AS "skillScore"
+      FROM scored s
+      ORDER BY "skillScore" DESC, "userId" ASC
+      OFFSET ${pageOffset} LIMIT ${query.perPage}
+    `
+
+    const pageUserIds = _.map(scored, r => _.get(r, 'userId'))
+    if (pageUserIds.length === 0) {
+      return { total: total, page: query.page, perPage: query.perPage, result: [] }
+    }
+
+    // Fetch member details for the ranked page
+    const pageMembers = await prisma.member.findMany({
+      where: { userId: { in: pageUserIds } },
+      include: { maxRating: true, addresses: true }
+    })
+
+    // Convert and attach computed score; preserve ranking order
+    const byId = _.keyBy(pageMembers, 'userId')
+    results = _.compact(_.map(pageUserIds, (uid) => {
+      const rec = byId[uid]
+      if (!rec) return null
+      prismaHelper.convertMember(rec)
+      const skillScoreForUser = _.get(_.find(scored, s => s.userId === uid), 'skillScore', 0)
+      rec.skillScore = Number(skillScoreForUser)
+      if (!rec.namesAndHandleAppearance) {
+        rec.namesAndHandleAppearance = 'namesAndHandle'
+      }
+      return rec
+    }))
+  } else {
+    if (total === 0) {
+      return { total: total, page: query.page, perPage: query.perPage, result: [] }
+    }
+
+    // get member data
+    results = await prisma.member.findMany({
+      ...prismaFilter,
+      include: {
+        maxRating: true,
+        addresses: true
+      },
+      // sort by handle with given order
+      skip: (query.page - 1) * query.perPage,
+      take: query.perPage,
+      orderBy: [{
+        handle: query.sortOrder
+      }]
+    })
+
+    // convert to response format
+    _.forEach(results, r => prismaHelper.convertMember(r))
   }
-
-  // get member data
-  results = await prisma.member.findMany({
-    ...prismaFilter,
-    include: {
-      maxRating: true,
-      addresses: true
-    },
-    // sort by handle with given order
-    skip: (query.page - 1) * query.perPage,
-    take: query.perPage,
-    orderBy: [{
-      handle: query.sortOrder
-    }]
-  })
-
-  // convert to response format
-  _.forEach(results, r => prismaHelper.convertMember(r))
 
   // Include the stats by default, but allow them to be ignored with ?includeStats=false
   // This is for performance reasons - pulling the stats is a bit of a resource hog
@@ -334,9 +445,12 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
   // Sort in slightly different secondary orders, depending on if
   // this is a skill search or handle search
   if (skillSearch) {
-    _.remove(results, (result) => (result.availableForGigs != null && result.availableForGigs === false))
-    results = await addSkillScore(results, query)
-    results = skillSearchOrder(results, query)
+    if (query.sortBy !== 'skillScore') {
+      // Legacy in-memory scoring + ordering (non-skillScore sorts)
+      _.remove(results, (result) => (result.availableForGigs != null && result.availableForGigs === false))
+      results = await addSkillScore(results, query)
+      results = skillSearchOrder(results, query)
+    }
   } else {
     results = handleSearchOrder(results, query)
   }
