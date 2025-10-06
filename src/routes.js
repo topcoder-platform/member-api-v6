@@ -190,5 +190,13 @@ module.exports = {
       // access: constants.ADMIN_ROLES,
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
     }
+  },
+  '/members/:handle/skills/verify': {
+    post: {
+      controller: 'StatisticsController',
+      method: 'verifyMemberSkills',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
   }
 }

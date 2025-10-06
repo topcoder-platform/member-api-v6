@@ -1,0 +1,945 @@
+generator client {
+  provider = "prisma-client-js"
+  // Generate a package-scoped client to avoid monorepo conflicts
+  output   = "./generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["members", "skills"]
+}
+
+enum MemberStatus {
+  UNVERIFIED
+  ACTIVE
+  INACTIVE_USER_REQUEST
+  INACTIVE_DUPLICATE_ACCOUNT
+  INACTIVE_IRREGULAR_ACCOUNT
+  UNKNOWN
+
+  @@schema("members")
+}
+
+enum FinancialStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+
+  @@schema("members")
+}
+
+model member {
+  userId                  BigInt           @id
+  handle                  String
+  handleLower             String           @unique
+  email                   String           @unique
+  verified                Boolean?
+  skillScore              Float?
+  memberRatingId          BigInt?
+  maxRating               memberMaxRating?
+  firstName               String?
+  lastName                String?
+  description             String?
+  otherLangName           String?
+  status                  MemberStatus?
+  newEmail                String?
+  emailVerifyToken        String?
+  emailVerifyTokenDate    DateTime?
+  newEmailVerifyToken     String?
+  newEmailVerifyTokenDate DateTime?
+  addresses               memberAddress[]
+
+  country                  String?
+  homeCountryCode          String?
+  competitionCountryCode   String?
+  photoURL                 String?
+  tracks                   String[]
+  loginCount               Int?
+  lastLoginDate            DateTime?
+  availableForGigs         Boolean?
+  skillScoreDeduction      Float?
+  namesAndHandleAppearance String?
+  aggregatedSkills         Json?
+  enteredSkills            Json?
+
+  financial    memberFinancial?
+  historyStats memberHistoryStats[]
+  memberStats  memberStats[]
+  memberTraits memberTraits?
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([handleLower])
+  @@index([email])
+  @@schema("members")
+}
+
+model memberAddress {
+  id          BigInt  @id @default(autoincrement())
+  userId      BigInt
+  streetAddr1 String?
+  streetAddr2 String?
+  city        String?
+  zip         String?
+  stateCode   String?
+  type        String
+
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([userId])
+  @@schema("members")
+}
+
+model memberMaxRating {
+  id          BigInt  @id @default(autoincrement())
+  userId      BigInt
+  rating      Int
+  track       String?
+  subTrack    String?
+  ratingColor String
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  member      member        @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  memberStats memberStats[] // virtual relation
+
+  @@unique([userId])
+  @@index([userId])
+  @@schema("members")
+}
+
+model distributionStats {
+  id       BigInt @id @default(autoincrement())
+  track    String
+  subTrack String
+
+  ratingRange0To099     Int
+  ratingRange100To199   Int
+  ratingRange200To299   Int
+  ratingRange300To399   Int
+  ratingRange400To499   Int
+  ratingRange500To599   Int
+  ratingRange600To699   Int
+  ratingRange700To799   Int
+  ratingRange800To899   Int
+  ratingRange900To999   Int
+  ratingRange1000To1099 Int
+  ratingRange1100To1199 Int
+  ratingRange1200To1299 Int
+  ratingRange1300To1399 Int
+  ratingRange1400To1499 Int
+  ratingRange1500To1599 Int
+  ratingRange1600To1699 Int
+  ratingRange1700To1799 Int
+  ratingRange1800To1899 Int
+  ratingRange1900To1999 Int
+  ratingRange2000To2099 Int
+  ratingRange2100To2199 Int
+  ratingRange2200To2299 Int
+  ratingRange2300To2399 Int
+  ratingRange2400To2499 Int
+  ratingRange2500To2599 Int
+  ratingRange2600To2699 Int
+  ratingRange2700To2799 Int
+  ratingRange2800To2899 Int
+  ratingRange2900To2999 Int
+  ratingRange3000To3099 Int
+  ratingRange3100To3199 Int
+  ratingRange3200To3299 Int
+  ratingRange3300To3399 Int
+  ratingRange3400To3499 Int
+  ratingRange3500To3599 Int
+  ratingRange3600To3699 Int
+  ratingRange3700To3799 Int
+  ratingRange3800To3899 Int
+  ratingRange3900To3999 Int
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([track, subTrack])
+  @@schema("members")
+}
+
+model memberFinancial {
+  userId BigInt          @id
+  amount Float
+  status FinancialStatus
+
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@schema("members")
+}
+
+model memberHistoryStats {
+  id          BigInt                          @id @default(autoincrement())
+  userId      BigInt
+  develop     memberDevelopHistoryStats[]
+  dataScience memberDataScienceHistoryStats[]
+  groupId     BigInt?
+  isPrivate   Boolean                         @default(false)
+
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([userId])
+  @@index([groupId])
+  @@schema("members")
+}
+
+model memberDevelopHistoryStats {
+  id             BigInt @id @default(autoincrement())
+  historyStatsId BigInt
+
+  challengeId   BigInt
+  challengeName String
+  ratingDate    DateTime
+  newRating     Int
+  subTrack      String
+  subTrackId    Int
+
+  historyStats memberHistoryStats @relation(fields: [historyStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([historyStatsId])
+  @@schema("members")
+}
+
+model memberDataScienceHistoryStats {
+  id             BigInt @id @default(autoincrement())
+  historyStatsId BigInt
+
+  challengeId   BigInt
+  challengeName String
+  date          DateTime
+  rating        Int
+  placement     Int
+  percentile    Float
+  subTrack      String
+  subTrackId    Int
+
+  historyStats memberHistoryStats @relation(fields: [historyStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([historyStatsId])
+  @@schema("members")
+}
+
+model memberStats {
+  id     BigInt @id @default(autoincrement())
+  userId BigInt
+
+  memberRatingId BigInt?
+  maxRating      memberMaxRating? @relation(fields: [memberRatingId], references: [id], onDelete: NoAction)
+
+  challenges  Int?
+  wins        Int?
+  develop     memberDevelopStats?
+  design      memberDesignStats?
+  dataScience memberDataScienceStats?
+  copilot     memberCopilotStats?
+  groupId     BigInt?
+  isPrivate   Boolean                 @default(false)
+
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([userId])
+  @@schema("members")
+}
+
+model memberCopilotStats {
+  id            BigInt @id @default(autoincrement())
+  memberStatsId BigInt
+
+  contests       Int
+  projects       Int
+  failures       Int
+  reposts        Int
+  activeContests Int
+  activeProjects Int
+  fulfillment    Float
+
+  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([memberStatsId])
+  @@index([memberStatsId])
+  @@schema("members")
+}
+
+model memberDevelopStats {
+  id                   BigInt                   @id @default(autoincrement())
+  memberStatsId        BigInt
+  challenges           BigInt?
+  wins                 BigInt?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+  items                memberDevelopStatsItem[]
+
+  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([memberStatsId])
+  @@index([memberStatsId])
+  @@schema("members")
+}
+
+model memberDevelopStatsItem {
+  id             BigInt @id @default(autoincrement())
+  developStatsId BigInt
+
+  // subTrack name
+  name                 String
+  subTrackId           Int
+  challenges           BigInt?
+  wins                 BigInt?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+  // submission part
+  numInquiries         BigInt?
+  submissions          BigInt?
+  passedScreening      BigInt?
+  passedReview         BigInt?
+  appeals              BigInt?
+  submissionRate       Float?
+  screeningSuccessRate Float?
+  reviewSuccessRate    Float?
+  appealSuccessRate    Float?
+  minScore             Float?
+  maxScore             Float?
+  avgScore             Float?
+  avgPlacement         Float?
+  winPercent           Float?
+
+  // rank part
+  rating             Int?
+  minRating          Int?
+  maxRating          Int?
+  volatility         Int?
+  reliability        Float?
+  overallRank        Int?
+  overallSchoolRank  Int?
+  overallCountryRank Int?
+  overallPercentile  Float?
+  activeRank         Int?
+  activeSchoolRank   Int?
+  activeCountryRank  Int?
+  activePercentile   Float?
+
+  developStats memberDevelopStats @relation(fields: [developStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([developStatsId, name])
+  @@index([developStatsId])
+  @@schema("members")
+}
+
+model memberDesignStats {
+  id                   BigInt                  @id @default(autoincrement())
+  memberStatsId        BigInt
+  challenges           BigInt?
+  wins                 BigInt?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+  items                memberDesignStatsItem[]
+
+  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([memberStatsId])
+  @@index([memberStatsId])
+  @@schema("members")
+}
+
+model memberDesignStatsItem {
+  id            BigInt @id @default(autoincrement())
+  designStatsId BigInt
+
+  // subTrack name
+  name                 String
+  subTrackId           Int
+  challenges           BigInt?
+  wins                 BigInt?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+
+  numInquiries         Int
+  submissions          Int
+  passedScreening      Int
+  avgPlacement         Float
+  screeningSuccessRate Float
+  submissionRate       Float
+  winPercent           Float
+
+  designStats memberDesignStats @relation(fields: [designStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([designStatsId, name])
+  @@index([designStatsId])
+  @@schema("members")
+}
+
+model memberDataScienceStats {
+  id            BigInt @id @default(autoincrement())
+  memberStatsId BigInt @unique
+
+  challenges           BigInt?
+  wins                 BigInt?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+  mostRecentEventName  String?
+
+  srm      memberSrmStats?      @relation(map: "member_srm_stats")
+  marathon memberMarathonStats? @relation(map: "member_marathon_stats")
+
+  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberStatsId])
+  @@schema("members")
+}
+
+model memberSrmStats {
+  id                 BigInt @id @default(autoincrement())
+  dataScienceStatsId BigInt
+
+  challenges           BigInt?
+  wins                 BigInt?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+  mostRecentEventName  String?
+
+  // rank data
+  rating          Int
+  percentile      Float
+  rank            Int
+  countryRank     Int
+  schoolRank      Int
+  volatility      Int
+  maximumRating   Int
+  minimumRating   Int
+  defaultLanguage String
+  competitions    Int
+
+  challengeDetails memberSrmChallengeDetail[]
+  divisions        memberSrmDivisionDetail[]
+
+  dataScienceStats memberDataScienceStats @relation(fields: [dataScienceStatsId], references: [id])
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([dataScienceStatsId])
+  @@index([dataScienceStatsId])
+  @@schema("members")
+}
+
+model memberSrmChallengeDetail {
+  id         BigInt @id @default(autoincrement())
+  srmStatsId BigInt
+
+  challenges       Int
+  failedChallenges Int
+  levelName        String
+
+  srmStats memberSrmStats @relation(fields: [srmStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([srmStatsId])
+  @@schema("members")
+}
+
+model memberSrmDivisionDetail {
+  id         BigInt @id @default(autoincrement())
+  srmStatsId BigInt
+
+  problemsSubmitted Int
+  problemsSysByTest Int
+  problemsFailed    Int
+  levelName         String
+  divisionName      String
+
+  srmStats memberSrmStats @relation(fields: [srmStatsId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([srmStatsId])
+  @@schema("members")
+}
+
+model memberMarathonStats {
+  id                 BigInt @id @default(autoincrement())
+  dataScienceStatsId BigInt
+
+  challenges           BigInt?
+  wins                 BigInt?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+  mostRecentEventName  String?
+
+  // rank data
+  rating            Int
+  percentile        Float
+  rank              Int
+  avgRank           Float
+  avgNumSubmissions Int
+  bestRank          Int
+  countryRank       Int
+  schoolRank        Int
+  volatility        Int
+  maximumRating     Int
+  minimumRating     Int
+  defaultLanguage   String
+  competitions      Int
+  topFiveFinishes   Int
+  topTenFinishes    Int
+
+  dataScienceStats memberDataScienceStats @relation(fields: [dataScienceStatsId], references: [id])
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([dataScienceStatsId])
+  @@index([dataScienceStatsId])
+  @@schema("members")
+}
+
+model memberTraits {
+  id     BigInt @id @default(autoincrement())
+  userId BigInt
+
+  device          memberTraitDevice[]
+  software        memberTraitSoftware[]
+  serviceProvider memberTraitServiceProvider[]
+  subscriptions   String[]
+  hobby           String[]
+  work            memberTraitWork[]
+  education       memberTraitEducation[]
+  basicInfo       memberTraitBasicInfo[]
+  language        memberTraitLanguage[]
+  checklist       memberTraitOnboardChecklist[]
+  personalization memberTraitPersonalization[]
+  community       memberTraitCommunity[]
+
+  member member @relation(fields: [userId], references: [userId])
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([userId])
+  @@index([userId])
+  @@schema("members")
+}
+
+enum DeviceType {
+  Console
+  Desktop
+  Laptop
+  Smartphone
+  Tablet
+  Wearable
+  Other
+
+  @@schema("members")
+}
+
+model memberTraitDevice {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  deviceType      DeviceType
+  manufacturer    String
+  model           String
+  operatingSystem String
+  osVersion       String?
+  osLanguage      String?
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+enum SoftwareType {
+  DeveloperTools
+  Browser
+  Productivity
+  GraphAndDesign
+  Utilities
+
+  @@schema("members")
+}
+
+model memberTraitSoftware {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  softwareType SoftwareType
+  name         String
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+enum ServiceProviderType {
+  InternetServiceProvider
+  MobileCarrier
+  Television
+  FinancialInstitution
+  Other
+
+  @@schema("members")
+}
+
+model memberTraitServiceProvider {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  type ServiceProviderType
+  name String
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+enum WorkIndustryType {
+  Banking
+  ConsumerGoods
+  Energy
+  Entertainment
+  HealthCare
+  Pharma
+  PublicSector
+  TechAndTechnologyService
+  Telecoms
+  TravelAndHospitality
+
+  @@schema("members")
+}
+
+model memberTraitWork {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  industry    WorkIndustryType?
+  companyName String
+  position    String
+  startDate   DateTime?
+  endDate     DateTime?
+  working     Boolean?
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+model memberTraitEducation {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  collegeName String
+  degree      String
+  endYear     Int?
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+model memberTraitBasicInfo {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  userId                    BigInt
+  country                   String
+  primaryInterestInTopcoder String
+  tshirtSize                String?
+  gender                    String?
+  shortBio                  String
+  birthDate                 DateTime?
+  currentLocation           String?
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([memberTraitId])
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+model memberTraitLanguage {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  language     String
+  spokenLevel  String?
+  writtenLevel String?
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+// This model is used to send messages when user login. When profile not complete, it will show up.
+model memberTraitOnboardChecklist {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  listItemType String // Like 'profile_completed'
+  date         DateTime
+  message      String
+  status       String
+  skip         Boolean?
+  metadata     Json?
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+model memberTraitPersonalization {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  key   String?
+  value Json?
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+model memberTraitCommunity {
+  id BigInt @id @default(autoincrement())
+
+  memberTraitId BigInt
+
+  communityName String
+  status        Boolean
+
+  memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@index([memberTraitId])
+  @@schema("members")
+}
+
+// skill category
+// Standardized Skills models (mapped to standardized-skills-api tables)
+model SkillCategory {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  skills      Skill[]
+
+  @@unique([name], map: "uniq_category_name")
+  @@map("skill_category")
+  @@schema("skills")
+}
+
+model Skill {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  categoryId  String?   @map("category_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  category   SkillCategory? @relation(fields: [categoryId], references: [id])
+  userSkills UserSkill[]
+
+  @@unique([name], map: "uniq_skill_name")
+  @@index([categoryId], map: "fki_fk_skill_category")
+  @@map("skill")
+  @@schema("skills")
+}
+
+model UserSkillLevel {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  userSkills  UserSkill[]
+
+  @@unique([name], map: "uniq_skill_level_name")
+  @@map("user_skill_level")
+  @@schema("skills")
+}
+
+model UserSkillDisplayMode {
+  id          String      @id
+  name        String
+  description String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  userSkills  UserSkill[]
+
+  @@unique([name], map: "user_skill_display_mode_name_key")
+  @@map("user_skill_display_mode")
+  @@schema("skills")
+}
+
+model UserSkill {
+  id                     String   @id @default(uuid())
+  userId                 Int      @map("user_id")
+  skillId                String   @map("skill_id")
+  userSkillLevelId       String   @map("user_skill_level_id")
+  userSkillDisplayModeId String   @map("user_skill_display_mode_id")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  skill                Skill                @relation(fields: [skillId], references: [id])
+  userSkillLevel       UserSkillLevel       @relation(fields: [userSkillLevelId], references: [id])
+  userSkillDisplayMode UserSkillDisplayMode @relation(fields: [userSkillDisplayModeId], references: [id])
+
+  @@unique([userId, skillId, userSkillLevelId], map: "uniq_user_skill_type")
+  @@index([skillId], map: "fki_fk_skill")
+  @@index([userSkillLevelId], map: "fki_fk_user_skill_level")
+  @@index([userSkillDisplayModeId], map: "fki_fk_user_skill_display_mode")
+  @@map("user_skill")
+  @@schema("skills")
+}

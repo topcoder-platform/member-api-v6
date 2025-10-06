@@ -1,4 +1,5 @@
-const { PrismaClient } = require('@prisma/client')
+// Use the package-scoped generated client to avoid cross-package overrides in the monorepo
+const { PrismaClient } = require('../../prisma/generated/client')
 
 // Following Prisma best practice to create one instance of PrismaClient
 const prisma = new PrismaClient({

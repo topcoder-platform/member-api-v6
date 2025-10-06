@@ -1496,6 +1496,63 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/skills/verify':
+    post:
+      tags:
+        - Statistics
+      description: >
+        Bulk verify a set of skills for the member. Ensures each provided skill is associated with the member and sets the skill level to `verified`.
+        Existing levels for those skills are replaced by `verified`.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              skillIds:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+                description: List of skill IDs to verify
+            required:
+              - skillIds
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberSkills'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
     post:
       tags:
         - Statistics

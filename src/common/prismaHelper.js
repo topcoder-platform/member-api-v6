@@ -73,16 +73,38 @@ function buildMemberSkills (skillList) {
   if (!skillList || skillList.length === 0) {
     return []
   }
-  return _.map(skillList, item => {
-    const ret = _.pick(item.skill, ['id', 'name'])
-    ret.category = _.pick(item.skill.category, ['id', 'name'])
-    if (item.displayMode) {
-      ret.displayMode = _.pick(item.displayMode, ['id', 'name'])
+  // Detect standardized shape (UserSkill records) vs legacy (memberSkill with nested levels)
+  const isStandardized = !!_.get(skillList, '[0].userSkillLevel') || !!_.get(skillList, '[0].userSkillDisplayMode')
+
+  if (!isStandardized) {
+    return _.map(skillList, item => {
+      const ret = _.pick(item.skill, ['id', 'name'])
+      ret.category = _.pick(item.skill.category, ['id', 'name'])
+      if (item.displayMode) {
+        ret.displayMode = _.pick(item.displayMode, ['id', 'name'])
+      }
+      if (item.levels && item.levels.length > 0) {
+        ret.levels = _.map(item.levels, lvl => _.pick(lvl.skillLevel, ['id', 'name', 'description']))
+      }
+      return ret
+    })
+  }
+
+  // Standardized: one UserSkill per (userId, skillId, level). Group by skill and aggregate levels
+  const bySkill = _.groupBy(skillList, (i) => i.skill.id)
+  return _.map(bySkill, (items) => {
+    const first = items[0]
+    const ret = _.pick(first.skill, ['id', 'name'])
+    ret.category = _.pick(first.skill.category, ['id', 'name'])
+    if (first.userSkillDisplayMode) {
+      ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])
     }
-    // set levels
-    if (item.levels && item.levels.length > 0) {
-      ret.levels = _.map(item.levels,
-        lvl => _.pick(lvl.skillLevel, ['id', 'name', 'description']))
+    const levels = _.uniqBy(
+      _.map(items, (i) => _.pick(i.userSkillLevel, ['id', 'name', 'description'])),
+      'id'
+    )
+    if (levels.length > 0) {
+      ret.levels = levels
     }
     return ret
   })
@@ -329,10 +351,11 @@ const statsIncludeParams = {
 }
 
 // include parameters used to get all member skills
+// Standardized skills schema: userSkill has singular level and display mode
 const skillsIncludeParams = {
-  levels: { include: { skillLevel: true } },
+  userSkillLevel: true,
   skill: { include: { category: true } },
-  displayMode: true
+  userSkillDisplayMode: true
 }
 
 /**

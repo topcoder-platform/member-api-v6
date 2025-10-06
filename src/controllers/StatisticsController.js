@@ -103,6 +103,16 @@ async function partiallyUpdateMemberSkills (req, res) {
   res.send(result)
 }
 
+/**
+ * Verify a set of member skills (bulk) to 'verified' level
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function verifyMemberSkills (req, res) {
+  const result = await service.verifyMemberSkills(req.authUser, req.params.handle, req.body)
+  res.send(result)
+}
+
 module.exports = {
   getDistribution,
   getHistoryStats,
@@ -113,5 +123,6 @@ module.exports = {
   partiallyUpdateMemberStats,
   getMemberSkills,
   createMemberSkills,
-  partiallyUpdateMemberSkills
+  partiallyUpdateMemberSkills,
+  verifyMemberSkills
 }

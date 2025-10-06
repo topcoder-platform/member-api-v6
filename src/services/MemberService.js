@@ -88,13 +88,12 @@ function omitMemberAttributes (currentUser, mb) {
  * @param {BigInt} userId prisma BigInt userId
  */
 async function getMemberSkills (userId) {
-  const skillList = await prisma.memberSkill.findMany({
+  const skillList = await prisma.userSkill.findMany({
     where: {
-      userId: userId
+      userId: helper.bigIntToNumber(userId)
     },
     include: prismaHelper.skillsIncludeParams
   })
-  // convert to response format
   return prismaHelper.buildMemberSkills(skillList)
 }
 

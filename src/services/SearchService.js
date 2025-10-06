@@ -5,7 +5,8 @@
 const _ = require('lodash')
 const Joi = require('joi')
 const config = require('config')
-const Prisma = require('@prisma/client')
+// Use the same generated Prisma client helpers as the prisma instance
+const { Prisma } = require('../../prisma/generated/client')
 const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
@@ -174,8 +175,8 @@ async function addSkills (results) {
   }
   const userIds = _.map(results, 'userId')
   // get member skills
-  const allSkillList = await prisma.memberSkill.findMany({
-    where: { userId: { in: userIds } },
+  const allSkillList = await prisma.userSkill.findMany({
+    where: { userId: { in: _.map(userIds, helper.bigIntToNumber) } },
     include: prismaHelper.skillsIncludeParams
   })
   // group by user id
@@ -215,63 +216,8 @@ async function addSkillScore (results, query) {
         score = score + 0.5
       }
     }
-    item.skillScore = Math.round(score / query.skillIds.length * 100) / 100
-
-    if (item.availableForGigs == null) {
-      // Deduct 1% if availableForGigs is not set on the user.
-      item.skillScore = item.skillScore - 0.01
-    }
-
-    if (item.description == null || item.description === '') {
-      // Deduct 1% if the description is not set on the user.
-      item.skillScore = item.skillScore - 0.01
-    }
-
-    if (item.photoURL == null || item.photoURL === '') {
-      // Deduct 4% if the photoURL is not set on the user.
-      item.skillScore = item.skillScore - 0.04
-    }
-
-    // Use the pre-calculated skillScoreDeduction on the user profile
-    if (item.skillScoreDeduction != null) {
-      item.skillScore = item.skillScore + item.skillScoreDeduction
-    } else {
-      // The default skill score deduction is -4%, if it's not set on the user.
-      item.skillScore = item.skillScore - 0.04
-    }
-
-    // 1696118400000 is the epoch value for Oct 1, 2023, which is when we deployed the change to set the last login date when a user logs in
-    // So, we use this as the baseline for the user if they don't have a last login date.
-
-    let lastLoginDate = 1696118400000
-    if (item.lastLoginDate) {
-      lastLoginDate = item.lastLoginDate
-    }
-
-    let loginDiff = Date.now() - lastLoginDate
-    // For diff calculation (30 days, 24 hours, 60 minutes, 60 seconds, 1000 milliseconds)
-    let monthLength = 30 * 24 * 60 * 60 * 1000
-
-    // If logged in > 5 month ago
-    if (loginDiff > (5 * monthLength)) {
-      item.skillScore = item.skillScore - 0.5
-    } else if (loginDiff > (4 * monthLength)) {
-      // Logged in more than 4 months ago, but less than 5
-      item.skillScore = item.skillScore - 0.4
-    } else if (loginDiff > (3 * monthLength)) {
-      // Logged in more than 3 months ago, but less than 4
-      item.skillScore = item.skillScore - 0.3
-    } else if (loginDiff > (2 * monthLength)) {
-      // Logged in more than 2 months ago, but less than 3
-      item.skillScore = item.skillScore - 0.2
-    } else if (loginDiff > (1 * monthLength)) {
-      // Logged in more than 1 month ago, but less than 2
-      item.skillScore = item.skillScore - 0.1
-    }
-    if (item.skillScore < 0) {
-      item.skillScore = 0
-    }
-    item.skillScore = Math.round(item.skillScore * 100) / 100
+    // Final score is percentage match to searched skills
+    item.skillScore = Math.round((score / query.skillIds.length) * 100) / 100
     // Default names and handle appearance
     // https://topcoder.atlassian.net/browse/MP-325
     if (!item.namesAndHandleAppearance) {
@@ -291,20 +237,9 @@ function handleSearchOrder (results, query) {
   return results
 }
 
-// The skill search order, which has a secondary sort of the number of
-// Topcoder-verified skills, in descending order (where level.name===verified)
 function skillSearchOrder (results, query) {
-  results = _.orderBy(results, [query.sortBy, function (member) {
-    const challengeWinSkills = _.filter(member.skills,
-      function (skill) {
-        skill.levels.forEach(level => {
-          if (level.name === 'verified') {
-            return true
-          }
-        })
-      })
-    return challengeWinSkills.length
-  }], [query.sortOrder, 'desc'])
+  // Order strictly by the computed percentage match (skillScore)
+  results = _.orderBy(results, [query.sortBy], [query.sortOrder])
   return results
 }
 
@@ -376,11 +311,11 @@ async function searchMemberIdWithSkillIds (skillIds) {
   }
   const members = await prisma.$queryRaw`
     SELECT m."userId"
-    FROM "member" m
-    JOIN "memberSkill" ms ON m."userId" = ms."userId"
-    WHERE ms."skillId"::text IN (${Prisma.join(skillIds)})
+    FROM "members"."member" m
+    JOIN "skills"."user_skill" us ON m."userId" = us."user_id"
+    WHERE us."skill_id"::text IN (${Prisma.join(skillIds)})
     GROUP BY m."userId"
-    HAVING COUNT(DISTINCT ms."skillId") = ${skillIds.length}
+    HAVING COUNT(DISTINCT us."skill_id") = ${skillIds.length}
   `
   return _.map(members, 'userId')
 }

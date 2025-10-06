@@ -290,13 +290,39 @@ function buildTraitPrismaData (data, operatorId, result) {
           }
         }
       } else {
-        _.forEach(item.traits.data, t => {
+        // Normalize payloads for known traits before persisting
+        let payload = item.traits && Array.isArray(item.traits.data) ? item.traits.data : []
+
+        if (traitId === 'work') {
+          // Map legacy UI keys to Prisma model fields
+          payload = _.map(payload, (raw) => {
+            const t = { ...raw }
+            // company -> companyName
+            if (t.company && !t.companyName) {
+              t.companyName = t.company
+            }
+            // timePeriodFrom/To -> startDate/endDate
+            if (t.timePeriodFrom && !t.startDate) {
+              t.startDate = new Date(t.timePeriodFrom)
+            }
+            if (t.timePeriodTo && !t.endDate) {
+              t.endDate = new Date(t.timePeriodTo)
+            }
+            // Remove unknown keys that Prisma model does not accept
+            delete t.company
+            delete t.timePeriodFrom
+            delete t.timePeriodTo
+            return t
+          })
+        }
+
+        _.forEach(payload, t => {
           t.createdBy = operatorId
           t.updatedBy = operatorId
         })
         prismaData[modelKey] = {
           createMany: {
-            data: item.traits.data
+            data: payload
           }
         }
       }

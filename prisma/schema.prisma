@@ -1,10 +1,13 @@
 generator client {
   provider = "prisma-client-js"
+  // Generate a package-scoped client to avoid monorepo conflicts
+  output   = "./generated/client"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["members", "skills"]
 }
 
 enum MemberStatus {
@@ -14,6 +17,7 @@ enum MemberStatus {
   INACTIVE_DUPLICATE_ACCOUNT
   INACTIVE_IRREGULAR_ACCOUNT
   UNKNOWN
+  @@schema("members")
 }
 
 enum FinancialStatus {
@@ -21,6 +25,7 @@ enum FinancialStatus {
   PAID
   FAILED
   CANCELLED
+  @@schema("members")
 }
 
 model member {
@@ -60,7 +65,6 @@ model member {
   financial memberFinancial?
   historyStats memberHistoryStats[]
   memberStats memberStats[]
-  memberSkills memberSkill[]
   memberTraits memberTraits?
 
   createdAt   DateTime @default(now())
@@ -70,6 +74,7 @@ model member {
 
   @@index([handleLower])
   @@index([email])
+  @@schema("members")
 }
 
 model memberAddress {
@@ -90,6 +95,7 @@ model memberAddress {
   updatedBy   String?
 
   @@index([userId])
+  @@schema("members")
 }
 
 model memberMaxRating {
@@ -110,6 +116,7 @@ model memberMaxRating {
 
   @@unique([userId])
   @@index([userId])
+  @@schema("members")
 }
 
 
@@ -166,6 +173,7 @@ model distributionStats {
   updatedBy   String?
 
   @@unique([track, subTrack])
+  @@schema("members")
 }
 
 model memberFinancial {
@@ -179,6 +187,7 @@ model memberFinancial {
   createdBy   String
   updatedAt   DateTime? @updatedAt
   updatedBy   String?
+  @@schema("members")
 }
 
 
@@ -199,6 +208,7 @@ model memberHistoryStats {
 
   @@index([userId])
   @@index([groupId])
+  @@schema("members")
 }
 
 model memberDevelopHistoryStats {
@@ -220,6 +230,7 @@ model memberDevelopHistoryStats {
   updatedBy   String?
 
   @@index([historyStatsId])
+  @@schema("members")
 }
 
 model memberDataScienceHistoryStats {
@@ -243,6 +254,7 @@ model memberDataScienceHistoryStats {
   updatedBy   String?
 
   @@index([historyStatsId])
+  @@schema("members")
 }
 
 model memberStats {
@@ -269,6 +281,7 @@ model memberStats {
   updatedBy   String?
 
   @@index([userId])
+  @@schema("members")
 }
 
 model memberCopilotStats {
@@ -292,6 +305,7 @@ model memberCopilotStats {
 
   @@index([memberStatsId])
   @@unique([memberStatsId])
+  @@schema("members")
 }
 
 model memberDevelopStats {
@@ -312,6 +326,7 @@ model memberDevelopStats {
 
   @@index([memberStatsId])
   @@unique([memberStatsId])
+  @@schema("members")
 }
 
 model memberDevelopStatsItem {
@@ -365,6 +380,7 @@ model memberDevelopStatsItem {
 
   @@index([developStatsId])
   @@unique([developStatsId, name])
+  @@schema("members")
 }
 
 model memberDesignStats {
@@ -385,6 +401,7 @@ model memberDesignStats {
 
   @@index([memberStatsId])
   @@unique([memberStatsId])
+  @@schema("members")
 }
 
 model memberDesignStatsItem {
@@ -416,6 +433,7 @@ model memberDesignStatsItem {
 
   @@index([designStatsId])
   @@unique([designStatsId, name])
+  @@schema("members")
 }
 
 model memberDataScienceStats {
@@ -439,6 +457,7 @@ model memberDataScienceStats {
   updatedBy   String?
 
   @@index([memberStatsId])
+  @@schema("members")
 }
 
 model memberSrmStats {
@@ -475,6 +494,7 @@ model memberSrmStats {
 
   @@index([dataScienceStatsId])
   @@unique([dataScienceStatsId])
+  @@schema("members")
 }
 
 model memberSrmChallengeDetail {
@@ -493,6 +513,7 @@ model memberSrmChallengeDetail {
   updatedBy   String?
 
   @@index([srmStatsId])
+  @@schema("members")
 }
 
 model memberSrmDivisionDetail {
@@ -513,6 +534,7 @@ model memberSrmDivisionDetail {
   updatedBy   String?
 
   @@index([srmStatsId])
+  @@schema("members")
 }
 
 model memberMarathonStats {
@@ -551,6 +573,7 @@ model memberMarathonStats {
 
   @@index([dataScienceStatsId])
   @@unique([dataScienceStatsId])
+  @@schema("members")
 }
 
 model memberTraits {
@@ -579,6 +602,7 @@ model memberTraits {
 
   @@unique([userId])
   @@index([userId])
+  @@schema("members")
 }
 
 enum DeviceType {
@@ -589,6 +613,7 @@ enum DeviceType {
   Tablet
   Wearable
   Other
+  @@schema("members")
 }
 
 model memberTraitDevice {
@@ -611,6 +636,7 @@ model memberTraitDevice {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 enum SoftwareType {
@@ -619,6 +645,7 @@ enum SoftwareType {
   Productivity
   GraphAndDesign
   Utilities
+  @@schema("members")
 }
 
 model memberTraitSoftware {
@@ -637,6 +664,7 @@ model memberTraitSoftware {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 enum ServiceProviderType {
@@ -645,6 +673,7 @@ enum ServiceProviderType {
   Television
   FinancialInstitution
   Other
+  @@schema("members")
 }
 
 model memberTraitServiceProvider {
@@ -663,6 +692,7 @@ model memberTraitServiceProvider {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 enum WorkIndustryType {
@@ -676,6 +706,7 @@ enum WorkIndustryType {
   TechAndTechnologyService
   Telecoms
   TravelAndHospitality
+  @@schema("members")
 }
 
 model memberTraitWork {
@@ -698,6 +729,7 @@ model memberTraitWork {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitEducation {
@@ -717,6 +749,7 @@ model memberTraitEducation {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitBasicInfo {
@@ -742,6 +775,7 @@ model memberTraitBasicInfo {
 
   @@unique([memberTraitId])
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 
@@ -762,6 +796,7 @@ model memberTraitLanguage {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 // This model is used to send messages when user login. When profile not complete, it will show up.
@@ -785,6 +820,7 @@ model memberTraitOnboardChecklist {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitPersonalization {
@@ -803,6 +839,7 @@ model memberTraitPersonalization {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitCommunity {
@@ -821,101 +858,85 @@ model memberTraitCommunity {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 // skill category
-model skillCategory {
-  id String @id @db.Uuid
-  name  String
+// Standardized Skills models (mapped to standardized-skills-api tables)
+model SkillCategory {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  skills      Skill[]
 
-  skills skill[] // virtual relation
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
+  @@map("skill_category")
+  @@schema("skills")
+  @@unique([name], map: "uniq_category_name")
 }
 
-// skill
-model skill {
-  id String @id @db.Uuid
-  name  String
-  categoryId  String @db.Uuid
+model Skill {
+  id          String        @id @default(uuid())
+  name        String
+  description String?
+  categoryId  String?       @map("category_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  deletedAt   DateTime?     @map("deleted_at")
 
-  category skillCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  category    SkillCategory? @relation(fields: [categoryId], references: [id])
+  userSkills  UserSkill[]
 
-  memberSkills memberSkill[]
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
+  @@map("skill")
+  @@schema("skills")
+  @@index([categoryId], map: "fki_fk_skill_category")
+  @@unique([name], map: "uniq_skill_name")
 }
 
-// display mode. Including name "principal" and "additional"
-model displayMode {
-  id String @id @db.Uuid
-  name  String
+model UserSkillLevel {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  userSkills  UserSkill[]
 
-  memberSkills memberSkill[]
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
+  @@map("user_skill_level")
+  @@schema("skills")
+  @@unique([name], map: "uniq_skill_level_name")
 }
 
-// skill level. Names are "verified" and "self-declared"
-model skillLevel {
-  id String @id @db.Uuid
-  name  String
-  description String
+model UserSkillDisplayMode {
+  id          String      @id
+  name        String
+  description String?
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  userSkills  UserSkill[]
 
-  levels memberSkillLevel[]
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
+  @@map("user_skill_display_mode")
+  @@schema("skills")
+  @@unique([name], map: "user_skill_display_mode_name_key")
 }
 
-// many to many relations on member and skill
-model memberSkill {
-  id String @id @db.Uuid
-  userId  BigInt
-  skillId String @db.Uuid
-  displayModeId String? @db.Uuid
+model UserSkill {
+  id                     String               @id @default(uuid())
+  userId                 Int                  @map("user_id")
+  skillId                String               @map("skill_id")
+  userSkillLevelId       String               @map("user_skill_level_id")
+  userSkillDisplayModeId String               @map("user_skill_display_mode_id")
+  createdAt              DateTime             @default(now()) @map("created_at")
+  updatedAt              DateTime             @updatedAt @map("updated_at")
 
-  displayMode displayMode? @relation(fields: [displayModeId], references: [id], onDelete: NoAction)
+  skill                  Skill                @relation(fields: [skillId], references: [id])
+  userSkillLevel         UserSkillLevel       @relation(fields: [userSkillLevelId], references: [id])
+  userSkillDisplayMode   UserSkillDisplayMode @relation(fields: [userSkillDisplayModeId], references: [id])
 
-  levels memberSkillLevel[]
-
-  skill skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
-  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-
-  @@unique([userId, skillId])
-  @@index([userId])
-  @@index([skillId])
+  @@map("user_skill")
+  @@schema("skills")
+  @@index([skillId], map: "fki_fk_skill")
+  @@index([userSkillLevelId], map: "fki_fk_user_skill_level")
+  @@index([userSkillDisplayModeId], map: "fki_fk_user_skill_display_mode")
+  @@unique([userId, skillId, userSkillLevelId], map: "uniq_user_skill_type")
 }
-
-// many to many relations on memberSkill and skill level
-model memberSkillLevel {
-  memberSkillId String @db.Uuid
-  skillLevelId String @db.Uuid
-
-  memberSkill memberSkill @relation(fields: [memberSkillId], references: [id], onDelete: Cascade)
-  skillLevel skillLevel @relation(fields: [skillLevelId], references: [id], onDelete: NoAction)
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-
-  @@id([memberSkillId, skillLevelId])
-}
-
