@@ -448,39 +448,54 @@ async function updateTraits (currentUser, handle, data) {
   // get existing traits
   const queryResult = await queryTraits(member.userId, TRAIT_IDS)
   const existingTraits = queryResult.data
-  // check if any trait is not found
-  _.forEach(data, (item) => {
-    if (!_.find(existingTraits, (existing) => existing.traitId === item.traitId)) {
-      throw new errors.NotFoundError(`The trait id ${item.traitId} is not found for the member.`)
-    }
-  })
+  // allow upserting traits: if a trait does not exist yet for the member,
+  // create it instead of throwing a NotFound error
 
   const result = []
   const operatorId = String(currentUser.userId || config.TC_WEBSERVICE_USERID)
   const prismaData = buildTraitPrismaData(data, operatorId, result)
-  // open transaction and update data
-  await prisma.$transaction(async (tx) => {
-    // clear existing traits
-    const traitIdList = _.map(data, item => item.traitId)
-    // map trait ids to relational models and drop non-relational ones (e.g., subscription, hobby)
-    const models = _.uniq(_.compact(_.map(traitIdList, t => traitIdModelMap[t])))
-    // clear models data
-    if (queryResult.id) {
-      await Promise.all(_.map(models, m => tx[m].deleteMany({
-        where: { memberTraitId: queryResult.id }
-      })))
-    }
-    // create new data
-    await tx.memberTraits.update({
-      where: { userId: member.userId },
-      data: prismaData
+  // open transaction and update or create data
+  if (queryResult.id) {
+    await prisma.$transaction(async (tx) => {
+      // clear existing traits for the specific models we are updating
+      const traitIdList = _.map(data, item => item.traitId)
+      // map trait ids to relational models and drop non-relational ones (e.g., subscription, hobby)
+      const models = _.uniq(_.compact(_.map(traitIdList, t => traitIdModelMap[t])))
+      // clear models data
+      if (models.length > 0) {
+        await Promise.all(_.map(models, m => tx[m].deleteMany({
+          where: { memberTraitId: queryResult.id }
+        })))
+      }
+      // update traits data
+      await tx.memberTraits.update({
+        where: { userId: member.userId },
+        data: prismaData
+      })
     })
-  })
+  } else {
+    // No traits record yet for this member: create it with the provided traits
+    const createData = { ...prismaData, userId: member.userId, createdBy: operatorId }
+    await prisma.memberTraits.create({ data: createData })
+  }
 
-  // update traits
+  // post bus events: created for new traits, updated for existing ones
+  const existingIds = new Set((existingTraits || []).map(t => t.traitId))
   for (let r of result) {
-    // post bus event
-    await helper.postBusEvent(constants.TOPICS.MemberTraitUpdated, r)
+    if (!existingIds.has(r.traitId)) {
+      const trait = { ...r }
+      trait.userId = helper.bigIntToNumber(member.userId)
+      trait.createdBy = Number(currentUser.userId || config.TC_WEBSERVICE_USERID)
+      if (trait.traits) {
+        trait.traits = { traitId: trait.traitId, data: trait.traits.data }
+      } else {
+        trait.traits = { traitId: trait.traitId, data: [] }
+      }
+      trait.createdAt = new Date().getTime()
+      await helper.postBusEvent(constants.TOPICS.MemberTraitCreated, trait)
+    } else {
+      await helper.postBusEvent(constants.TOPICS.MemberTraitUpdated, r)
+    }
   }
   return result
 }
