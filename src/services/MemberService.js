@@ -346,6 +346,8 @@ async function updateMember (currentUser, handle, query, data) {
       await tx.memberAddress.createMany({
         data: _.map(data.addresses, t => ({
           ...t,
+          // default address type to HOME if not provided
+          type: t.type || 'HOME',
           userId: member.userId,
           createdBy: operatorId
         }))

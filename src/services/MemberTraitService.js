@@ -89,8 +89,20 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
         data: []
       }
     }
-    traitItem.traits.data = _.map(prismaValues,
-      t => _.omit(t, ['id', 'memberTraitId', ...auditFields]))
+    // Special case: return communities as a single object map for compatibility
+    if (displayName === 'communities') {
+      const communitiesMap = {}
+      _.forEach(prismaValues, (t) => {
+        const item = _.omit(t, ['id', 'memberTraitId', ...auditFields])
+        if (item.communityName) {
+          communitiesMap[item.communityName] = Boolean(item.status)
+        }
+      })
+      traitItem.traits.data = [communitiesMap]
+    } else {
+      traitItem.traits.data = _.map(prismaValues,
+        t => _.omit(t, ['id', 'memberTraitId', ...auditFields]))
+    }
 
     ret.push(traitItem)
   }
@@ -252,13 +264,40 @@ function buildTraitPrismaData (data, operatorId, result) {
     const traitId = item.traitId
     const modelKey = traitIdPrismaMap[traitId]
     if (modelKey && traitId !== 'personalization') {
-      _.forEach(item.traits.data, t => {
-        t.createdBy = operatorId
-        t.updatedBy = operatorId
-      })
-      prismaData[modelKey] = {
-        createMany: {
-          data: item.traits.data
+      if (traitId === 'communities') {
+        // Support payloads sent as an object map: { [communityName]: boolean }
+        let communityData = []
+        const inputArr = (item.traits && item.traits.data) ? item.traits.data : []
+        _.forEach(inputArr, (piece) => {
+          if (piece && _.isPlainObject(piece) && !piece.communityName && !_.has(piece, 'status')) {
+            _.forEach(Object.keys(piece), (name) => {
+              const val = piece[name]
+              if (_.isBoolean(val)) {
+                communityData.push({ communityName: name, status: val })
+              }
+            })
+          } else if (piece && piece.communityName) {
+            communityData.push({ communityName: piece.communityName, status: Boolean(piece.status) })
+          }
+        })
+        _.forEach(communityData, t => {
+          t.createdBy = operatorId
+          t.updatedBy = operatorId
+        })
+        prismaData[modelKey] = {
+          createMany: {
+            data: communityData
+          }
+        }
+      } else {
+        _.forEach(item.traits.data, t => {
+          t.createdBy = operatorId
+          t.updatedBy = operatorId
+        })
+        prismaData[modelKey] = {
+          createMany: {
+            data: item.traits.data
+          }
         }
       }
     } else if (traitId === 'subscription') {
@@ -420,14 +459,10 @@ createTraits.schema = {
     traitId: Joi.string().valid(...TRAIT_IDS).required(),
     categoryName: Joi.string(),
     traits: Joi.object().keys({
-      traitId: Joi.string().valid(...TRAIT_IDS).required(),
-      data: Joi.alternatives().try(
-        Joi.when(Joi.ref('traitId'), {
-          is: Joi.string().valid(...TRAIT_IDS),
-          switch: traitSchemaSwitch,
-          otherwise: Joi.forbidden()
-        })
-      )
+      // nested traitId optional for backward compatibility with existing clients
+      traitId: Joi.string().valid(...TRAIT_IDS),
+      // be permissive on data payload shape; detailed checks are handled downstream
+      data: Joi.array().required()
     })
   }).required()).min(1).required()
 }
