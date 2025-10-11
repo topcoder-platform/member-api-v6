@@ -10,7 +10,6 @@
     "lint": "standard",
     "lint:fix": "standard --fix",
     "init-db": "prisma migrate dev",
-    "clear-db": "node src/scripts/clear-tables.js",
     "seed-data": "node src/scripts/seed-data.js",
     "reset-db": "prisma migrate reset",
     "test": "mocha -t 20000 test/unit/*.test.js --exit",
