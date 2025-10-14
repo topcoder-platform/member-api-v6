@@ -5,13 +5,13 @@
 const _ = require('lodash')
 const Joi = require('joi')
 const config = require('config')
-// Use the same generated Prisma client helpers as the prisma instance
-const { Prisma } = require('../../prisma/generated/client')
 const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
 const prismaHelper = require('../common/prismaHelper')
-const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const prisma = prismaManager.getClient()
+const skillsPrisma = prismaManager.getSkillsClient()
 
 const stringifyForLog = (value) => {
   try {
@@ -45,6 +45,74 @@ const MEMBER_AUTOCOMPLETE_FIELDS = ['userId', 'handle', 'handleLower',
 var MEMBER_STATS_FIELDS = ['userId', 'handle', 'handleLower', 'maxRating',
   'numberOfChallengesWon', 'numberOfChallengesPlaced',
   'challenges', 'wins', 'DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT']
+
+const SKILL_LEVEL_WEIGHTS = {
+  verified: 1.0,
+  'self-declared': 0.5
+}
+
+const DEFAULT_SKILL_SCORE_DEDUCTION = -0.04
+
+const monthsAgo = (n) => {
+  const date = new Date()
+  date.setMonth(date.getMonth() - n)
+  return date
+}
+
+function lastLoginPenalty (lastLoginDate) {
+  if (!lastLoginDate) {
+    return 0.05
+  }
+  const loginDate = new Date(lastLoginDate)
+  if (loginDate < monthsAgo(5)) {
+    return 0.05
+  }
+  if (loginDate < monthsAgo(4)) {
+    return 0.04
+  }
+  if (loginDate < monthsAgo(3)) {
+    return 0.03
+  }
+  if (loginDate < monthsAgo(2)) {
+    return 0.02
+  }
+  if (loginDate < monthsAgo(1)) {
+    return 0.01
+  }
+  return 0
+}
+
+function levelWeight (levelName) {
+  if (!levelName) {
+    return 0
+  }
+  return SKILL_LEVEL_WEIGHTS[levelName.toLowerCase()] || 0
+}
+
+function computeSkillScoreForCandidate (candidate, skillsByUser, skillIds) {
+  const userIdNumber = helper.bigIntToNumber(candidate.userId)
+  const candidateSkills = skillsByUser[userIdNumber] || []
+
+  let baseSum = 0
+  for (const skillId of skillIds) {
+    const matches = candidateSkills.filter(s => String(s.skillId) === String(skillId))
+    if (!matches.length) {
+      continue
+    }
+    const best = _.max(matches.map(m => levelWeight(_.get(m, 'userSkillLevel.name')))) || 0
+    baseSum += best
+  }
+
+  const averageWeight = baseSum / skillIds.length
+  const deduction = candidate.skillScoreDeduction != null ? candidate.skillScoreDeduction : DEFAULT_SKILL_SCORE_DEDUCTION
+  const availabilityPenalty = candidate.availableForGigs == null ? 0.01 : 0
+  const descriptionPenalty = candidate.description == null ? 0.01 : 0
+  const photoPenalty = candidate.photoURL == null ? 0.04 : 0
+  const loginPenalty = lastLoginPenalty(candidate.lastLoginDate)
+  const scoreRaw = averageWeight + deduction - availabilityPenalty - descriptionPenalty - photoPenalty - loginPenalty
+
+  return Math.max(Number(scoreRaw.toFixed(2)), 0)
+}
 
 function omitMemberAttributes (currentUser, query, allowedValues) {
   // validate and parse fields param
@@ -175,7 +243,7 @@ async function addSkills (results) {
   }
   const userIds = _.map(results, 'userId')
   // get member skills
-  const allSkillList = await prisma.userSkill.findMany({
+  const allSkillList = await skillsPrisma.userSkill.findMany({
     where: { userId: { in: _.map(userIds, helper.bigIntToNumber) } },
     include: prismaHelper.skillsIncludeParams
   })
@@ -191,12 +259,6 @@ async function addSkills (results) {
 
 async function addSkillScore (results, query) {
   // Pull out availableForGigs to add to the search results, for talent search
-  const monthsAgo = (n) => {
-    const d = new Date()
-    d.setMonth(d.getMonth() - n)
-    return d
-  }
-
   const resultsWithScores = _.map(results, function (item) {
     if (!item.skills) {
       item.skillScore = 0
@@ -301,7 +363,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
 
   let results = []
   if (skillSearch && query.sortBy === 'skillScore') {
-    // For skill searches, compute scores and sort/paginate at the DB layer
+    // For skill searches, compute scores and sort in memory using the skills database
     const memberIds = _.get(prismaFilter, 'where.userId.in', []) || []
     const skillIds = query.skillIds || []
 
@@ -309,105 +371,72 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
       return { total: 0, page: query.page, perPage: query.perPage, result: [] }
     }
 
-    // Compute total after excluding unavailable-for-gigs members (false)
-    const totalRows = await prisma.$queryRaw`
-      SELECT COUNT(*)::int AS total
-      FROM "members"."member" m
-      WHERE m."userId" IN (${Prisma.join(memberIds)})
-        AND (m."availableForGigs" IS NULL OR m."availableForGigs" = TRUE)
-    `
-    total = _.get(totalRows, '[0].total', 0) || 0
+    const candidates = await prisma.member.findMany({
+      where: { userId: { in: memberIds } },
+      select: {
+        userId: true,
+        availableForGigs: true,
+        description: true,
+        photoURL: true,
+        lastLoginDate: true,
+        skillScoreDeduction: true
+      }
+    })
 
-    if (total === 0) {
+    const eligibleCandidates = candidates.filter(c => c.availableForGigs !== false)
+    if (!eligibleCandidates.length) {
       return { total: 0, page: query.page, perPage: query.perPage, result: [] }
     }
 
-    // DB-side computation of skillScore per member, ordered and paginated
-    const pageOffset = (query.page - 1) * query.perPage
-    const scored = await prisma.$queryRaw`
-      WITH candidates AS (
-        SELECT m."userId", m."availableForGigs", m."description", m."photoURL", m."lastLoginDate", m."skillScoreDeduction"
-        FROM "members"."member" m
-        WHERE m."userId" IN (${Prisma.join(memberIds)})
-          AND (m."availableForGigs" IS NULL OR m."availableForGigs" = TRUE)
-      ),
-      skill_list AS (
-        SELECT UNNEST(ARRAY[${Prisma.join(skillIds)}])::text AS skill_id
-      ),
-      weights AS (
-        SELECT c."userId",
-               sl.skill_id,
-               MAX(
-                 CASE
-                   WHEN LOWER(usl.name) = 'verified' THEN 1.0
-                   WHEN LOWER(usl.name) = 'self-declared' THEN 0.5
-                   ELSE 0.0
-                 END
-               ) AS weight
-        FROM candidates c
-        CROSS JOIN skill_list sl
-        LEFT JOIN "skills"."user_skill" us
-          ON us."user_id" = c."userId" AND us."skill_id"::text = sl.skill_id
-        LEFT JOIN "skills"."user_skill_level" usl
-          ON usl.id = us."user_skill_level_id"
-        GROUP BY c."userId", sl.skill_id
-      ),
-      base_scores AS (
-        SELECT c."userId",
-               SUM(COALESCE(w.weight, 0)) AS base_sum,
-               c."availableForGigs", c."description", c."photoURL", c."lastLoginDate", c."skillScoreDeduction"
-        FROM candidates c
-        JOIN weights w ON w."userId" = c."userId"
-        GROUP BY c."userId", c."availableForGigs", c."description", c."photoURL", c."lastLoginDate", c."skillScoreDeduction"
-      ),
-      scored AS (
-        SELECT bs."userId",
-               GREATEST(
-                 ((bs.base_sum / ${skillIds.length})::double precision
-                   + COALESCE(bs."skillScoreDeduction", -0.04)
-                   - (CASE WHEN bs."availableForGigs" IS NULL THEN 0.01 ELSE 0 END)
-                   - (CASE WHEN bs."description" IS NULL THEN 0.01 ELSE 0 END)
-                   - (CASE WHEN bs."photoURL" IS NULL THEN 0.04 ELSE 0 END)
-                   - (CASE WHEN bs."lastLoginDate" IS NULL THEN 0.05
-                           WHEN bs."lastLoginDate" < NOW() - interval '5 months' THEN 0.05
-                           WHEN bs."lastLoginDate" < NOW() - interval '4 months' THEN 0.04
-                           WHEN bs."lastLoginDate" < NOW() - interval '3 months' THEN 0.03
-                           WHEN bs."lastLoginDate" < NOW() - interval '2 months' THEN 0.02
-                           WHEN bs."lastLoginDate" < NOW() - interval '1 months' THEN 0.01
-                           ELSE 0 END)
-               ), 0) AS score_raw
-        FROM base_scores bs
-      )
-      SELECT s."userId" AS "userId",
-             ROUND(s.score_raw::numeric, 2) AS "skillScore"
-      FROM scored s
-      ORDER BY "skillScore" DESC, "userId" ASC
-      OFFSET ${pageOffset} LIMIT ${query.perPage}
-    `
+    const userIdsAsNumbers = eligibleCandidates.map(c => helper.bigIntToNumber(c.userId))
+    const userSkills = await skillsPrisma.userSkill.findMany({
+      where: {
+        userId: { in: userIdsAsNumbers },
+        skillId: { in: skillIds }
+      },
+      include: {
+        userSkillLevel: true
+      }
+    })
+    const skillsByUser = _.groupBy(userSkills, 'userId')
 
-    const pageUserIds = _.map(scored, r => _.get(r, 'userId'))
+    const scored = eligibleCandidates.map(candidate => ({
+      userId: candidate.userId,
+      skillScore: computeSkillScoreForCandidate(candidate, skillsByUser, skillIds)
+    }))
+
+    total = scored.length
+    const orderedScores = _.orderBy(
+      scored,
+      [
+        'skillScore',
+        (entry) => helper.bigIntToNumber(entry.userId)
+      ],
+      ['desc', 'asc']
+    )
+
+    const pageOffset = (query.page - 1) * query.perPage
+    const pageScores = orderedScores.slice(pageOffset, pageOffset + query.perPage)
+    const pageUserIds = pageScores.map(score => score.userId)
     if (pageUserIds.length === 0) {
-      return { total: total, page: query.page, perPage: query.perPage, result: [] }
+      return { total, page: query.page, perPage: query.perPage, result: [] }
     }
 
-    // Fetch member details for the ranked page
     const pageMembers = await prisma.member.findMany({
       where: { userId: { in: pageUserIds } },
       include: { maxRating: true, addresses: true }
     })
 
-    // Convert and attach computed score; preserve ranking order
     const byId = _.keyBy(pageMembers, 'userId')
-    results = _.compact(_.map(pageUserIds, (uid) => {
-      const rec = byId[uid]
-      if (!rec) return null
-      prismaHelper.convertMember(rec)
-      const skillScoreForUser = _.get(_.find(scored, s => s.userId === uid), 'skillScore', 0)
-      rec.skillScore = Number(skillScoreForUser)
-      if (!rec.namesAndHandleAppearance) {
-        rec.namesAndHandleAppearance = 'namesAndHandle'
+    results = _.compact(pageScores.map(score => {
+      const record = byId[score.userId]
+      if (!record) return null
+      prismaHelper.convertMember(record)
+      record.skillScore = score.skillScore
+      if (!record.namesAndHandleAppearance) {
+        record.namesAndHandleAppearance = 'namesAndHandle'
       }
-      return rec
+      return record
     }))
   } else {
     if (total === 0) {
@@ -475,15 +504,37 @@ async function searchMemberIdWithSkillIds (skillIds) {
   if (!skillIds || skillIds.length === 0) {
     return []
   }
-  const members = await prisma.$queryRaw`
-    SELECT m."userId"
-    FROM "members"."member" m
-    JOIN "skills"."user_skill" us ON m."userId" = us."user_id"
-    WHERE us."skill_id"::text IN (${Prisma.join(skillIds)})
-    GROUP BY m."userId"
-    HAVING COUNT(DISTINCT us."skill_id") = ${skillIds.length}
-  `
-  return _.map(members, 'userId')
+  const normalizedSkillIds = _.uniq(skillIds.map(id => String(id)))
+  const userSkills = await skillsPrisma.userSkill.findMany({
+    where: {
+      skillId: { in: normalizedSkillIds }
+    },
+    select: {
+      userId: true,
+      skillId: true
+    }
+  })
+  if (!userSkills.length) {
+    return []
+  }
+  const requiredSkills = new Set(normalizedSkillIds)
+  const groupedByUser = _.groupBy(userSkills, 'userId')
+  const matchingUserIds = []
+
+  _.forEach(groupedByUser, (records, userIdKey) => {
+    const ownedSkills = new Set(records.map(r => String(r.skillId)))
+    let hasAllSkills = true
+    requiredSkills.forEach((skillId) => {
+      if (!ownedSkills.has(skillId)) {
+        hasAllSkills = false
+      }
+    })
+    if (hasAllSkills) {
+      matchingUserIds.push(BigInt(userIdKey))
+    }
+  })
+
+  return matchingUserIds
 }
 
 // TODO - use some caching approach to replace these in-memory objects

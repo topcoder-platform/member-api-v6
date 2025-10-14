@@ -8,7 +8,9 @@ const config = require('config')
 const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
-const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const prisma = prismaManager.getClient()
+const skillsPrisma = prismaManager.getSkillsClient()
 const prismaHelper = require('../common/prismaHelper')
 const { v4: uuidv4 } = require('uuid')
 
@@ -1545,7 +1547,7 @@ partiallyUpdateMemberStats.schema = {
 async function getMemberSkills (handle) {
   // validate member
   const member = await helper.getMemberByHandle(handle)
-  const skillList = await prisma.userSkill.findMany({
+  const skillList = await skillsPrisma.userSkill.findMany({
     where: {
       userId: helper.bigIntToNumber(member.userId)
     },
@@ -1567,7 +1569,7 @@ getMemberSkills.schema = {
 async function validateMemberSkillData (data) {
   // Check displayMode
   if (data.displayModeId) {
-    const modeCount = await prisma.userSkillDisplayMode.count({
+    const modeCount = await skillsPrisma.userSkillDisplayMode.count({
       where: { id: data.displayModeId }
     })
     if (modeCount <= 0) {
@@ -1575,7 +1577,7 @@ async function validateMemberSkillData (data) {
     }
   }
   if (data.levels && data.levels.length > 0) {
-    const levelCount = await prisma.userSkillLevel.count({
+    const levelCount = await skillsPrisma.userSkillLevel.count({
       where: { id: { in: data.levels } }
     })
     if (levelCount < data.levels.length) {
@@ -1593,7 +1595,7 @@ async function createMemberSkills (currentUser, handle, data) {
   }
 
   // validate request
-  const existingCount = await prisma.userSkill.count({
+  const existingCount = await skillsPrisma.userSkill.count({
     where: { userId: helper.bigIntToNumber(member.userId), skillId: data.skillId }
   })
   if (existingCount > 0) {
@@ -1605,14 +1607,14 @@ async function createMemberSkills (currentUser, handle, data) {
   // Determine target levels: provided, or default to 'self-declared'
   let levelIds = data.levels && data.levels.length > 0 ? data.levels : null
   if (!levelIds) {
-    const selfDeclared = await prisma.userSkillLevel.findFirst({ where: { name: 'self-declared' } })
+    const selfDeclared = await skillsPrisma.userSkillLevel.findFirst({ where: { name: 'self-declared' } })
     if (!selfDeclared) {
       throw new errors.NotFoundError('Default skill level "self-declared" not found')
     }
     levelIds = [selfDeclared.id]
   }
   const modeId = data.displayModeId || (await (async () => {
-    const principal = await prisma.userSkillDisplayMode.findFirst({ where: { name: 'principal' } })
+    const principal = await skillsPrisma.userSkillDisplayMode.findFirst({ where: { name: 'principal' } })
     return principal ? principal.id : undefined
   })())
   if (!modeId) {
@@ -1620,7 +1622,7 @@ async function createMemberSkills (currentUser, handle, data) {
   }
 
   for (const levelId of levelIds) {
-    await prisma.userSkill.create({
+    await skillsPrisma.userSkill.create({
       data: {
         userId: helper.bigIntToNumber(member.userId),
         skillId: data.skillId,
@@ -1661,7 +1663,7 @@ async function partiallyUpdateMemberSkills (currentUser, handle, data) {
   }
 
   // validate request
-  const existingUserSkills = await prisma.userSkill.findMany({
+  const existingUserSkills = await skillsPrisma.userSkill.findMany({
     where: { userId: helper.bigIntToNumber(member.userId), skillId: data.skillId }
   })
   if (!existingUserSkills || existingUserSkills.length === 0) {
@@ -1671,16 +1673,16 @@ async function partiallyUpdateMemberSkills (currentUser, handle, data) {
 
   if (data.levels && data.levels.length > 0) {
     // Replace all existing with new set
-    await prisma.userSkill.deleteMany({ where: { userId: helper.bigIntToNumber(member.userId), skillId: data.skillId } })
+    await skillsPrisma.userSkill.deleteMany({ where: { userId: helper.bigIntToNumber(member.userId), skillId: data.skillId } })
     const modeId = data.displayModeId || (existingUserSkills[0] && existingUserSkills[0].userSkillDisplayModeId) || (await (async () => {
-      const principal = await prisma.userSkillDisplayMode.findFirst({ where: { name: 'principal' } })
+      const principal = await skillsPrisma.userSkillDisplayMode.findFirst({ where: { name: 'principal' } })
       return principal ? principal.id : undefined
     })())
     if (!modeId) {
       throw new errors.BadRequestError('Display mode is required and default mode not found')
     }
     for (const levelId of data.levels) {
-      await prisma.userSkill.create({
+      await skillsPrisma.userSkill.create({
         data: {
           userId: helper.bigIntToNumber(member.userId),
           skillId: data.skillId,
@@ -1691,7 +1693,7 @@ async function partiallyUpdateMemberSkills (currentUser, handle, data) {
     }
   } else if (data.displayModeId) {
     // Update display mode on all existing records for this skill
-    await prisma.userSkill.updateMany({
+    await skillsPrisma.userSkill.updateMany({
       where: { userId: helper.bigIntToNumber(member.userId), skillId: data.skillId },
       data: { userSkillDisplayModeId: data.displayModeId }
     })
@@ -1735,13 +1737,13 @@ async function verifyMemberSkills (currentUser, handle, data) {
   }
 
   // ensure all skills exist
-  const skillsCount = await prisma.skill.count({ where: { id: { in: data.skillIds } } })
+  const skillsCount = await skillsPrisma.skill.count({ where: { id: { in: data.skillIds } } })
   if (skillsCount < data.skillIds.length) {
     throw new errors.BadRequestError('One or more provided skills do not exist')
   }
 
   // find the 'verified' skill level id
-  const verifiedLevel = await prisma.userSkillLevel.findFirst({ where: { name: 'verified' } })
+  const verifiedLevel = await skillsPrisma.userSkillLevel.findFirst({ where: { name: 'verified' } })
   if (!verifiedLevel || !verifiedLevel.id) {
     throw new errors.NotFoundError('Verified skill level not found')
   }
@@ -1750,21 +1752,21 @@ async function verifyMemberSkills (currentUser, handle, data) {
 
   // process each skill: upsert memberSkill and set levels to verified only
   for (const skillId of data.skillIds) {
-    const existing = await prisma.userSkill.findMany({
+    const existing = await skillsPrisma.userSkill.findMany({
       where: { userId: helper.bigIntToNumber(member.userId), skillId }
     })
     // preserve display mode if any existing record
     let modeId = existing[0] ? existing[0].userSkillDisplayModeId : undefined
     if (!modeId) {
-      const principal = await prisma.userSkillDisplayMode.findFirst({ where: { name: 'principal' } })
+      const principal = await skillsPrisma.userSkillDisplayMode.findFirst({ where: { name: 'principal' } })
       modeId = principal ? principal.id : undefined
     }
     if (!modeId) {
       throw new errors.BadRequestError('Display mode is required and default mode not found')
     }
     // replace all with a single verified record
-    await prisma.userSkill.deleteMany({ where: { userId: helper.bigIntToNumber(member.userId), skillId } })
-    await prisma.userSkill.create({
+    await skillsPrisma.userSkill.deleteMany({ where: { userId: helper.bigIntToNumber(member.userId), skillId } })
+    await skillsPrisma.userSkill.create({
       data: {
         userId: helper.bigIntToNumber(member.userId),
         skillId,

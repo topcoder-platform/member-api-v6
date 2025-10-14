@@ -4,7 +4,9 @@ const readline = require('readline')
 const { concat, isArray, isBoolean, isEmpty, isEqual, isInteger, find, omit, pick, isNumber, forEach, map, uniqBy, isString, cloneDeep } = require('lodash')
 const { v4: uuidv4 } = require('uuid')
 const config = require('./config')
-const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const prisma = prismaManager.getClient()
+const skillsPrisma = prismaManager.getSkillsClient()
 
 const CREATED_BY = 'migrate'
 const MIGRATE_DIR = config.migrateLocation
@@ -82,9 +84,9 @@ async function clearDB () {
 
   // delete skills
   console.log('Clearing skill data')
-  await prisma.skillLevel.deleteMany()
-  await prisma.skill.deleteMany()
-  await prisma.skillCategory.deleteMany()
+  await skillsPrisma.skillLevel.deleteMany()
+  await skillsPrisma.skill.deleteMany()
+  await skillsPrisma.skillCategory.deleteMany()
   await prisma.displayMode.deleteMany()
 
   // delete distribution
@@ -2242,9 +2244,9 @@ async function main () {
 
             await prisma.memberSkillLevel.deleteMany()
             await prisma.memberSkill.deleteMany()
-            await prisma.skillLevel.deleteMany()
-            await prisma.skill.deleteMany()
-            await prisma.skillCategory.deleteMany()
+            await skillsPrisma.skillLevel.deleteMany()
+            await skillsPrisma.skill.deleteMany()
+            await skillsPrisma.skillCategory.deleteMany()
             await prisma.displayMode.deleteMany()
 
             const memberElasticsearchFilename = 'members-2020-01.json'

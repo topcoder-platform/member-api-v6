@@ -1,17 +1,39 @@
-// Use the package-scoped generated client to avoid cross-package overrides in the monorepo
-const { PrismaClient } = require('../../prisma/generated/client')
+// Use the package-scoped generated clients to avoid cross-package overrides in the monorepo
+const {
+  PrismaClient: MembersPrismaClient,
+  Prisma
+} = require('../../prisma/generated/client')
+const { PrismaClient: SkillsPrismaClient } = require('../../prisma/generated/skills-client')
 
-// Following Prisma best practice to create one instance of PrismaClient
-const prisma = new PrismaClient({
+const clientOptions = {
   log: [
     { level: 'query', emit: 'event' },
     { level: 'info', emit: 'event' },
     { level: 'warn', emit: 'event' },
     { level: 'error', emit: 'event' }
   ]
-})
+}
 
-// By running the first query, prisma calls $connect() under the hood
-module.exports.getClient = () => {
-  return prisma
+let membersClient
+let skillsClient
+
+const getMembersClient = () => {
+  if (!membersClient) {
+    membersClient = new MembersPrismaClient(clientOptions)
+  }
+  return membersClient
+}
+
+const getSkillsClient = () => {
+  if (!skillsClient) {
+    skillsClient = new SkillsPrismaClient(clientOptions)
+  }
+  return skillsClient
+}
+
+module.exports = {
+  Prisma,
+  getClient: getMembersClient,
+  getMembersClient,
+  getSkillsClient
 }

@@ -3,7 +3,9 @@ const fs = require('fs')
 const _ = require('lodash')
 const { v4: uuidv4 } = require('uuid')
 const config = require('./config')
-const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const prisma = prismaManager.getClient()
+const skillsPrisma = prismaManager.getSkillsClient()
 
 const OUTPUT_DIR = config.fileLocation
 const handleList = config.handleList
@@ -83,7 +85,7 @@ async function createSkillData (memberData) {
     return
   }
   for (let skillData of memberData.skills) {
-    await prisma.skillCategory.upsert({
+    await skillsPrisma.skillCategory.upsert({
       create: { id: skillData.category.id, name: skillData.category.name, createdBy },
       update: { name: skillData.category.name },
       where: { id: skillData.category.id }
@@ -96,13 +98,13 @@ async function createSkillData (memberData) {
       })
     }
     for (let level of skillData.levels) {
-      await prisma.skillLevel.upsert({
+      await skillsPrisma.skillLevel.upsert({
         create: { id: level.id, name: level.name, description: level.description, createdBy },
         update: { name: level.name, description: level.description },
         where: { id: level.id }
       })
     }
-    await prisma.skill.upsert({
+    await skillsPrisma.skill.upsert({
       create: {
         id: skillData.id,
         name: skillData.name,

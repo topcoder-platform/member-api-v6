@@ -7,7 +7,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  schemas  = ["members", "skills"]
+  schemas  = ["members"]
 }
 
 enum MemberStatus {
@@ -859,84 +859,4 @@ model memberTraitCommunity {
 
   @@index([memberTraitId])
   @@schema("members")
-}
-
-// skill category
-// Standardized Skills models (mapped to standardized-skills-api tables)
-model SkillCategory {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  skills      Skill[]
-
-  @@map("skill_category")
-  @@schema("skills")
-  @@unique([name], map: "uniq_category_name")
-}
-
-model Skill {
-  id          String        @id @default(uuid())
-  name        String
-  description String?
-  categoryId  String?       @map("category_id")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-  deletedAt   DateTime?     @map("deleted_at")
-
-  category    SkillCategory? @relation(fields: [categoryId], references: [id])
-  userSkills  UserSkill[]
-
-  @@map("skill")
-  @@schema("skills")
-  @@index([categoryId], map: "fki_fk_skill_category")
-  @@unique([name], map: "uniq_skill_name")
-}
-
-model UserSkillLevel {
-  id          String      @id @default(uuid())
-  name        String
-  description String?
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
-  userSkills  UserSkill[]
-
-  @@map("user_skill_level")
-  @@schema("skills")
-  @@unique([name], map: "uniq_skill_level_name")
-}
-
-model UserSkillDisplayMode {
-  id          String      @id
-  name        String
-  description String?
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
-  userSkills  UserSkill[]
-
-  @@map("user_skill_display_mode")
-  @@schema("skills")
-  @@unique([name], map: "user_skill_display_mode_name_key")
-}
-
-model UserSkill {
-  id                     String               @id @default(uuid())
-  userId                 Int                  @map("user_id")
-  skillId                String               @map("skill_id")
-  userSkillLevelId       String               @map("user_skill_level_id")
-  userSkillDisplayModeId String               @map("user_skill_display_mode_id")
-  createdAt              DateTime             @default(now()) @map("created_at")
-  updatedAt              DateTime             @updatedAt @map("updated_at")
-
-  skill                  Skill                @relation(fields: [skillId], references: [id])
-  userSkillLevel         UserSkillLevel       @relation(fields: [userSkillLevelId], references: [id])
-  userSkillDisplayMode   UserSkillDisplayMode @relation(fields: [userSkillDisplayModeId], references: [id])
-
-  @@map("user_skill")
-  @@schema("skills")
-  @@index([skillId], map: "fki_fk_skill")
-  @@index([userSkillLevelId], map: "fki_fk_user_skill_level")
-  @@index([userSkillDisplayModeId], map: "fki_fk_user_skill_display_mode")
-  @@unique([userId, skillId, userSkillLevelId], map: "uniq_user_skill_type")
 }

@@ -18,7 +18,9 @@ const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const prismaHelper = require('../common/prismaHelper')
-const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const prisma = prismaManager.getClient()
+const skillsPrisma = prismaManager.getSkillsClient()
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
@@ -88,7 +90,7 @@ function omitMemberAttributes (currentUser, mb) {
  * @param {BigInt} userId prisma BigInt userId
  */
 async function getMemberSkills (userId) {
-  const skillList = await prisma.userSkill.findMany({
+  const skillList = await skillsPrisma.userSkill.findMany({
     where: {
       userId: helper.bigIntToNumber(userId)
     },

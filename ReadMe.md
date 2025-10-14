@@ -20,11 +20,12 @@ docker run -d --name memberdb -p 5432:5432 \
 After that, please set db URL environment variables:
 ```bash
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
+export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
 ```
 
-This variable is important since it's required by prisma.
+These variables are important since they're required by Prisma clients.
 
-If you want to do anything with database, this variable is necessary.
+If you want to do anything with database, these variables are necessary.
 
 ## Database Scripts
 
@@ -33,6 +34,7 @@ Before running db scripts, please make sure you have setup db and config db url 
 ```bash
 # set db url values
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
+export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
 
 # install dependencies
 npm install
@@ -61,7 +63,7 @@ I have created a script to download data from dev environment and a script to lo
 To use them, you should:
 - Make sure you have started db.
 - Check configs in `src/scripts/config.js`. Add some handle if you like.
-- Open a terminal and navigate to codebase folder. Set `DATABASE_URL` above.
+- Open a terminal and navigate to codebase folder. Set `DATABASE_URL` and `SKILLS_DB_URL` above.
 - Run `npm install`.
 - Use `node src/scripts/download.js` to download profile data.
 - Run `npm run clear-db` to clear db data first

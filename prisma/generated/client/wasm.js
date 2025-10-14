@@ -641,50 +641,6 @@ exports.Prisma.MemberTraitCommunityScalarFieldEnum = {
   updatedBy: 'updatedBy'
 };
 
-exports.Prisma.SkillCategoryScalarFieldEnum = {
-  id: 'id',
-  name: 'name',
-  description: 'description',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt'
-};
-
-exports.Prisma.SkillScalarFieldEnum = {
-  id: 'id',
-  name: 'name',
-  description: 'description',
-  categoryId: 'categoryId',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt',
-  deletedAt: 'deletedAt'
-};
-
-exports.Prisma.UserSkillLevelScalarFieldEnum = {
-  id: 'id',
-  name: 'name',
-  description: 'description',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt'
-};
-
-exports.Prisma.UserSkillDisplayModeScalarFieldEnum = {
-  id: 'id',
-  name: 'name',
-  description: 'description',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt'
-};
-
-exports.Prisma.UserSkillScalarFieldEnum = {
-  id: 'id',
-  userId: 'userId',
-  skillId: 'skillId',
-  userSkillLevelId: 'userSkillLevelId',
-  userSkillDisplayModeId: 'userSkillDisplayModeId',
-  createdAt: 'createdAt',
-  updatedAt: 'updatedAt'
-};
-
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -795,12 +751,7 @@ exports.Prisma.ModelName = {
   memberTraitLanguage: 'memberTraitLanguage',
   memberTraitOnboardChecklist: 'memberTraitOnboardChecklist',
   memberTraitPersonalization: 'memberTraitPersonalization',
-  memberTraitCommunity: 'memberTraitCommunity',
-  SkillCategory: 'SkillCategory',
-  Skill: 'Skill',
-  UserSkillLevel: 'UserSkillLevel',
-  UserSkillDisplayMode: 'UserSkillDisplayMode',
-  UserSkill: 'UserSkill'
+  memberTraitCommunity: 'memberTraitCommunity'
 };
 
 /**

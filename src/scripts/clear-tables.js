@@ -1,4 +1,6 @@
-const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const prisma = prismaManager.getClient()
+const skillsPrisma = prismaManager.getSkillsClient()
 
 async function main () {
   console.log('Clearing address and financial data')
@@ -47,9 +49,9 @@ async function main () {
 
   // delete skills
   console.log('Clearing skill data')
-  await prisma.skillLevel.deleteMany()
-  await prisma.skill.deleteMany()
-  await prisma.skillCategory.deleteMany()
+  await skillsPrisma.skillLevel.deleteMany()
+  await skillsPrisma.skill.deleteMany()
+  await skillsPrisma.skillCategory.deleteMany()
   await prisma.displayMode.deleteMany()
 
   // delete distribution
