@@ -2224,7 +2224,7 @@ async function main () {
             await prisma.memberMaxRating.deleteMany()
             await prisma.member.deleteMany()
 
-            const memberDynamoFilename = 'MemberProfile_dynamo_data.json'
+            const memberDynamoFilename = 'MemberProfile.json'
             await importDynamoMember(memberDynamoFilename)
           } else if (step === '2') {
             console.log('Clearing member trait and skill data...')
@@ -2263,7 +2263,7 @@ async function main () {
             await prisma.memberDataScienceStats.deleteMany()
             await prisma.memberStats.deleteMany()
 
-            const memberStateDynamoFilename = 'MemberStats_dynamo_data.json'
+            const memberStateDynamoFilename = 'MemberStats.json'
             await importDynamoMemberStat(memberStateDynamoFilename)
           } else if (step === '4') {
             const memberStatElasticsearchFilename = 'memberstats-2020-01.json'
@@ -2274,10 +2274,10 @@ async function main () {
             await prisma.memberDevelopHistoryStats.deleteMany()
             await prisma.memberHistoryStats.deleteMany()
 
-            const memberStateHistoryDynamoFilename = 'MemberStatsHistory_dynamo_data.json'
+            const memberStateHistoryDynamoFilename = 'MemberStatsHistory.json'
             await importDynamoMemberStatHistory(memberStateHistoryDynamoFilename)
 
-            const memberStatePrivateDynamoFilename = 'MemberStatsHistory_Private_dynamo_data.json'
+            const memberStatePrivateDynamoFilename = 'MemberStatsHistory_Private.json'
             await importDynamoMemberStatHistoryPrivate(memberStatePrivateDynamoFilename)
           } else if (step === '6') {
             console.log('Clearing distribution stats data...')

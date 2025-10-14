@@ -1,8 +1,8 @@
 
 module.exports = {
   apiUrl: 'https://api.topcoder-dev.com/v5/members',
-  fileLocation: '../member_data',
-  migrateLocation: '../migrate-data',
+  fileLocation: '/home/ubuntu/',
+  migrateLocation: '/home/ubuntu/',
   handleList: [
     // data science
     'ACRush',
