@@ -1,6 +1,6 @@
 
 module.exports = {
-  apiUrl: 'https://api.topcoder-dev.com/v5/members',
+  apiUrl: 'https://api.topcoder.com/v6/members',
   fileLocation: '/home/ubuntu/',
   migrateLocation: '/home/ubuntu/',
   handleList: [
