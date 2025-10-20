@@ -164,41 +164,76 @@ async function importDynamoMember (filename) {
       process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items`)
     }
 
-    // paste line string data, and combine to member data
-    const trimmedLine = line.trimEnd()
-    if (trimmedLine === '},') {
-      stringObject += '}'
-      if (stringObject.length <= 2) {
-        continue
-      }
-      count += 1
-      const dataItem = JSON.parse(stringObject)
-
-      const dataObj = await fixMemberData(dataItem, batchItems)
-      if (dataObj) {
-        batchItems.push(dataObj)
-      }
-      stringObject = ''
-
-      if (count % BATCH_SIZE === 0) {
-        // create member
-        await createMembers(batchItems)
-        total += batchItems.length
-        batchItems = []
-      }
-    } else if (trimmedLine === '    {') {
-      stringObject = '{'
-    } else if (trimmedLine === '[' || trimmedLine === ']') {
+    // normalize line content so we can handle both pretty-printed JSON arrays
+    // and files where each member appears on a single line.
+    let trimmedLine = line.trim()
+    if (!trimmedLine || trimmedLine === ',' || trimmedLine === '[' || trimmedLine === ']' || trimmedLine === '],') {
       continue
-    } else if (stringObject.length > 0) {
-      stringObject += line.trim()
     }
 
-    // count += 1
+    // strip leading/trailing array delimiters that might be attached to the object
+    if (trimmedLine.startsWith('[')) {
+      trimmedLine = trimmedLine.substring(1).trim()
+    }
+    if (trimmedLine.endsWith(']')) {
+      trimmedLine = trimmedLine.substring(0, trimmedLine.length - 1).trim()
+      if (!trimmedLine) {
+        continue
+      }
+    }
 
-    // if (count >= 10000) {
-    //   break
-    // }
+    if (!stringObject) {
+      stringObject = trimmedLine
+    } else {
+      stringObject += trimmedLine
+    }
+
+    let jsonCandidate = stringObject
+    if (jsonCandidate.endsWith(',')) {
+      jsonCandidate = jsonCandidate.slice(0, -1)
+    }
+
+    let dataItem
+    try {
+      dataItem = JSON.parse(jsonCandidate)
+    } catch (err) {
+      // keep collecting lines until we have a full JSON object
+      continue
+    }
+
+    count += 1
+    const dataObj = await fixMemberData(dataItem, batchItems)
+    if (dataObj) {
+      batchItems.push(dataObj)
+    }
+    stringObject = ''
+
+    if (count % BATCH_SIZE === 0) {
+      // create member
+      await createMembers(batchItems)
+      total += batchItems.length
+      batchItems = []
+    }
+  }
+
+  // attempt to parse any remaining buffered JSON object
+  if (stringObject) {
+    let jsonCandidate = stringObject
+    if (jsonCandidate.endsWith(',')) {
+      jsonCandidate = jsonCandidate.slice(0, -1)
+    }
+    if (jsonCandidate) {
+      try {
+        const dataItem = JSON.parse(jsonCandidate)
+        count += 1
+        const dataObj = await fixMemberData(dataItem, batchItems)
+        if (dataObj) {
+          batchItems.push(dataObj)
+        }
+      } catch (err) {
+        console.warn(`Skipping malformed member JSON object near line ${currentLine}`)
+      }
+    }
   }
 
   // batchItems still contains some data, input them into DB
