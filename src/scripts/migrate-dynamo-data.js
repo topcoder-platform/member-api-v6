@@ -166,7 +166,7 @@ async function importDynamoMember (filename) {
 
     // paste line string data, and combine to member data
     const trimmedLine = line.trimEnd()
-    if (trimmedLine === '    },') {
+    if (trimmedLine === '},') {
       stringObject += '}'
       if (stringObject.length <= 2) {
         continue
