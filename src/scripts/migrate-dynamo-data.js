@@ -33,6 +33,8 @@ const TRAIT_LANGUAGE = ['language', 'spokenLevel', 'writtenLevel']
 const TRAIT_SERVICE_PROVIDER = ['serviceProviderType', 'name']
 const TRAIT_DEVICE = ['deviceType', 'manufacturer', 'model', 'operatingSystem', 'osVersion', 'osLanguage']
 const WORK_INDUSTRY_TYPES = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/
+const FALLBACK_RECORD_DATE_FIELDS = ['lastLoginDate', 'modified', 'modifiedAt', 'modified_on', 'modifiedOn', 'lastModified', 'lastModifiedAt', 'lastModifiedOn', 'timestamp', 'lastActivityDate']
 
 /**
  * Clear All DB.
@@ -129,10 +131,77 @@ function _convert2Date (dateValue) {
 }
 
 /**
+ * Parse a YYYY-MM-DD date string into a Date representing the start of that day in UTC.
+ * Rejects values that are not strictly formatted as YYYY-MM-DD.
+ * @param {String} dateString the date filter string
+ * @returns {Date|null} the parsed date at UTC midnight or null when not provided or invalid
+ */
+function parseDateFilter (dateString) {
+  if (!dateString || !dateString.trim()) {
+    return null
+  }
+
+  const trimmed = dateString.trim()
+  if (!DATE_ONLY_REGEX.test(trimmed)) {
+    return null
+  }
+
+  const parsed = new Date(`${trimmed}T00:00:00.000Z`)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  return parsed
+}
+
+/**
+ * Determine if a record should be processed based on the optional date filter.
+ * Falls back to additional timestamp fields (e.g. lastLoginDate, modified) when createdAt/updatedAt are absent.
+ * Records without any recognized timestamp fields are skipped when a filter is provided.
+ * @param {Object} record the data record to evaluate
+ * @param {Date|null} filterDate the filter threshold
+ * @returns {Boolean} true when the record passes the filter
+ */
+function shouldProcessRecord (record, filterDate) {
+  if (!filterDate) {
+    return true
+  }
+
+  if (!record) {
+    return false
+  }
+
+  const createdAt = _convert2Date(record.createdAt)
+  const updatedAt = _convert2Date(record.updatedAt)
+
+  if (createdAt && createdAt >= filterDate) {
+    return true
+  }
+
+  if (updatedAt && updatedAt >= filterDate) {
+    return true
+  }
+
+  for (const field of FALLBACK_RECORD_DATE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(record, field)) {
+      continue
+    }
+
+    const fallbackValue = _convert2Date(record[field])
+    if (fallbackValue && fallbackValue >= filterDate) {
+      return true
+    }
+  }
+
+  return false
+}
+
+/**
  * Import the Dynamo members from file
  * @param {String} filename filename
+ * @param {Date|null} [dateFilter=null] optional date filter threshold
  */
-async function importDynamoMember (filename) {
+async function importDynamoMember (filename, dateFilter = null) {
   const memberDynamoFilePath = path.join(MIGRATE_DIR, filename)
 
   const lineCount = await countFileLines(memberDynamoFilePath)
@@ -148,6 +217,8 @@ async function importDynamoMember (filename) {
   let count = 0
   // count the insert items
   let total = 0
+  // count skipped items due to date filter
+  let skipped = 0
   // store the temp json object string
   let stringObject = ''
   // store batch items
@@ -161,7 +232,7 @@ async function importDynamoMember (filename) {
       // Move the cursor to the beginning of the line
       process.stdout.cursorTo(0)
       // Write the new percentage
-      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items`)
+      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items, skipped ${skipped}`)
     }
 
     // normalize line content so we can handle both pretty-printed JSON arrays
@@ -202,6 +273,11 @@ async function importDynamoMember (filename) {
     }
 
     count += 1
+    if (!shouldProcessRecord(dataItem, dateFilter)) {
+      skipped += 1
+      stringObject = ''
+      continue
+    }
     const dataObj = await fixMemberData(dataItem, batchItems)
     if (dataObj) {
       batchItems.push(dataObj)
@@ -226,9 +302,13 @@ async function importDynamoMember (filename) {
       try {
         const dataItem = JSON.parse(jsonCandidate)
         count += 1
-        const dataObj = await fixMemberData(dataItem, batchItems)
-        if (dataObj) {
-          batchItems.push(dataObj)
+        if (!shouldProcessRecord(dataItem, dateFilter)) {
+          skipped += 1
+        } else {
+          const dataObj = await fixMemberData(dataItem, batchItems)
+          if (dataObj) {
+            batchItems.push(dataObj)
+          }
         }
       } catch (err) {
         console.warn(`Skipping malformed member JSON object near line ${currentLine}`)
@@ -241,7 +321,7 @@ async function importDynamoMember (filename) {
     await createMembers(batchItems)
     total += batchItems.length
   }
-  console.log(`\nIt has inserted ${total} items totally`)
+  console.log(`\nIt has inserted ${total} items totally, skipped ${skipped} items`)
 
   console.log(`Finished reading the file: ${filename}\n`)
 }
@@ -386,8 +466,9 @@ async function createMembers (memberItems) {
 /**
  * Import the Dynamo member stats from file
  * @param {String} filename filename
+ * @param {Date|null} [dateFilter=null] optional date filter threshold
  */
-async function importDynamoMemberStat (filename) {
+async function importDynamoMemberStat (filename, dateFilter = null) {
   const memberStatDynamoFilePath = path.join(MIGRATE_DIR, filename)
 
   const lineCount = await countFileLines(memberStatDynamoFilePath)
@@ -403,6 +484,8 @@ async function importDynamoMemberStat (filename) {
   let count = 0
   // count the insert items
   let total = 0
+  // count skipped items due to date filter
+  let skipped = 0
   // store the temp json object string
   let stringObject = ''
 
@@ -415,7 +498,7 @@ async function importDynamoMemberStat (filename) {
       // Move the cursor to the beginning of the line
       process.stdout.cursorTo(0)
       // Write the new percentage
-      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items`)
+      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items, skipped ${skipped}`)
     }
 
     // paste line string data, and combine to member data
@@ -427,6 +510,12 @@ async function importDynamoMemberStat (filename) {
       }
       count += 1
       const dataItem = JSON.parse(stringObject)
+
+      if (!shouldProcessRecord(dataItem, dateFilter)) {
+        skipped += 1
+        stringObject = ''
+        continue
+      }
 
       // make sure the member is exist
       const member = await prisma.member.findFirst({
@@ -482,7 +571,7 @@ async function importDynamoMemberStat (filename) {
     }
   }
 
-  console.log(`\nIt has inserted ${total} items totally`)
+  console.log(`\nIt has inserted ${total} items totally, skipped ${skipped} items`)
 
   console.log(`Finished reading the file: ${filename}\n`)
 }
@@ -686,8 +775,9 @@ function fixDynamoMemberStatData (dataItem) {
 /**
  * Import the Dynamo member stat history from file
  * @param {String} filename filename
+ * @param {Date|null} [dateFilter=null] optional date filter threshold
  */
-async function importDynamoMemberStatHistory (filename) {
+async function importDynamoMemberStatHistory (filename, dateFilter = null) {
   const memberStatHistoryDynamoFilePath = path.join(MIGRATE_DIR, filename)
 
   const lineCount = await countFileLines(memberStatHistoryDynamoFilePath)
@@ -703,6 +793,8 @@ async function importDynamoMemberStatHistory (filename) {
   let count = 0
   // count the insert items
   let total = 0
+  // count skipped items due to date filter
+  let skipped = 0
   // store the temp json object string
   let stringObject = ''
 
@@ -715,7 +807,7 @@ async function importDynamoMemberStatHistory (filename) {
       // Move the cursor to the beginning of the line
       process.stdout.cursorTo(0)
       // Write the new percentage
-      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items`)
+      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items, skipped ${skipped}`)
     }
 
     // paste line string data, and combine to member data
@@ -728,6 +820,11 @@ async function importDynamoMemberStatHistory (filename) {
       count += 1
 
       const dataItem = JSON.parse(stringObject)
+      if (!shouldProcessRecord(dataItem, dateFilter)) {
+        skipped += 1
+        stringObject = ''
+        continue
+      }
       // make sure the member is exist
       const member = await prisma.member.findFirst({
         where: {
@@ -767,7 +864,7 @@ async function importDynamoMemberStatHistory (filename) {
     }
   }
 
-  console.log(`\nIt has inserted ${total} items totally`)
+  console.log(`\nIt has inserted ${total} items totally, skipped ${skipped} items`)
 
   console.log(`Finished reading the file: ${filename}\n`)
 }
@@ -775,13 +872,15 @@ async function importDynamoMemberStatHistory (filename) {
 /**
  * Import the Dynamo member stat history from file
  * @param {String} filename filename
+ * @param {Date|null} [dateFilter=null] optional date filter threshold
  */
-async function importDynamoMemberStatHistoryPrivate (filename) {
+async function importDynamoMemberStatHistoryPrivate (filename, dateFilter = null) {
   const memberStatHistoryDynamoFilePath = path.join(MIGRATE_DIR, filename)
 
   let lineCount = 0
   let stringObject = ''
   let total = 0
+  let skipped = 0
   const rlCount = readline.createInterface({
     input: fs.createReadStream(memberStatHistoryDynamoFilePath),
     crlfDelay: Infinity // To recognize all instances of CR LF as a single line break
@@ -799,6 +898,10 @@ async function importDynamoMemberStatHistoryPrivate (filename) {
 
   for (let idx = 0; idx < dataItems.length; idx++) {
     const dataItem = dataItems[idx]
+    if (!shouldProcessRecord(dataItem, dateFilter)) {
+      skipped += 1
+      continue
+    }
     const member = await prisma.member.findFirst({
       where: {
         userId: dataItem.userId
@@ -828,7 +931,7 @@ async function importDynamoMemberStatHistoryPrivate (filename) {
     }
   }
 
-  console.log(`\nIt has inserted ${total} items totally`)
+  console.log(`\nIt has inserted ${total} items totally, skipped ${skipped} items`)
 
   console.log(`Finished reading the file: ${filename}\n`)
 }
@@ -914,8 +1017,9 @@ function fixDynamoMemberStatHistoryData (dataItem) {
 /**
  * Update the ElasticSearch members from file
  * @param {String} filename filename
+ * @param {Date|null} [dateFilter=null] optional date filter threshold
  */
-async function importElasticSearchMember (filename) {
+async function importElasticSearchMember (filename, dateFilter = null) {
   const memberElasticFilePath = path.join(MIGRATE_DIR, filename)
 
   const lineCount = await countFileLines(memberElasticFilePath)
@@ -931,6 +1035,8 @@ async function importElasticSearchMember (filename) {
   let count = 0
   // count the insert items
   let total = 0
+  // count skipped items due to date filter
+  let skipped = 0
   for await (const line of rlRead) {
     currentLine += 1
     if (currentLine % 10 === 0) {
@@ -940,11 +1046,16 @@ async function importElasticSearchMember (filename) {
       // Move the cursor to the beginning of the line
       process.stdout.cursorTo(0)
       // Write the new percentage
-      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items`)
+      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items, skipped ${skipped}`)
     }
 
     count += 1
     const dataItem = JSON.parse(line.trim())
+
+    if (!shouldProcessRecord(dataItem._source, dateFilter)) {
+      skipped += 1
+      continue
+    }
 
     const dbItem = await prisma.member.findFirst({
       where: {
@@ -958,9 +1069,10 @@ async function importElasticSearchMember (filename) {
     const dataObj = await fixMemberUpdateData(dataItem._source, dbItem || {})
 
     await updateMembersWithTraitsAndSkills(dataObj)
+    total += 1
   }
 
-  console.log(`\nIt has updated ${total} items totally`)
+  console.log(`\nIt has updated ${total} items totally, skipped ${skipped} items`)
 
   console.log(`Finished reading the file: ${filename}\n`)
 }
@@ -1499,8 +1611,9 @@ async function updateTraitElement (objArr, txObject, memberTraitId, createdBy) {
 /**
  * Update the ElasticSearch member stat from file
  * @param {String} filename filename
+ * @param {Date|null} [dateFilter=null] optional date filter threshold
  */
-async function importElasticSearchMemberStat (filename) {
+async function importElasticSearchMemberStat (filename, dateFilter = null) {
   const memberStatElasticFilePath = path.join(MIGRATE_DIR, filename)
 
   const lineCount = await countFileLines(memberStatElasticFilePath)
@@ -1516,6 +1629,8 @@ async function importElasticSearchMemberStat (filename) {
   let count = 0
   // count the insert items
   let total = 0
+  // count skipped items due to date filter
+  let skipped = 0
   for await (const line of rlRead) {
     currentLine += 1
     if (currentLine % 10 === 0) {
@@ -1525,13 +1640,18 @@ async function importElasticSearchMemberStat (filename) {
       // Move the cursor to the beginning of the line
       process.stdout.cursorTo(0)
       // Write the new percentage
-      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items`)
+      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items, skipped ${skipped}`)
     }
 
     count += 1
 
     let dataItem = JSON.parse(line.trim())
     dataItem = dataItem._source
+
+    if (!shouldProcessRecord(dataItem, dateFilter)) {
+      skipped += 1
+      continue
+    }
 
     const memberDB = await prisma.member.findFirst({
       where: {
@@ -1552,7 +1672,7 @@ async function importElasticSearchMemberStat (filename) {
     }
   }
 
-  console.log(`\nIt has updated ${total} items totally`)
+  console.log(`\nIt has updated ${total} items totally, skipped ${skipped} items`)
 
   console.log(`Finished reading the file: ${filename}\n`)
 }
@@ -2251,81 +2371,101 @@ async function main () {
       rl.question('Please confirm (yes/no): ', async (answer) => {
         const answerLower = answer.toLowerCase()
         if (answerLower === 'yes' || answerLower === 'y') {
-          console.log('')
-          if (step === '0') {
-            console.log('Clearing all DB data...')
-            await clearDB()
-          } else if (step === '1') {
-            console.log('Clearing member data...')
-            await prisma.memberAddress.deleteMany()
-            await prisma.memberMaxRating.deleteMany()
-            await prisma.member.deleteMany()
+          const executeStep = async (dateFilter) => {
+            console.log('')
+            if (step === '0') {
+              console.log('Clearing all DB data...')
+              await clearDB()
+            } else if (step === '1') {
+              console.log('Clearing member data...')
+              await prisma.memberAddress.deleteMany()
+              await prisma.memberMaxRating.deleteMany()
+              await prisma.member.deleteMany()
 
-            const memberDynamoFilename = 'MemberProfile.json'
-            await importDynamoMember(memberDynamoFilename)
-          } else if (step === '2') {
-            console.log('Clearing member trait and skill data...')
-            await prisma.memberTraitBasicInfo.deleteMany()
-            await prisma.memberTraitCommunity.deleteMany()
-            await prisma.memberTraitDevice.deleteMany()
-            await prisma.memberTraitEducation.deleteMany()
-            await prisma.memberTraitLanguage.deleteMany()
-            await prisma.memberTraitOnboardChecklist.deleteMany()
-            await prisma.memberTraitPersonalization.deleteMany()
-            await prisma.memberTraitServiceProvider.deleteMany()
-            await prisma.memberTraitSoftware.deleteMany()
-            await prisma.memberTraitWork.deleteMany()
-            await prisma.memberTraits.deleteMany()
+              const memberDynamoFilename = 'MemberProfile.json'
+              await importDynamoMember(memberDynamoFilename, dateFilter)
+            } else if (step === '2') {
+              console.log('Clearing member trait and skill data...')
+              await prisma.memberTraitBasicInfo.deleteMany()
+              await prisma.memberTraitCommunity.deleteMany()
+              await prisma.memberTraitDevice.deleteMany()
+              await prisma.memberTraitEducation.deleteMany()
+              await prisma.memberTraitLanguage.deleteMany()
+              await prisma.memberTraitOnboardChecklist.deleteMany()
+              await prisma.memberTraitPersonalization.deleteMany()
+              await prisma.memberTraitServiceProvider.deleteMany()
+              await prisma.memberTraitSoftware.deleteMany()
+              await prisma.memberTraitWork.deleteMany()
+              await prisma.memberTraits.deleteMany()
 
-            await prisma.memberSkillLevel.deleteMany()
-            await prisma.memberSkill.deleteMany()
-            await skillsPrisma.skillLevel.deleteMany()
-            await skillsPrisma.skill.deleteMany()
-            await skillsPrisma.skillCategory.deleteMany()
-            await prisma.displayMode.deleteMany()
+              await prisma.memberSkillLevel.deleteMany()
+              await prisma.memberSkill.deleteMany()
+              await skillsPrisma.skillLevel.deleteMany()
+              await skillsPrisma.skill.deleteMany()
+              await skillsPrisma.skillCategory.deleteMany()
+              await prisma.displayMode.deleteMany()
 
-            const memberElasticsearchFilename = 'members-2020-01.json'
-            await importElasticSearchMember(memberElasticsearchFilename)
-          } else if (step === '3') {
-            console.log('Clearing member stats data...')
-            await prisma.memberCopilotStats.deleteMany()
-            await prisma.memberMarathonStats.deleteMany()
-            await prisma.memberDesignStatsItem.deleteMany()
-            await prisma.memberDesignStats.deleteMany()
-            await prisma.memberDevelopStatsItem.deleteMany()
-            await prisma.memberDevelopStats.deleteMany()
-            await prisma.memberSrmChallengeDetail.deleteMany()
-            await prisma.memberSrmDivisionDetail.deleteMany()
-            await prisma.memberSrmStats.deleteMany()
-            await prisma.memberDataScienceStats.deleteMany()
-            await prisma.memberStats.deleteMany()
+              const memberElasticsearchFilename = 'members-2020-01.json'
+              await importElasticSearchMember(memberElasticsearchFilename, dateFilter)
+            } else if (step === '3') {
+              console.log('Clearing member stats data...')
+              await prisma.memberCopilotStats.deleteMany()
+              await prisma.memberMarathonStats.deleteMany()
+              await prisma.memberDesignStatsItem.deleteMany()
+              await prisma.memberDesignStats.deleteMany()
+              await prisma.memberDevelopStatsItem.deleteMany()
+              await prisma.memberDevelopStats.deleteMany()
+              await prisma.memberSrmChallengeDetail.deleteMany()
+              await prisma.memberSrmDivisionDetail.deleteMany()
+              await prisma.memberSrmStats.deleteMany()
+              await prisma.memberDataScienceStats.deleteMany()
+              await prisma.memberStats.deleteMany()
 
-            const memberStateDynamoFilename = 'MemberStats.json'
-            await importDynamoMemberStat(memberStateDynamoFilename)
-          } else if (step === '4') {
-            const memberStatElasticsearchFilename = 'memberstats-2020-01.json'
-            await importElasticSearchMemberStat(memberStatElasticsearchFilename)
-          } else if (step === '5') {
-            console.log('Clearing member stats history data...')
-            await prisma.memberDataScienceHistoryStats.deleteMany()
-            await prisma.memberDevelopHistoryStats.deleteMany()
-            await prisma.memberHistoryStats.deleteMany()
+              const memberStateDynamoFilename = 'MemberStats.json'
+              await importDynamoMemberStat(memberStateDynamoFilename, dateFilter)
+            } else if (step === '4') {
+              const memberStatElasticsearchFilename = 'memberstats-2020-01.json'
+              await importElasticSearchMemberStat(memberStatElasticsearchFilename, dateFilter)
+            } else if (step === '5') {
+              console.log('Clearing member stats history data...')
+              await prisma.memberDataScienceHistoryStats.deleteMany()
+              await prisma.memberDevelopHistoryStats.deleteMany()
+              await prisma.memberHistoryStats.deleteMany()
 
-            const memberStateHistoryDynamoFilename = 'MemberStatsHistory.json'
-            await importDynamoMemberStatHistory(memberStateHistoryDynamoFilename)
+              const memberStateHistoryDynamoFilename = 'MemberStatsHistory.json'
+              await importDynamoMemberStatHistory(memberStateHistoryDynamoFilename, dateFilter)
 
-            const memberStatePrivateDynamoFilename = 'MemberStatsHistory_Private.json'
-            await importDynamoMemberStatHistoryPrivate(memberStatePrivateDynamoFilename)
-          } else if (step === '6') {
-            console.log('Clearing distribution stats data...')
-            await prisma.distributionStats.deleteMany()
+              const memberStatePrivateDynamoFilename = 'MemberStatsHistory_Private.json'
+              await importDynamoMemberStatHistoryPrivate(memberStatePrivateDynamoFilename, dateFilter)
+            } else if (step === '6') {
+              console.log('Clearing distribution stats data...')
+              await prisma.distributionStats.deleteMany()
 
-            await importDistributionStats()
+              await importDistributionStats()
+            }
+
+            console.log('Script is finished.')
+            rl.close()
           }
-        }
 
-        console.log('Script is finished.')
-        rl.close()
+          const needsDateFilter = ['1', '2', '3', '4', '5'].includes(step)
+          if (needsDateFilter) {
+            rl.question('Enter date filter (YYYY-MM-DD UTC; timestamp-less records will be skipped, or press Enter to skip): ', async (dateFilterInput) => {
+              const dateFilter = parseDateFilter(dateFilterInput)
+              if (dateFilter) {
+                console.log(`Filtering records with recognized timestamps on or after ${dateFilter.toISOString()} (UTC). Records missing timestamps will be skipped.`)
+              } else if (dateFilterInput && dateFilterInput.trim()) {
+                console.log('Invalid date filter input. Expected YYYY-MM-DD; continuing without filtering.')
+              }
+              await executeStep(dateFilter)
+            })
+          } else {
+            await executeStep(null)
+          }
+        } else {
+          console.log('Script is finished.')
+          rl.close()
+        }
       })
     }
   })
