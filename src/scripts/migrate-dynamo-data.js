@@ -23,11 +23,19 @@ const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
   'skillScoreDeduction', 'namesAndHandleAppearance']
 
+const MEMBER_STRING_FIELDS = ['handle', 'handleLower', 'firstName', 'lastName', 'description', 'otherLangName', 'status',
+  'newEmail', 'emailVerifyToken', 'newEmailVerifyToken', 'country', 'homeCountryCode', 'competitionCountryCode',
+  'photoURL', 'createdBy', 'updatedBy', 'namesAndHandleAppearance']
+
+const MEMBER_STRING_ARRAY_FIELDS = ['tracks']
+
 const MEMBER_STATUS = ['UNVERIFIED', 'ACTIVE', 'INACTIVE_USER_REQUEST', 'INACTIVE_DUPLICATE_ACCOUNT', 'INACTIVE_IRREGULAR_ACCOUNT', 'UNKNOWN']
 
 const DEVICE_TYPE = ['Console', 'Desktop', 'Laptop', 'Smartphone', 'Tablet', 'Wearable', 'Other']
 
 const MAX_RATING_FIELDS = ['rating', 'track', 'subTrack', 'ratingColor']
+
+const MAX_RATING_STRING_FIELDS = ['track', 'subTrack', 'ratingColor', 'createdBy', 'updatedBy']
 
 const ADDRESS_FIELDS = ['streetAddr1', 'streetAddr2', 'city', 'zip', 'stateCode', 'type']
 
@@ -197,6 +205,127 @@ function shouldProcessRecord (record, filterDate) {
   }
 
   return false
+}
+
+/**
+ * Coerce numeric address fields to strings while leaving other values untouched.
+ * Prisma schemas expect string values for address fields, but legacy data may store numbers.
+ * @param {Object} address the address object to normalize
+ * @returns {Object} the normalized address object
+ */
+function normalizeAddressFieldStrings (address) {
+  if (!address) {
+    return address
+  }
+
+  const normalized = { ...address }
+
+  for (const field of ADDRESS_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(normalized, field)) {
+      continue
+    }
+
+    const value = normalized[field]
+    if (isNumber(value)) {
+      normalized[field] = `${value}`
+    }
+  }
+
+  return normalized
+}
+
+/**
+ * Ensure the provided fields are stored as strings when numeric values are encountered.
+ * Mutates the target object.
+ * @param {Object} target object to normalize
+ * @param {Array<String>} fieldNames field names expected to store string values
+ */
+function normalizeStringFields (target, fieldNames) {
+  if (!target) {
+    return
+  }
+
+  for (const field of fieldNames) {
+    if (!Object.prototype.hasOwnProperty.call(target, field)) {
+      continue
+    }
+
+    const value = target[field]
+    if (isNumber(value)) {
+      target[field] = `${value}`
+    }
+  }
+}
+
+/**
+ * Ensure array fields contain string elements when numeric values are encountered.
+ * Mutates the target object.
+ * @param {Object} target object to normalize
+ * @param {Array<String>} fieldNames field names expected to store arrays of strings
+ */
+function normalizeStringArrayFields (target, fieldNames) {
+  if (!target) {
+    return
+  }
+
+  for (const field of fieldNames) {
+    if (!Object.prototype.hasOwnProperty.call(target, field)) {
+      continue
+    }
+
+    const value = target[field]
+    if (isArray(value)) {
+      target[field] = value.map(item => (isNumber(item) ? `${item}` : item))
+    }
+  }
+}
+
+/**
+ * Normalize string-based fields for member max rating payloads.
+ * @param {Object} maxRating max rating object to normalize
+ */
+function normalizeMaxRatingStringFields (maxRating) {
+  if (!maxRating) {
+    return
+  }
+
+  normalizeStringFields(maxRating, MAX_RATING_STRING_FIELDS)
+}
+
+/**
+ * Normalize all known string-based member fields (including nested structures).
+ * Mutates the member object to coerce numeric values to strings where required.
+ * @param {Object} member member object to normalize
+ */
+function normalizeMemberStringFields (member) {
+  if (!member) {
+    return member
+  }
+
+  normalizeStringFields(member, MEMBER_STRING_FIELDS)
+  normalizeStringArrayFields(member, MEMBER_STRING_ARRAY_FIELDS)
+
+  if (member.addresses) {
+    if (isArray(member.addresses)) {
+      member.addresses = member.addresses.map(normalizeAddressFieldStrings)
+    } else if (member.addresses.create && isArray(member.addresses.create)) {
+      member.addresses.create = member.addresses.create.map(normalizeAddressFieldStrings)
+    } else if (member.addresses.update && isArray(member.addresses.update)) {
+      member.addresses.update = member.addresses.update.map(normalizeAddressFieldStrings)
+    }
+  }
+
+  if (member.maxRating) {
+    if (member.maxRating.create) {
+      normalizeMaxRatingStringFields(member.maxRating.create)
+    } else if (member.maxRating.update) {
+      normalizeMaxRatingStringFields(member.maxRating.update)
+    } else {
+      normalizeMaxRatingStringFields(member.maxRating)
+    }
+  }
+
+  return member
 }
 
 /**
@@ -373,15 +502,19 @@ async function fixMemberData (memberItem, batchItems) {
   if (memberItem.addresses) {
     let addressArr = JSON.parse(memberItem.addresses)
     if (isArray(addressArr) && addressArr.length > 0) {
-      addressArr = addressArr.map(addressItem => ({
-        ...addressItem,
-        zip: addressItem.zip ? '' + addressItem.zip : undefined,
-        type: addressItem.type ? addressItem.type : 'HOME',
-        createdAt: _convert2Date(addressItem.createdAt),
-        createdBy: CREATED_BY,
-        updatedAt: _convert2Date(addressItem.updatedAt),
-        updatedBy: addressItem.updatedBy ? addressItem.updatedBy : undefined
-      }))
+      addressArr = addressArr.map(addressItem => {
+        const normalized = normalizeAddressFieldStrings(addressItem)
+        const zipValue = normalized.zip
+        return {
+          ...normalized,
+          zip: zipValue !== null && zipValue !== undefined ? `${zipValue}` : undefined,
+          type: normalized.type ? normalized.type : 'HOME',
+          createdAt: _convert2Date(normalized.createdAt),
+          createdBy: CREATED_BY,
+          updatedAt: _convert2Date(normalized.updatedAt),
+          updatedBy: normalized.updatedBy ? normalized.updatedBy : undefined
+        }
+      })
       memberItem.addresses = {
         create: addressArr
       }
@@ -405,6 +538,8 @@ async function fixMemberData (memberItem, batchItems) {
       memberItem.maxRating = undefined
     }
   }
+
+  normalizeMemberStringFields(memberItem)
 
   // check duplicate fields: handleLower, email
   let found = batchItems.find(item => item.email === memberItem.email)
@@ -437,6 +572,8 @@ async function fixMemberData (memberItem, batchItems) {
     updatedAt: _convert2Date(memberItem.updatedAt),
     updatedBy: memberItem.updatedBy ? memberItem.updatedBy : undefined
   }
+
+  normalizeMemberStringFields(memberItemDB)
 
   if (memberItemDB.userId && memberItemDB.handle && memberItemDB.handleLower && memberItemDB.email) {
     return memberItemDB
@@ -1125,19 +1262,21 @@ async function fixMemberUpdateData (memberItem, dbItem) {
   memberItemUpdate = omit(memberItemUpdate, omitFields)
 
   if (memberItemUpdate.addresses) {
-    const updateAddr = pick(memberItemUpdate.addresses['0'], ADDRESS_FIELDS)
+    const firstUpdateAddress = memberItemUpdate.addresses['0'] || {}
+    const updateAddr = normalizeAddressFieldStrings(pick(firstUpdateAddress, ADDRESS_FIELDS))
     let addressItem = {}
     if (dbItem.addresses && dbItem.addresses.length > 0) {
       addressItem = dbItem.addresses[0]
     }
-    const dbAddr = pick(addressItem, ADDRESS_FIELDS)
+    const dbAddr = normalizeAddressFieldStrings(pick(addressItem, ADDRESS_FIELDS))
 
     if (isEqual(updateAddr, dbAddr)) {
       memberItemUpdate = omit(memberItemUpdate, ['addresses'])
     } else if (updateAddr.type) {
+      const zipValue = updateAddr.zip
       memberItemUpdate.addresses = [{
         ...updateAddr,
-        zip: '' + updateAddr.zip
+        zip: zipValue !== null && zipValue !== undefined ? `${zipValue}` : undefined
       }]
     } else {
       delete memberItemUpdate.addresses
@@ -1347,6 +1486,8 @@ async function fixMemberUpdateData (memberItem, dbItem) {
       }
     })
   }
+
+  normalizeMemberStringFields(memberItemUpdate)
 
   const pureMemberObj = omit(memberItemUpdate, ['lastLoginDate', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy'])
 
