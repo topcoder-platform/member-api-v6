@@ -46,6 +46,7 @@ const TRAIT_DEVICE = ['deviceType', 'manufacturer', 'model', 'operatingSystem', 
 const WORK_INDUSTRY_TYPES = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/
 const FALLBACK_RECORD_DATE_FIELDS = ['lastLoginDate', 'modified', 'modifiedAt', 'modified_on', 'modifiedOn', 'lastModified', 'lastModifiedAt', 'lastModifiedOn', 'timestamp', 'lastActivityDate']
+const NULL_BYTE_REGEX = /\u0000/g
 
 /**
  * Clear All DB.
@@ -227,7 +228,9 @@ function normalizeAddressFieldStrings (address) {
 
     const value = normalized[field]
     if (isNumber(value)) {
-      normalized[field] = `${value}`
+      normalized[field] = stripNullBytes(`${value}`)
+    } else if (isString(value)) {
+      normalized[field] = stripNullBytes(value)
     }
   }
 
@@ -252,7 +255,9 @@ function normalizeStringFields (target, fieldNames) {
 
     const value = target[field]
     if (isNumber(value)) {
-      target[field] = `${value}`
+      target[field] = stripNullBytes(`${value}`)
+    } else if (isString(value)) {
+      target[field] = stripNullBytes(value)
     }
   }
 }
@@ -275,7 +280,12 @@ function normalizeStringArrayFields (target, fieldNames) {
 
     const value = target[field]
     if (isArray(value)) {
-      target[field] = value.map(item => (isNumber(item) ? `${item}` : item))
+      target[field] = value.map(item => {
+        if (isNumber(item)) {
+          return stripNullBytes(`${item}`)
+        }
+        return isString(item) ? stripNullBytes(item) : item
+      })
     }
   }
 }
@@ -326,6 +336,59 @@ function normalizeMemberStringFields (member) {
   }
 
   return member
+}
+
+function stripNullBytes (value) {
+  if (typeof value !== 'string') {
+    return value
+  }
+  return value.replace(NULL_BYTE_REGEX, '')
+}
+
+/**
+ * Recursively remove null-byte characters from strings in the provided target.
+ * Mutates the input so Prisma/Postgres never encounter invalid UTF-8 sequences.
+ * @param {*} target any structure to sanitize
+ * @returns {Boolean} true when at least one null byte was removed
+ */
+function sanitizeNullBytesDeep (target) {
+  let removed = false
+
+  function visit (value) {
+    if (typeof value === 'string') {
+      if (NULL_BYTE_REGEX.test(value)) {
+        removed = true
+        return value.replace(NULL_BYTE_REGEX, '')
+      }
+      return value
+    }
+
+    if (value === null || value === undefined) {
+      return value
+    }
+
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        value[i] = visit(value[i])
+      }
+      return value
+    }
+
+    if (value instanceof Date || Buffer.isBuffer(value)) {
+      return value
+    }
+
+    if (typeof value === 'object') {
+      for (const key of Object.keys(value)) {
+        value[key] = visit(value[key])
+      }
+    }
+
+    return value
+  }
+
+  visit(target)
+  return removed
 }
 
 /**
@@ -540,6 +603,7 @@ async function fixMemberData (memberItem, batchItems) {
   }
 
   normalizeMemberStringFields(memberItem)
+  const removedNullBytes = sanitizeNullBytesDeep(memberItem)
 
   // check duplicate fields: handleLower, email
   let found = batchItems.find(item => item.email === memberItem.email)
@@ -574,6 +638,11 @@ async function fixMemberData (memberItem, batchItems) {
   }
 
   normalizeMemberStringFields(memberItemDB)
+  const removedNullBytesDb = sanitizeNullBytesDeep(memberItemDB)
+
+  if ((removedNullBytes || removedNullBytesDb) && memberItemDB.userId) {
+    console.warn(`Sanitized null bytes for member ${memberItemDB.userId}`)
+  }
 
   if (memberItemDB.userId && memberItemDB.handle && memberItemDB.handleLower && memberItemDB.email) {
     return memberItemDB
@@ -603,6 +672,39 @@ async function executeWithTransactionRetry (operation, attempt = 1) {
   }
 }
 
+function isInvalidUtf8Error (err) {
+  if (!err) {
+    return false
+  }
+
+  if (err.code === '22021') {
+    return true
+  }
+
+  const message = err.message || ''
+  return message.includes('invalid byte sequence for encoding "UTF8"') || message.includes('0x00')
+}
+
+async function createMembersIndividually (memberItems) {
+  for (const memberItem of memberItems) {
+    try {
+      await executeWithTransactionRetry(() => prisma.$transaction(async (tx) => {
+        await tx.member.create({
+          data: memberItem
+        })
+      }, {
+        timeout: TRANSACTION_TIMEOUT_MS
+      }))
+    } catch (err) {
+      if (isInvalidUtf8Error(err)) {
+        console.warn(`Skipping member ${memberItem.userId || memberItem.handleLower || 'unknown'} due to invalid UTF-8 data`)
+        continue
+      }
+      throw err
+    }
+  }
+}
+
 /**
  * Crate member items in DB
  * @param {Array} memberItems member items
@@ -610,21 +712,30 @@ async function executeWithTransactionRetry (operation, attempt = 1) {
 async function createMembers (memberItems) {
   const memberWithAddress = memberItems.filter(item => item.addresses || item.maxRating)
   const memberWithoutAddress = memberItems.filter(item => !(item.addresses || item.maxRating))
-  return executeWithTransactionRetry(() => prisma.$transaction(async (tx) => {
-    if (memberWithoutAddress.length > 0) {
-      await tx.member.createMany({
-        data: memberWithoutAddress
-      })
-    }
+  try {
+    return await executeWithTransactionRetry(() => prisma.$transaction(async (tx) => {
+      if (memberWithoutAddress.length > 0) {
+        await tx.member.createMany({
+          data: memberWithoutAddress
+        })
+      }
 
-    for (const memberItem of memberWithAddress) {
-      await tx.member.create({
-        data: memberItem
-      })
+      for (const memberItem of memberWithAddress) {
+        await tx.member.create({
+          data: memberItem
+        })
+      }
+    }, {
+      timeout: TRANSACTION_TIMEOUT_MS
+    }))
+  } catch (err) {
+    if (isInvalidUtf8Error(err)) {
+      console.warn('Batch insert failed due to invalid UTF-8 data. Falling back to per-member inserts.')
+      await createMembersIndividually(memberItems)
+      return
     }
-  }, {
-    timeout: TRANSACTION_TIMEOUT_MS
-  }))
+    throw err
+  }
 }
 
 /**
