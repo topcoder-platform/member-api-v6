@@ -11,6 +11,9 @@ const skillsPrisma = prismaManager.getSkillsClient()
 const CREATED_BY = 'migrate'
 const MIGRATE_DIR = config.migrateLocation
 const BATCH_SIZE = 1000
+const TRANSACTION_TIMEOUT_MS = 60000
+const TRANSACTION_MAX_RETRIES = 3
+const TRANSACTION_RETRY_DELAY_MS = 1000
 const DEFAULT_RATING_COLOR = '#EF3A3A'
 const DEFAULT_SRM_ID = 101
 const DEFAULT_MARATHON_MATCH_ID = 102
@@ -442,6 +445,27 @@ async function fixMemberData (memberItem, batchItems) {
   return null
 }
 
+function isTransactionTimeoutError (err) {
+  return err?.code === 'P2028' || (err?.message && err.message.includes('Transaction already closed'))
+}
+
+function delay (ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function executeWithTransactionRetry (operation, attempt = 1) {
+  try {
+    return await operation()
+  } catch (err) {
+    if (!isTransactionTimeoutError(err) || attempt >= TRANSACTION_MAX_RETRIES) {
+      throw err
+    }
+    console.warn(`Transaction timed out (attempt ${attempt}/${TRANSACTION_MAX_RETRIES}). Retrying...`)
+    await delay(attempt * TRANSACTION_RETRY_DELAY_MS)
+    return executeWithTransactionRetry(operation, attempt + 1)
+  }
+}
+
 /**
  * Crate member items in DB
  * @param {Array} memberItems member items
@@ -449,18 +473,21 @@ async function fixMemberData (memberItem, batchItems) {
 async function createMembers (memberItems) {
   const memberWithAddress = memberItems.filter(item => item.addresses || item.maxRating)
   const memberWithoutAddress = memberItems.filter(item => !(item.addresses || item.maxRating))
-  return prisma.$transaction(async (tx) => {
-    // create address without address
-    await tx.member.createMany({
-      data: memberWithoutAddress
-    })
+  return executeWithTransactionRetry(() => prisma.$transaction(async (tx) => {
+    if (memberWithoutAddress.length > 0) {
+      await tx.member.createMany({
+        data: memberWithoutAddress
+      })
+    }
 
     for (const memberItem of memberWithAddress) {
       await tx.member.create({
         data: memberItem
       })
     }
-  })
+  }, {
+    timeout: TRANSACTION_TIMEOUT_MS
+  }))
 }
 
 /**
