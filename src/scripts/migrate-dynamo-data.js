@@ -2403,7 +2403,7 @@ async function updateMemberStat (data, member, operatorId) {
     // update model memberStats
     let memberStatDB = await prisma.memberStats.findFirst({
       where: {
-        userId: member.id
+        userId: member.userId
       },
       include: {
         develop: { include: { items: true } },
@@ -2431,6 +2431,7 @@ async function updateMemberStat (data, member, operatorId) {
     } else {
       memberStatDB = await prisma.memberStats.create({
         data: {
+          userId: member.userId,
           challenges: data.challenges,
           wins: data.wins,
           groupId: data.groupId,
