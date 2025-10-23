@@ -1071,7 +1071,81 @@ async function importDynamoMemberStatHistory (filename, dateFilter = null) {
   // count skipped items due to date filter
   let skipped = 0
   // store the temp json object string
-  let stringObject = ''
+  const processObjectString = async (objectString) => {
+    let candidate = objectString.trim()
+    if (!candidate) {
+      return false
+    }
+
+    if (candidate.endsWith(',')) {
+      candidate = candidate.slice(0, -1)
+    }
+
+    if (!candidate.startsWith('{') || !candidate.endsWith('}')) {
+      return false
+    }
+
+    let dataItem
+    try {
+      dataItem = JSON.parse(candidate)
+    } catch (err) {
+      // The buffer does not yet contain a complete JSON object; keep accumulating.
+      return false
+    }
+
+    count += 1
+
+    if (!shouldProcessRecord(dataItem, dateFilter)) {
+      skipped += 1
+      return true
+    }
+
+    const member = await prisma.member.findFirst({
+      where: {
+        userId: dataItem.userId
+      }
+    })
+
+    if (member) {
+      const statHistory = fixDynamoMemberStatHistoryData(dataItem)
+
+      if (!isEmpty(statHistory)) {
+        const createData = {
+          groupId: dataItem.groupId,
+          createdBy: CREATED_BY,
+          userId: member.userId
+        }
+
+        if (statHistory.develop) {
+          createData.develop = {
+            create: statHistory.develop
+          }
+        }
+
+        if (statHistory.dataScience) {
+          createData.dataScience = {
+            create: statHistory.dataScience
+          }
+        }
+
+        if (createData.develop || createData.dataScience) {
+          await prisma.memberHistoryStats.create({
+            data: createData,
+            include: { develop: true, dataScience: true }
+          })
+          total += 1
+        }
+      }
+    }
+
+    return true
+  }
+
+  let buffer = ''
+  let capturingObject = false
+  let depth = 0
+  let inString = false
+  let escapeNext = false
 
   for await (const line of rlRead) {
     currentLine += 1
@@ -1084,59 +1158,61 @@ async function importDynamoMemberStatHistory (filename, dateFilter = null) {
       // Write the new percentage
       process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items, skipped ${skipped}`)
     }
+    for (let idx = 0; idx < line.length; idx += 1) {
+      const char = line[idx]
 
-    // paste line string data, and combine to member data
-    const trimmedLine = line.trimEnd()
-    if (trimmedLine === '    },') {
-      stringObject += '}'
-      if (stringObject.length <= 2) {
+      if (!capturingObject) {
+        if (char === '{') {
+          capturingObject = true
+          buffer = '{'
+          depth = 1
+          inString = false
+          escapeNext = false
+        }
         continue
       }
-      count += 1
 
-      const dataItem = JSON.parse(stringObject)
-      if (!shouldProcessRecord(dataItem, dateFilter)) {
-        skipped += 1
-        stringObject = ''
+      buffer += char
+
+      if (escapeNext) {
+        escapeNext = false
         continue
       }
-      // make sure the member is exist
-      const member = await prisma.member.findFirst({
-        where: {
-          userId: dataItem.userId
-        }
-      })
 
-      if (member) {
-        const statHistory = fixDynamoMemberStatHistoryData(dataItem)
-
-        if (!isEmpty(statHistory)) {
-          await prisma.memberHistoryStats.create({
-            data: {
-              groupId: dataItem.groupId,
-              createdBy: CREATED_BY,
-              userId: member.userId,
-              develop: {
-                create: statHistory.develop
-              },
-              dataScience: {
-                create: statHistory.dataScience
-              }
-            },
-            include: { develop: true, dataScience: true }
-          })
-          total += 1
-        }
+      if (char === '\\') {
+        escapeNext = true
+        continue
       }
 
-      stringObject = ''
-    } else if (trimmedLine === '    {') {
-      stringObject = '{'
-    } else if (trimmedLine === '[' || trimmedLine === ']') {
-      continue
-    } else if (stringObject.length > 0) {
-      stringObject += line.trim()
+      if (char === '"') {
+        inString = !inString
+        continue
+      }
+
+      if (inString) {
+        continue
+      }
+
+      if (char === '{') {
+        depth += 1
+      } else if (char === '}') {
+        depth -= 1
+        if (depth === 0) {
+          const objectString = buffer
+          // eslint-disable-next-line no-await-in-loop
+          await processObjectString(objectString)
+          buffer = ''
+          capturingObject = false
+          inString = false
+          escapeNext = false
+        }
+      }
     }
+  }
+
+  // Process any remaining buffered object.
+  if (buffer) {
+    await processObjectString(buffer)
   }
 
   console.log(`\nIt has inserted ${total} items totally, skipped ${skipped} items`)
@@ -1186,23 +1262,33 @@ async function importDynamoMemberStatHistoryPrivate (filename, dateFilter = null
     if (member) {
       const statHistory = fixDynamoMemberStatHistoryData(dataItem)
 
-      await prisma.memberHistoryStats.create({
-        data: {
-          groupId: dataItem.groupId,
-          isPrivate: true,
-          createdBy: CREATED_BY,
-          userId: member.userId,
-          develop: {
-            create: statHistory.develop
-          },
-          dataScience: {
-            create: statHistory.dataScience
-          }
-        },
-        include: { develop: true, dataScience: true }
-      })
+      const createData = {
+        groupId: dataItem.groupId,
+        isPrivate: true,
+        createdBy: CREATED_BY,
+        userId: member.userId
+      }
 
-      total += 1
+      if (statHistory.develop) {
+        createData.develop = {
+          create: statHistory.develop
+        }
+      }
+
+      if (statHistory.dataScience) {
+        createData.dataScience = {
+          create: statHistory.dataScience
+        }
+      }
+
+      if (createData.develop || createData.dataScience) {
+        await prisma.memberHistoryStats.create({
+          data: createData,
+          include: { develop: true, dataScience: true }
+        })
+
+        total += 1
+      }
     }
   }
 
