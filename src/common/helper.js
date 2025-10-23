@@ -8,7 +8,8 @@ const AWS = require('aws-sdk')
 const config = require('config')
 const busApi = require('topcoder-bus-api-wrapper')
 const querystring = require('querystring')
-const prisma = require('./prisma').getClient();
+const request = require('request')
+const prisma = require('./prisma').getClient()
 
 // Color schema for Ratings
 const RATING_COLORS = [{
@@ -41,10 +42,10 @@ if (config.AMAZON.AWS_ACCESS_KEY_ID && config.AMAZON.AWS_SECRET_ACCESS_KEY) {
 }
 AWS.config.update(awsConfig)
 
-let s3;
+let s3
 
 // lazy loading to allow mock tests
-function getS3() {
+function getS3 () {
   if (!s3) {
     s3 = new AWS.S3()
   }
@@ -147,6 +148,38 @@ function hasAutocompleteRole (authUser) {
   return false
 }
 
+/**
+ * Check if exists.
+ *
+ * @param {Array} source the array in which to search for the term
+ * @param {Array | String} term the term to search
+ * @returns {Boolean} whether the term is in the source
+ */
+function checkIfExists (source, term) {
+  let terms
+
+  if (!_.isArray(source)) {
+    throw new Error('Source argument should be an array')
+  }
+
+  source = source.map(s => s.toLowerCase())
+
+  if (_.isString(term)) {
+    terms = term.toLowerCase().split(' ')
+  } else if (_.isArray(term)) {
+    terms = term.map(t => t.toLowerCase())
+  } else {
+    throw new Error('Term argument should be either a string or an array')
+  }
+
+  for (let i = 0; i < terms.length; i++) {
+    if (source.includes(terms[i])) {
+      return true
+    }
+  }
+
+  return false
+}
 
 /**
  * Get member by handle
@@ -157,14 +190,14 @@ async function getMemberByHandle (handle) {
   const ret = await prisma.member.findUnique({
     where: {
       handleLower: handle.trim().toLowerCase()
-    }
-  });
+    },
+    include: { maxRating: true }
+  })
   if (!ret || !ret.userId) {
-    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`);
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
   }
-  return ret;
+  return ret
 }
-
 
 /**
  * Upload photo to S3
@@ -304,37 +337,93 @@ function canManageMember (currentUser, member) {
     (currentUser.handle && currentUser.handle.toLowerCase() === member.handleLower.toLowerCase()))
 }
 
-function cleanUpStatistics (stats, fields) {
-  // cleanup - convert string to object
-  for (let count = 0; count < stats.length; count++) {
-    if (stats[count].hasOwnProperty('maxRating')) {
-      if (typeof stats[count].maxRating === 'string') {
-        stats[count].maxRating = JSON.parse(stats[count].maxRating)
+function cleanupSkills (memberEnteredSkill, member) {
+  if (memberEnteredSkill.hasOwnProperty('userHandle')) {
+    memberEnteredSkill.handle = memberEnteredSkill.userHandle
+  }
+  if (!memberEnteredSkill.hasOwnProperty('userId')) {
+    memberEnteredSkill.userId = bigIntToNumber(member.userId)
+  }
+  if (!memberEnteredSkill.hasOwnProperty('handle')) {
+    memberEnteredSkill.handle = member.handle
+  }
+  if (!memberEnteredSkill.hasOwnProperty('handleLower')) {
+    memberEnteredSkill.handleLower = member.handleLower
+  }
+  return memberEnteredSkill
+}
+
+function mergeSkills (memberEnteredSkill, memberAggregatedSkill, allTags) {
+  // process skills in member entered skill
+  if (memberEnteredSkill.hasOwnProperty('skills')) {
+    let tempSkill = {}
+    _.forIn(memberEnteredSkill.skills, (value, key) => {
+      if (!value.hidden) {
+        var tag = this.findTagById(allTags, Number(key))
+        if (tag) {
+          value.tagName = tag.name
+          if (!value.hasOwnProperty('sources')) {
+            value.sources = [ 'USER_ENTERED' ]
+          }
+          if (!value.hasOwnProperty('score')) {
+            value.score = 0
+          }
+          tempSkill[key] = value
+        }
       }
-      // set the rating color
-      stats[count].maxRating.ratingColor = this.getRatingColor(stats[count].maxRating.rating)
+    })
+    // process skills in member aggregated skill
+    if (memberAggregatedSkill.skills) {
+      tempSkill = mergeAggregatedSkill(memberAggregatedSkill, allTags, tempSkill)
     }
-    if (stats[count].hasOwnProperty('DATA_SCIENCE')) {
-      if (typeof stats[count].DATA_SCIENCE === 'string') {
-        stats[count].DATA_SCIENCE = JSON.parse(stats[count].DATA_SCIENCE)
-      }
-    }
-    if (stats[count].hasOwnProperty('DESIGN')) {
-      if (typeof stats[count].DESIGN === 'string') {
-        stats[count].DESIGN = JSON.parse(stats[count].DESIGN)
-      }
-    }
-    if (stats[count].hasOwnProperty('DEVELOP')) {
-      if (typeof stats[count].DEVELOP === 'string') {
-        stats[count].DEVELOP = JSON.parse(stats[count].DEVELOP)
-      }
-    }
-    // select fields if provided
-    if (fields) {
-      stats[count] = _.pick(stats[count], fields)
+    memberEnteredSkill.skills = tempSkill
+  } else {
+    // process skills in member aggregated skill
+    if (memberAggregatedSkill.hasOwnProperty('skills')) {
+      let tempSkill = {}
+      memberEnteredSkill.skills = mergeAggregatedSkill(memberAggregatedSkill, allTags, tempSkill)
+    } else {
+      memberEnteredSkill.skills = {}
     }
   }
-  return stats
+  return memberEnteredSkill
+}
+
+function mergeAggregatedSkill (memberAggregatedSkill, allTags, tempSkill) {
+  for (var key in memberAggregatedSkill.skills) {
+    var value = memberAggregatedSkill.skills[key]
+    if (!value.hidden) {
+      var tag = findTagById(allTags, Number(key))
+      if (tag) {
+        if (value.hasOwnProperty('sources')) {
+          if (value.sources.includes('CHALLENGE')) {
+            if (tempSkill[key]) {
+              value.tagName = tag.name
+              if (!value.hasOwnProperty('score')) {
+                value.score = tempSkill[key].score
+              } else {
+                if (value.score <= tempSkill[key].score) {
+                  value.score = tempSkill[key].score
+                }
+              }
+              value.sources.push(tempSkill[key].sources[0])
+            } else {
+              value.tagName = tag.name
+              if (!value.hasOwnProperty('score')) {
+                value.score = 0
+              }
+            }
+            tempSkill[key] = value
+          }
+        }
+      }
+    }
+  }
+  return tempSkill
+}
+
+function findTagById (data, id) {
+  return _.find(data, { 'id': id })
 }
 
 function getRatingColor (rating) {
@@ -343,8 +432,84 @@ function getRatingColor (rating) {
   return RATING_COLORS[i].color || 'black'
 }
 
-function paginate (array, page_size, page_number) {
-  return array.slice(page_number * page_size, page_number * page_size + page_size)
+function paginate (array, pageSize, pageNumber) {
+  return array.slice(pageNumber * pageSize, pageNumber * pageSize + pageSize)
+}
+
+async function parseGroupIds (groupIds) {
+  const idArray = _.filter(_.map(_.split(groupIds, ','), id => _.trim(id)), _.size)
+  const newIdArray = []
+  for (const id of idArray) {
+    if (_.isInteger(_.toNumber(id))) {
+      newIdArray.push(id)
+    } else {
+      try {
+        const { oldId } = await getGroupId(id)
+        if (!_.isNil(oldId)) {
+          newIdArray.push(oldId)
+        }
+      } catch (err) { }
+    }
+  }
+  return _.filter(_.uniq(newIdArray), _.size)
+}
+
+async function getGroupId (id) {
+  const token = await getM2MToken()
+  return new Promise(function (resolve, reject) {
+    request({ url: `${config.GROUPS_API_URL}/${id}`,
+      headers: {
+        Authorization: `Bearer ${token}`
+      } },
+    function (error, response, body) {
+      if (response.statusCode === 200) {
+        resolve(JSON.parse(body))
+      } else {
+        reject(error)
+      }
+    }
+    )
+  })
+}
+
+async function getAllowedGroupIds (currentUser, subjectUser, groupIds) {
+  // always load public stats if no groupId is provided
+  if (_.isUndefined(groupIds) || _.isEmpty(groupIds)) {
+    return [config.PUBLIC_GROUP_ID]
+  }
+
+  // if caller is anonymous user return public group.
+  if (_.isUndefined(currentUser)) {
+    return groupIds.split(',').indexOf(config.PUBLIC_GROUP_ID) !== -1 ? [config.PUBLIC_GROUP_ID] : []
+  }
+  const groups = await parseGroupIds(groupIds)
+
+  // admins and members themselves should be able to view all stats from all the groups.
+  if (canManageMember(currentUser, subjectUser)) {
+    return groups
+  }
+  const currentUserGroups = await getMemberGroups(currentUser.userId)
+  currentUserGroups.push(config.PUBLIC_GROUP_ID)
+  const commonGroups = _.intersection(groups, currentUserGroups)
+  return _.difference(commonGroups, config.PRIVATE_GROUP_IDS)
+}
+
+async function getMemberGroups (memberId) {
+  const token = await getM2MToken()
+  return new Promise(function (resolve, reject) {
+    request({ url: `${config.GROUPS_API_URL}/memberGroups/${memberId}`,
+      headers: {
+        Authorization: `Bearer ${token}`
+      } },
+    function (error, response, body) {
+      if (response.statusCode === 200) {
+        resolve(JSON.parse(body))
+      } else {
+        reject(error)
+      }
+    }
+    )
+  })
 }
 
 /*
@@ -377,7 +542,7 @@ const getParamsFromQueryAsArray = async (query, parameterName) => {
   return paramsArray
 }
 
-function secureMemberAddressData(member) {
+function secureMemberAddressData (member) {
   if (member.addresses) {
     member.addresses = _.map(member.addresses, (address) => _.omit(address, config.ADDRESS_SECURE_FIELDS))
   }
@@ -385,14 +550,14 @@ function secureMemberAddressData(member) {
   return member
 }
 
-function truncateLastName(member) {
+function truncateLastName (member) {
   if (member.lastName) {
-    member.lastName = member.lastName.substring(0,1)
+    member.lastName = member.lastName.substring(0, 1)
   }
   return member
 }
 
-function bigIntToNumber(value) {
+function bigIntToNumber (value) {
   if (value) {
     return Number(value)
   }
@@ -402,6 +567,7 @@ function bigIntToNumber(value) {
 module.exports = {
   wrapExpress,
   autoWrapExpress,
+  checkIfExists,
   hasAdminRole,
   hasAutocompleteRole,
   hasSearchByEmailRole,
@@ -411,9 +577,16 @@ module.exports = {
   parseCommaSeparatedString,
   setResHeaders,
   canManageMember,
-  cleanUpStatistics,
+  cleanupSkills,
+  mergeSkills,
+  mergeAggregatedSkill,
+  findTagById,
   getRatingColor,
   paginate,
+  parseGroupIds,
+  getGroupId,
+  getAllowedGroupIds,
+  getMemberGroups,
   getM2MToken,
   getParamsFromQueryAsArray,
   secureMemberAddressData,

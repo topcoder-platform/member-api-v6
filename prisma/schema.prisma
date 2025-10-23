@@ -1,10 +1,13 @@
 generator client {
   provider = "prisma-client-js"
+  // Generate a package-scoped client to avoid monorepo conflicts
+  output   = "./generated/client"
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["members"]
 }
 
 enum MemberStatus {
@@ -14,6 +17,7 @@ enum MemberStatus {
   INACTIVE_DUPLICATE_ACCOUNT
   INACTIVE_IRREGULAR_ACCOUNT
   UNKNOWN
+  @@schema("members")
 }
 
 enum FinancialStatus {
@@ -21,6 +25,7 @@ enum FinancialStatus {
   PAID
   FAILED
   CANCELLED
+  @@schema("members")
 }
 
 model member {
@@ -43,6 +48,8 @@ model member {
   newEmailVerifyToken String?
   newEmailVerifyTokenDate DateTime?
   addresses memberAddress[]
+
+  country String?
   homeCountryCode String?
   competitionCountryCode  String?
   photoURL  String?
@@ -58,7 +65,6 @@ model member {
   financial memberFinancial?
   historyStats memberHistoryStats[]
   memberStats memberStats[]
-  memberSkills memberSkill[]
   memberTraits memberTraits?
 
   createdAt   DateTime @default(now())
@@ -68,11 +74,15 @@ model member {
 
   @@index([handleLower])
   @@index([email])
+  @@index([status, handleLower])
+  @@index([lastLoginDate])
+  @@index([availableForGigs])
+  @@schema("members")
 }
 
 model memberAddress {
   id    BigInt  @id @default(autoincrement())
-  userId  BigInt 
+  userId  BigInt
   streetAddr1 String?
   streetAddr2 String?
   city        String?
@@ -88,14 +98,16 @@ model memberAddress {
   updatedBy   String?
 
   @@index([userId])
+  @@index([userId, type])
+  @@schema("members")
 }
 
 model memberMaxRating {
   id      BigInt @id @default(autoincrement())
   userId  BigInt
   rating  Int
-  track   String
-  subTrack  String
+  track   String?
+  subTrack  String?
   ratingColor String
 
   createdAt   DateTime @default(now())
@@ -108,6 +120,7 @@ model memberMaxRating {
 
   @@unique([userId])
   @@index([userId])
+  @@schema("members")
 }
 
 
@@ -156,7 +169,7 @@ model distributionStats {
   ratingRange3700To3799 Int
   ratingRange3800To3899 Int
   ratingRange3900To3999 Int
-  
+
 
   createdAt   DateTime @default(now())
   createdBy   String
@@ -164,6 +177,7 @@ model distributionStats {
   updatedBy   String?
 
   @@unique([track, subTrack])
+  @@schema("members")
 }
 
 model memberFinancial {
@@ -177,6 +191,7 @@ model memberFinancial {
   createdBy   String
   updatedAt   DateTime? @updatedAt
   updatedBy   String?
+  @@schema("members")
 }
 
 
@@ -195,9 +210,10 @@ model memberHistoryStats {
   updatedAt   DateTime? @updatedAt
   updatedBy   String?
 
-  @@unique([userId, isPrivate])
   @@index([userId])
   @@index([groupId])
+  @@index([userId, isPrivate])
+  @@schema("members")
 }
 
 model memberDevelopHistoryStats {
@@ -217,8 +233,9 @@ model memberDevelopHistoryStats {
   createdBy   String
   updatedAt   DateTime? @updatedAt
   updatedBy   String?
-	
+
   @@index([historyStatsId])
+  @@schema("members")
 }
 
 model memberDataScienceHistoryStats {
@@ -240,17 +257,18 @@ model memberDataScienceHistoryStats {
   createdBy   String
   updatedAt   DateTime? @updatedAt
   updatedBy   String?
-	
+
   @@index([historyStatsId])
+  @@schema("members")
 }
 
 model memberStats {
   id      BigInt @id @default(autoincrement())
   userId  BigInt
-  
+
   memberRatingId  BigInt?
   maxRating   memberMaxRating?  @relation(fields: [memberRatingId], references: [id], onDelete: NoAction)
-  
+
   challenges  Int?
   wins        Int?
   develop     memberDevelopStats?
@@ -268,7 +286,8 @@ model memberStats {
   updatedBy   String?
 
   @@index([userId])
-  @@unique([userId, isPrivate])
+  @@index([userId, groupId])
+  @@schema("members")
 }
 
 model memberCopilotStats {
@@ -292,6 +311,7 @@ model memberCopilotStats {
 
   @@index([memberStatsId])
   @@unique([memberStatsId])
+  @@schema("members")
 }
 
 model memberDevelopStats {
@@ -312,6 +332,7 @@ model memberDevelopStats {
 
   @@index([memberStatsId])
   @@unique([memberStatsId])
+  @@schema("members")
 }
 
 model memberDevelopStatsItem {
@@ -365,11 +386,12 @@ model memberDevelopStatsItem {
 
   @@index([developStatsId])
   @@unique([developStatsId, name])
+  @@schema("members")
 }
 
 model memberDesignStats {
   id    BigInt  @id @default(autoincrement())
-  memberStatsId  BigInt  
+  memberStatsId  BigInt
   challenges  BigInt?
   wins        BigInt?
   mostRecentSubmission  DateTime?
@@ -385,6 +407,7 @@ model memberDesignStats {
 
   @@index([memberStatsId])
   @@unique([memberStatsId])
+  @@schema("members")
 }
 
 model memberDesignStatsItem {
@@ -416,6 +439,7 @@ model memberDesignStatsItem {
 
   @@index([designStatsId])
   @@unique([designStatsId, name])
+  @@schema("members")
 }
 
 model memberDataScienceStats {
@@ -439,11 +463,12 @@ model memberDataScienceStats {
   updatedBy   String?
 
   @@index([memberStatsId])
+  @@schema("members")
 }
 
 model memberSrmStats {
   id    BigInt @id @default(autoincrement())
-  dataScienceStatsId  BigInt 
+  dataScienceStatsId  BigInt
 
   challenges  BigInt?
   wins        BigInt?
@@ -475,6 +500,7 @@ model memberSrmStats {
 
   @@index([dataScienceStatsId])
   @@unique([dataScienceStatsId])
+  @@schema("members")
 }
 
 model memberSrmChallengeDetail {
@@ -493,6 +519,7 @@ model memberSrmChallengeDetail {
   updatedBy   String?
 
   @@index([srmStatsId])
+  @@schema("members")
 }
 
 model memberSrmDivisionDetail {
@@ -513,6 +540,7 @@ model memberSrmDivisionDetail {
   updatedBy   String?
 
   @@index([srmStatsId])
+  @@schema("members")
 }
 
 model memberMarathonStats {
@@ -551,6 +579,7 @@ model memberMarathonStats {
 
   @@index([dataScienceStatsId])
   @@unique([dataScienceStatsId])
+  @@schema("members")
 }
 
 model memberTraits {
@@ -579,6 +608,7 @@ model memberTraits {
 
   @@unique([userId])
   @@index([userId])
+  @@schema("members")
 }
 
 enum DeviceType {
@@ -588,17 +618,21 @@ enum DeviceType {
   Smartphone
   Tablet
   Wearable
+  Other
+  @@schema("members")
 }
 
 model memberTraitDevice {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   deviceType  DeviceType
   manufacturer  String
   model         String
   operatingSystem String
+  osVersion     String?
+  osLanguage    String?
 
   memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
 
@@ -608,6 +642,7 @@ model memberTraitDevice {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 enum SoftwareType {
@@ -616,12 +651,13 @@ enum SoftwareType {
   Productivity
   GraphAndDesign
   Utilities
+  @@schema("members")
 }
 
 model memberTraitSoftware {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   softwareType  SoftwareType
   name          String
@@ -634,6 +670,7 @@ model memberTraitSoftware {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 enum ServiceProviderType {
@@ -642,12 +679,13 @@ enum ServiceProviderType {
   Television
   FinancialInstitution
   Other
+  @@schema("members")
 }
 
 model memberTraitServiceProvider {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   type  ServiceProviderType
   name  String
@@ -660,6 +698,7 @@ model memberTraitServiceProvider {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 enum WorkIndustryType {
@@ -673,12 +712,13 @@ enum WorkIndustryType {
   TechAndTechnologyService
   Telecoms
   TravelAndHospitality
+  @@schema("members")
 }
 
 model memberTraitWork {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   industry  WorkIndustryType?
   companyName   String
@@ -695,12 +735,13 @@ model memberTraitWork {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitEducation {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   collegeName String
   degree      String
@@ -714,12 +755,13 @@ model memberTraitEducation {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitBasicInfo {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   userId      BigInt
   country     String
@@ -739,13 +781,14 @@ model memberTraitBasicInfo {
 
   @@unique([memberTraitId])
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 
 model memberTraitLanguage {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   language  String
   spokenLevel String?
@@ -759,18 +802,20 @@ model memberTraitLanguage {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 // This model is used to send messages when user login. When profile not complete, it will show up.
 model memberTraitOnboardChecklist {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   listItemType  String  // Like 'profile_completed'
   date          DateTime
   message       String
   status        String
+  skip          Boolean?
   metadata      Json?
 
   memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
@@ -781,12 +826,13 @@ model memberTraitOnboardChecklist {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitPersonalization {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   key     String?
   value   Json?
@@ -799,12 +845,13 @@ model memberTraitPersonalization {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
 
 model memberTraitCommunity {
   id    BigInt @id @default(autoincrement())
 
-  memberTraitId BigInt 
+  memberTraitId BigInt
 
   communityName String
   status        Boolean
@@ -817,101 +864,5 @@ model memberTraitCommunity {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@schema("members")
 }
-
-// skill category
-model skillCategory {
-  id String @id @db.Uuid
-  name  String
-
-  skills skill[] // virtual relation
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-}
-
-// skill
-model skill {
-  id String @id @db.Uuid
-  name  String
-  categoryId  String @db.Uuid
-
-  category skillCategory @relation(fields: [categoryId], references: [id], onDelete: NoAction)
-
-  memberSkills memberSkill[]
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-}
-
-// display mode. Including name "principal" and "additional"
-model displayMode {
-  id String @id @db.Uuid
-  name  String
-
-  memberSkills memberSkill[]
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-}
-
-// skill level. Names are "verified" and "self-declared"
-model skillLevel {
-  id String @id @db.Uuid
-  name  String
-  description String
-
-  levels memberSkillLevel[]
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-}
-
-// many to many relations on member and skill
-model memberSkill {
-  id String @id @db.Uuid
-  userId  BigInt
-  skillId String @db.Uuid
-  displayModeId String? @db.Uuid
-
-  displayMode displayMode? @relation(fields: [displayModeId], references: [id], onDelete: NoAction)
-
-  levels memberSkillLevel[]
-
-  skill skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
-  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-
-  @@unique([userId, skillId])
-  @@index([userId])
-  @@index([skillId])
-}
-
-// many to many relations on memberSkill and skill level
-model memberSkillLevel {
-  memberSkillId String @db.Uuid
-  skillLevelId String @db.Uuid
-
-  memberSkill memberSkill @relation(fields: [memberSkillId], references: [id], onDelete: Cascade)
-  skillLevel skillLevel @relation(fields: [skillLevelId], references: [id], onDelete: NoAction)
-
-  createdAt   DateTime @default(now())
-  createdBy   String
-  updatedAt   DateTime? @updatedAt
-  updatedBy   String?
-
-  @@id([memberSkillId, skillLevelId])
-}
-

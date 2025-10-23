@@ -11,28 +11,24 @@ const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
 const constants = require('../../app-constants')
-const LookerApi = require('../common/LookerApi')
 const memberTraitService = require('./MemberTraitService')
 const mime = require('mime-types')
-const fileType = require('file-type');
+const fileType = require('file-type')
 const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
-const prisma = require('../common/prisma').getClient();
-
-const lookerService = new LookerApi(logger)
+const prismaHelper = require('../common/prismaHelper')
+const prismaManager = require('../common/prisma')
+const prisma = prismaManager.getClient()
+const skillsPrisma = prismaManager.getSkillsClient()
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
-  'addresses', 'description', 'email', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
-  'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs', 
+  'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
+  'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
   'skillScoreDeduction', 'namesAndHandleAppearance']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest']
-
-const auditFields = [
-  'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
-];
 
 /**
  * Clean member fields according to current user.
@@ -47,22 +43,22 @@ function cleanMember (currentUser, member, selectFields) {
     response = _.pick(response, selectFields)
   }
 
-  if(response.addresses){
+  if (response.addresses) {
     response.addresses.forEach((address) => {
-      if(address.stateCode===null){
-        address.stateCode=""
+      if (address.stateCode === null) {
+        address.stateCode = ''
       }
-      if(address.streetAddr1===null){
-        address.streetAddr1=""
+      if (address.streetAddr1 === null) {
+        address.streetAddr1 = ''
       }
-      if(address.streetAddr2===null){
-        address.streetAddr2=""
+      if (address.streetAddr2 === null) {
+        address.streetAddr2 = ''
       }
-      if(address.city===null){
-        address.city=""
+      if (address.city === null) {
+        address.city = ''
       }
-      if(address.zip===null){
-        address.zip=""
+      if (address.zip === null) {
+        address.zip = ''
       }
     })
   }
@@ -93,49 +89,14 @@ function omitMemberAttributes (currentUser, mb) {
  * Get member skills with user id
  * @param {BigInt} userId prisma BigInt userId
  */
-async function getMemberSkills(userId) {
-  const skillList = await prisma.memberSkill.findMany({
+async function getMemberSkills (userId) {
+  const skillList = await skillsPrisma.userSkill.findMany({
     where: {
-      userId: userId
+      userId: helper.bigIntToNumber(userId)
     },
-    include: {
-      levels: { include: { skillLevel: true } },
-      skill: { include: { category: true } },
-      displayMode: true
-    }
-  });
-  // convert to response format
-  return _.map(skillList, item => {
-    const ret = _.pick(item.skill, ['id', 'name']);
-    ret.category = _.pick(item.skill.category, ['id', 'name']);
-    if (item.displayMode) {
-      ret.displayMode = _.pick(item.displayMode, ['id', 'name']);
-    }
-    // set levels
-    if (item.levels && item.levels.length > 0) {
-      ret.levels = _.map(item.levels, 
-        lvl => _.pick(lvl.skillLevel, ['id', 'name', 'description']));
-    }
-    return ret;
-  });
-}
-
-/**
- * Convert member prisma data to response
- * @param {Object} member prisma member data
- */
-function convertPrisma(member) {
-  member.userId = helper.bigIntToNumber(member.userId);
-  member.createdAt = member.createdAt.getTime();
-  member.updatedAt = member.updatedAt.getTime();
-  if (member.maxRating) {
-    member.maxRating = _.omit(member.maxRating, 
-      ['id', 'userId', ...auditFields])
-  }
-  if (member.addresses) {
-    member.addresses = _.map(member.addresses, d => _.omit(d, 
-      ['id', 'userId', ...auditFields]))
-  }
+    include: prismaHelper.skillsIncludeParams
+  })
+  return prismaHelper.buildMemberSkills(skillList)
 }
 
 /**
@@ -163,22 +124,17 @@ async function getMember (currentUser, handle, query) {
   }
 
   // To keep original business logic, let's use findMany
-  const member = await prisma.member.findUnique(prismaFilter);
+  const member = await prisma.member.findUnique(prismaFilter)
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
   }
   // convert members data structure to response
-  convertPrisma(member);
+  prismaHelper.convertMember(member)
   // get member skills
   if (_.includes(selectFields, 'skills')) {
     member.skills = await getMemberSkills(member.userId)
   }
 
-  try{
-    member.verified = await lookerService.isMemberVerified(member.userId)
-  } catch (e) {
-    console.log("Error when contacting Looker: " + JSON.stringify(e))
-  }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
@@ -199,33 +155,33 @@ getMember.schema = {
  * @returns {Object} the member profile data
  */
 async function getProfileCompleteness (currentUser, handle, query) {
-  // Don't pass the query parameter to the trait service - we want *all* traits and member data 
+  // Don't pass the query parameter to the trait service - we want *all* traits and member data
   // to come back for calculation of the completeness
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = {'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs'}
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs' }
   const member = await getMember(currentUser, handle, memberFields)
 
-  //Used for calculating the percentComplete
+  // Used for calculating the percentComplete
   let completeItems = 0
 
   // Magic number - 6 total items for profile "completeness"
   // TODO: Bump this back up to 7 once verification is implemented
   const totalItems = 6
 
-  response = {}
+  let response = {}
   response.userId = member.userId
   response.handle = member.handle
-  data = {}
+  let data = {}
 
   // We use this to hold the items not completed, and then randomly pick one
   // to use when showing the "toast" to prompt the user to complete an item in their profile
-  showToast = []
-  //Set default values
+  let showToast = []
+  // Set default values
 
   // TODO: Turn this back on once we have verification flow implemented elsewhere
-  //data.verified = false
+  // data.verified = false
 
   data.skills = false
   data.gigAvailability = false
@@ -234,41 +190,39 @@ async function getProfileCompleteness (currentUser, handle, query) {
   data.workHistory = false
   data.education = false
 
-  if(member.availableForGigs != null){
+  if (member.availableForGigs != null) {
     completeItems += 1
     data.gigAvailability = true
   }
 
   _.forEach(memberTraits, (item) => {
-    if(item.traitId=="education" && item.traits.data.length > 0 && data.education == false){
+    if (item.traitId === 'education' && item.traits.data.length > 0 && data.education === false) {
       completeItems += 1
       data.education = true
     }
 
-    if(item.traitId=="work" && item.traits.data.length > 0 && data.workHistory==false){
+    if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory === false) {
       completeItems += 1
       data.workHistory = true
     }
-    
   })
   // Push on the incomplete traits for picking a random toast to show
-  if(!data.education){
-    showToast.push("education")
+  if (!data.education) {
+    showToast.push('education')
   }
-  if(!data.workHistory){
-    showToast.push("workHistory")
+  if (!data.workHistory) {
+    showToast.push('workHistory')
   }
-  if(!data.gigAvailability){
-    showToast.push("gigAvailability")
+  if (!data.gigAvailability) {
+    showToast.push('gigAvailability')
   }
 
   // TODO: Do we use the short bio or the "description" field of the member object?
-  if(member.description && data.bio==false) {
+  if (member.description && !data.bio) {
     completeItems += 1
     data.bio = true
-  }
-  else{
-    showToast.push("bio")
+  } else {
+    showToast.push('bio')
   }
 
   // TODO: Turn this back on once verification is implemented
@@ -280,32 +234,29 @@ async function getProfileCompleteness (currentUser, handle, query) {
   //   showToast.push("verified")
   // }
 
-  //Must have at least 3 skills entered
-  if(member.skills && member.skills.length >= 3 ){
+  // Must have at least 3 skills entered
+  if (member.skills && member.skills.length >= 3) {
     completeItems += 1
-    data.skills=true
-  }
-  else{
-    showToast.push("skills")
+    data.skills = true
+  } else {
+    showToast.push('skills')
   }
 
-  if(member.photoURL){
+  if (member.photoURL) {
     completeItems += 1
     data.profilePicture = true
-  }
-  else{
-    showToast.push("profilePicture")
+  } else {
+    showToast.push('profilePicture')
   }
 
   // Calculate the percent complete and round to 2 decimal places
   data.percentComplete = Math.round(completeItems / totalItems * 100) / 100
-  response.data=data
+  response.data = data
 
   // Pick a random, unfinished item to show in the toast after the user logs in
-  if(showToast.length > 0 && !query.toast){
+  if (showToast.length > 0 && !query.toast) {
     response.showToast = showToast[Math.floor(Math.random() * showToast.length)]
-  }
-  else if(query.toast){
+  } else if (query.toast) {
     response.showToast = query.toast
   }
 
@@ -328,14 +279,14 @@ getProfileCompleteness.schema = {
  * @returns {Object} uid_signature: user's hashed userId
  */
 async function getMemberUserIdSignature (currentUser, query) {
-  const hashingSecret = config.HASHING_KEYS[(query.type || '').toUpperCase()];
+  const hashingSecret = config.HASHING_KEYS[(query.type || '').toUpperCase()]
 
-  const userid_hash = crypto
-      .createHmac('sha256', hashingSecret)
-      .update(currentUser.userId)
-      .digest('hex');
+  const userIdHash = crypto
+    .createHmac('sha256', hashingSecret)
+    .update(currentUser.userId)
+    .digest('hex')
 
-      return { uid_signature: userid_hash };
+  return { uid_signature: userIdHash }
 }
 
 getMemberUserIdSignature.schema = {
@@ -369,7 +320,7 @@ async function updateMember (currentUser, handle, query, data) {
   if (emailChanged) {
     const emailCount = await prisma.member.count({
       where: { email: data.email }
-    });
+    })
     if (emailCount > 0) {
       throw new errors.EmailRegisteredError(`Email "${data.email}" is already registered`)
     }
@@ -391,29 +342,32 @@ async function updateMember (currentUser, handle, query, data) {
       // clear current addresses
       await tx.memberAddress.deleteMany({
         where: { userId: member.userId }
-      });
+      })
       // create new addresses
       await tx.memberAddress.createMany({
         data: _.map(data.addresses, t => ({
           ...t,
+          // default address type to HOME if not provided
+          type: t.type || 'HOME',
           userId: member.userId,
           createdBy: operatorId
         }))
       })
     }
     // clear addresses so it doesn't affect prisma.udpate
-    delete data.addresses;
+    delete data.addresses
 
-    return await tx.member.update({
+    return tx.member.update({
       where: { userId: member.userId },
       data,
       include: { addresses: true }
-    });
-  });
-  
-  // convert prisma data to response format
-  convertPrisma(result);
+    })
+  })
 
+  // convert prisma data to response format
+  prismaHelper.convertMember(result)
+  // send data to event bus
+  await helper.postBusEvent(constants.TOPICS.MemberUpdated, result)
   if (emailChanged) {
     // send email verification to old email
     await helper.postBusEvent(constants.TOPICS.EmailChanged, {
@@ -464,6 +418,7 @@ updateMember.schema = {
       type: Joi.string()
     })),
     verified: Joi.bool(),
+    country: Joi.string(),
     homeCountryCode: Joi.string(),
     competitionCountryCode: Joi.string(),
     photoURL: Joi.string().uri().allow('').allow(null),
@@ -516,10 +471,12 @@ async function verifyEmail (currentUser, handle, query) {
   member.updatedAt = new Date()
   member.updatedBy = currentUser.userId || currentUser.sub
   // update member in db
-  await prisma.member.update({
+  const result = await prisma.member.update({
     where: { userId: member.userId },
-    data: member
+    data: _.omit(member, ['maxRating'])
   })
+  prismaHelper.convertMember(result)
+  await helper.postBusEvent(constants.TOPICS.MemberUpdated, result)
   return { emailChangeCompleted, verifiedEmail }
 }
 
@@ -557,16 +514,16 @@ async function uploadPhoto (currentUser, handle, files) {
     } characters.`)
   }
   // mime type validation
-  const type = await fileType.fromBuffer(file.data);
-  const fileContentType = type.mime;
+  const type = await fileType.fromBuffer(file.data)
+  const fileContentType = type.mime
   if (!fileContentType || !fileContentType.startsWith('image/')) {
     throw new errors.BadRequestError('The photo should be an image file.')
   }
   // content type validation
   const isImage = fileTypeChecker.validateFileType(
     file.data,
-    ['jpeg', 'png'],
-  );
+    ['jpeg', 'png']
+  )
   if (!isImage) {
     throw new errors.BadRequestError('The photo should be an image file, either jpg, jpeg or png.')
   }
@@ -578,18 +535,18 @@ async function uploadPhoto (currentUser, handle, files) {
   }
 
   const sanitizedBuffer = await sharp(file.data)
-  .toBuffer();
+    .toBuffer()
 
   if (bufferContainsScript(sanitizedBuffer)) {
     throw new errors.BadRequestError('Sanitized photo should not contain any scripts or iframes.')
   }
-  
+
   // upload photo to S3
   // const photoURL = await helper.uploadPhotoToS3(file.data, file.mimetype, file.name)
   const photoURL = await helper.uploadPhotoToS3(sanitizedBuffer, file.mimetype, fileName)
 
   // update member's photoURL
-  await prisma.member.update({
+  const result = await prisma.member.update({
     where: { userId: member.userId },
     data: {
       photoURL,
@@ -597,6 +554,9 @@ async function uploadPhoto (currentUser, handle, files) {
       updatedBy: currentUser.userId || currentUser.sub
     }
   })
+  prismaHelper.convertMember(result)
+  // post bus event
+  await helper.postBusEvent(constants.TOPICS.MemberUpdated, result)
   return { photoURL }
 }
 

@@ -46,6 +46,7 @@ logger.logFullError = (err, signature) => {
  * @returns {Object} the new object with removed properties
  * @private
  */
+/*
 const _sanitizeObject = (obj) => {
   try {
     return JSON.parse(JSON.stringify(obj, (name, value) => {
@@ -58,6 +59,7 @@ const _sanitizeObject = (obj) => {
     return obj
   }
 }
+*/
 
 /**
  * Convert array with arguments to object
@@ -82,7 +84,7 @@ logger.decorateWithLogging = (service) => {
     return
   }
   _.each(service, (method, name) => {
-    const params = method.params || getParams(method)
+    // const params = method.params || getParams(method)
     service[name] = async function () {
       logger.debug(`ENTER ${name}`)
       // logger.debug('input arguments')

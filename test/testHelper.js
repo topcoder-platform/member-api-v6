@@ -1,8 +1,6 @@
 /**
  * This file defines common helper methods used for tests
  */
-const config = require('config')
-const helper = require('../src/common/helper')
 const _ = require('lodash')
 const prisma = require('../src/common/prisma').getClient()
 
@@ -11,7 +9,7 @@ const member1 = {
     rating: 1000,
     track: 'dev',
     subTrack: 'code',
-    ratingColor: '',
+    ratingColor: ''
   },
   userId: 123,
   firstName: 'first name',
@@ -96,7 +94,7 @@ const member2 = {
   updatedBy: 'test2'
 }
 
-function testDataToPrisma(data) {
+function testDataToPrisma (data) {
   const ret = _.omit(data, ['addresses', 'maxRating'])
   ret.maxRating = {
     create: {
@@ -139,7 +137,7 @@ async function createData () {
 async function clearData () {
   // remove data in DB
   const memberIds = [member1.userId, member2.userId]
-  const filter = { where: { userId : { in: memberIds } } }
+  const filter = { where: { userId: { in: memberIds } } }
 
   await prisma.memberTraits.deleteMany(filter)
   await prisma.memberAddress.deleteMany(filter)

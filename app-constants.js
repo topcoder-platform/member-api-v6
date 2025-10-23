@@ -2,7 +2,7 @@
  * App constants
  */
 const ADMIN_ROLES = ['administrator', 'admin']
-const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin');
+const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin')
 const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive']
 
 const EVENT_ORIGINATOR = 'topcoder-member-api'

@@ -12,7 +12,6 @@ const awsMock = require('aws-sdk-mock')
 const service = require('../../src/services/MemberService')
 const testHelper = require('../testHelper')
 
-
 const should = chai.should()
 
 const photoContent = fs.readFileSync(path.join(__dirname, '../photo.png'))
@@ -30,12 +29,12 @@ describe('member service unit tests', () => {
 
     // mock S3 before creating S3 instance
     awsMock.mock('S3', 'getObject', (params, callback) => {
-      callback(null, { Body: Buffer.from(photoContent) });
-    });
+      callback(null, { Body: Buffer.from(photoContent) })
+    })
 
     awsMock.mock('S3', 'upload', (params, callback) => {
-      callback(null);
-    });
+      callback(null)
+    })
   })
 
   after(async () => {

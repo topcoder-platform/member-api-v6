@@ -99,7 +99,7 @@ describe('member trait service unit tests', () => {
         data: [{
           industry: 'Banking',
           companyName: 'JP Morgan',
-          position: 'Manager' 
+          position: 'Manager'
         }]
       }
     }
@@ -171,12 +171,12 @@ describe('member trait service unit tests', () => {
         await service.createTraits({ isMachine: true, sub: 'sub1' }, member1.handle, [{
           traitId: 'work',
           categoryName: 'category',
-          traits: { 
+          traits: {
             traitId: 'work',
-            data: [{ 
+            data: [{
               industry: 'Banking',
               companyName: 'JP Morgan',
-              position: 'Manager' 
+              position: 'Manager'
             }] },
           other: 123
         }])

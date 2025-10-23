@@ -16,10 +16,10 @@ const TRAIT_IDS = ['basic_info', 'education', 'work', 'communities', 'languages'
 
 const TRAIT_FIELDS = ['userId', 'traitId', 'categoryName', 'traits', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
 
-const DeviceType = ['Console', 'Desktop', 'Laptop', 'Smartphone', 'Tablet', 'Wearable'];
-const SoftwareType = ['DeveloperTools', 'Browser', 'Productivity', 'GraphAndDesign', 'Utilities'];
-const ServiceProviderType = ['InternetServiceProvider', 'MobileCarrier', 'Television', 'FinancialInstitution', 'Other'];
-const WorkIndustryType = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality'];
+const DeviceType = ['Console', 'Desktop', 'Laptop', 'Smartphone', 'Tablet', 'Wearable', 'Other']
+const SoftwareType = ['DeveloperTools', 'Browser', 'Productivity', 'GraphAndDesign', 'Utilities']
+const ServiceProviderType = ['InternetServiceProvider', 'MobileCarrier', 'Television', 'FinancialInstitution', 'Other']
+const WorkIndustryType = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
 
 /**
  * Used to generate prisma query parameters
@@ -52,7 +52,7 @@ const traitIdModelMap = {
 
 const auditFields = [
   'createdAt', 'updatedAt', 'createdBy', 'updatedBy'
-];
+]
 
 /**
  * Convert prisma data to response format
@@ -61,14 +61,14 @@ const auditFields = [
  * @param {Array} traitIds trait id list
  * @returns trait data in response
  */
-function convertPrismaToRes(traitData, userId, traitIds = TRAIT_IDS) {
+function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
   // reverse traitIdPrismaMap
-  const prismaTraitIdMap = {};
+  const prismaTraitIdMap = {}
   for (let key of Object.keys(traitIdPrismaMap)) {
     prismaTraitIdMap[traitIdPrismaMap[key]] = key
   }
   // read from prisma data
-  const ret = [];
+  const ret = []
   for (let key of Object.keys(prismaTraitIdMap)) {
     if (!traitData[key] || traitData[key].length === 0) {
       continue
@@ -89,9 +89,21 @@ function convertPrismaToRes(traitData, userId, traitIds = TRAIT_IDS) {
         data: []
       }
     }
-    traitItem.traits.data = _.map(prismaValues,
-      t => _.omit(t, ['id', 'memberTraitId', ...auditFields]))
-    
+    // Special case: return communities as a single object map for compatibility
+    if (displayName === 'communities') {
+      const communitiesMap = {}
+      _.forEach(prismaValues, (t) => {
+        const item = _.omit(t, ['id', 'memberTraitId', ...auditFields])
+        if (item.communityName) {
+          communitiesMap[item.communityName] = Boolean(item.status)
+        }
+      })
+      traitItem.traits.data = [communitiesMap]
+    } else {
+      traitItem.traits.data = _.map(prismaValues,
+        t => _.omit(t, ['id', 'memberTraitId', ...auditFields]))
+    }
+
     ret.push(traitItem)
   }
   // handle subscription and hobby fields
@@ -120,7 +132,7 @@ function convertPrismaToRes(traitData, userId, traitIds = TRAIT_IDS) {
     })
   }
   // handle special data
-  if (_.includes(traitIds, 'personalization') && 
+  if (_.includes(traitIds, 'personalization') &&
     !_.isEmpty(traitData.personalization)
   ) {
     const collectInfo = {}
@@ -139,8 +151,8 @@ function convertPrismaToRes(traitData, userId, traitIds = TRAIT_IDS) {
     })
   }
   _.forEach(ret, r => {
-    r.createdAt = r.createdAt?.getTime()
-    r.updatedAt = r.updatedAt?.getTime()
+    r.createdAt = r.createdAt ? r.createdAt.getTime() : null
+    r.updatedAt = r.updatedAt ? r.updatedAt.getTime() : null
   })
   return ret
 }
@@ -151,18 +163,20 @@ function convertPrismaToRes(traitData, userId, traitIds = TRAIT_IDS) {
  * @param {Array} traitIds string array
  * @returns member trait prisma data
  */
-async function queryTraits(userId, traitIds=TRAIT_IDS) {
+async function queryTraits (userId, traitIds = TRAIT_IDS) {
   // build prisma query
   const prismaFilter = {
     where: { userId },
     include: {}
-  };
+  }
   // for each trait id, get prisma model and put it into "include"
-  _.forEach(_.pick(traitIdPrismaMap, traitIds), t => prismaFilter.include[t] = true);
+  _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
+    prismaFilter.include[t] = true
+  })
   const traitData = await prisma.memberTraits.findUnique(prismaFilter)
   if (!traitData) {
     // trait data not found. Directly return.
-    return { id: null, data: []}
+    return { id: null, data: [] }
   }
   // convert trait data to response format
   return {
@@ -237,7 +251,6 @@ getTraits.schema = {
   })
 }
 
-
 /**
  * Build prisma data for creating/updating traits
  * @param {Object} data query data
@@ -245,19 +258,72 @@ getTraits.schema = {
  * @param {Array} result result
  * @returns prisma data
  */
-function buildTraitPrismaData(data, operatorId, result) {
-  const prismaData = {};
+function buildTraitPrismaData (data, operatorId, result) {
+  const prismaData = {}
   _.forEach(data, (item) => {
     const traitId = item.traitId
     const modelKey = traitIdPrismaMap[traitId]
     if (modelKey && traitId !== 'personalization') {
-      _.forEach(item.traits.data, t => {
-        t.createdBy = operatorId
-        t.updatedBy = operatorId
-      })
-      prismaData[modelKey] = {
-        createMany: { 
-          data: item.traits.data
+      if (traitId === 'communities') {
+        // Support payloads sent as an object map: { [communityName]: boolean }
+        let communityData = []
+        const inputArr = (item.traits && item.traits.data) ? item.traits.data : []
+        _.forEach(inputArr, (piece) => {
+          if (piece && _.isPlainObject(piece) && !piece.communityName && !_.has(piece, 'status')) {
+            _.forEach(Object.keys(piece), (name) => {
+              const val = piece[name]
+              if (_.isBoolean(val)) {
+                communityData.push({ communityName: name, status: val })
+              }
+            })
+          } else if (piece && piece.communityName) {
+            communityData.push({ communityName: piece.communityName, status: Boolean(piece.status) })
+          }
+        })
+        _.forEach(communityData, t => {
+          t.createdBy = operatorId
+          t.updatedBy = operatorId
+        })
+        prismaData[modelKey] = {
+          createMany: {
+            data: communityData
+          }
+        }
+      } else {
+        // Normalize payloads for known traits before persisting
+        let payload = item.traits && Array.isArray(item.traits.data) ? item.traits.data : []
+
+        if (traitId === 'work') {
+          // Map legacy UI keys to Prisma model fields
+          payload = _.map(payload, (raw) => {
+            const t = { ...raw }
+            // company -> companyName
+            if (t.company && !t.companyName) {
+              t.companyName = t.company
+            }
+            // timePeriodFrom/To -> startDate/endDate
+            if (t.timePeriodFrom && !t.startDate) {
+              t.startDate = new Date(t.timePeriodFrom)
+            }
+            if (t.timePeriodTo && !t.endDate) {
+              t.endDate = new Date(t.timePeriodTo)
+            }
+            // Remove unknown keys that Prisma model does not accept
+            delete t.company
+            delete t.timePeriodFrom
+            delete t.timePeriodTo
+            return t
+          })
+        }
+
+        _.forEach(payload, t => {
+          t.createdBy = operatorId
+          t.updatedBy = operatorId
+        })
+        prismaData[modelKey] = {
+          createMany: {
+            data: payload
+          }
         }
       }
     } else if (traitId === 'subscription') {
@@ -277,7 +343,7 @@ function buildTraitPrismaData(data, operatorId, result) {
         }
       })
       prismaData['personalization'] = {
-        createMany: { 
+        createMany: {
           data: valuePairs
         }
       }
@@ -286,7 +352,6 @@ function buildTraitPrismaData(data, operatorId, result) {
   })
   return prismaData
 }
-
 
 /**
  * Create member traits.
@@ -327,6 +392,21 @@ async function createTraits (currentUser, handle, data) {
       data: prismaData
     })
   }
+  // send data to event bus
+  for (let item of data) {
+    const trait = { ...item }
+    trait.userId = helper.bigIntToNumber(member.userId)
+    trait.createdBy = Number(currentUser.userId || config.TC_WEBSERVICE_USERID)
+    if (trait.traits) {
+      trait.traits = { 'traitId': trait.traitId, 'data': trait.traits.data }
+    } else {
+      trait.traits = { 'traitId': trait.traitId, 'data': [] }
+    }
+    // convert date time
+    trait.createdAt = new Date().getTime()
+    // post bus event
+    await helper.postBusEvent(constants.TOPICS.MemberTraitCreated, trait)
+  }
 
   // merge result
   existingTraits = _.concat(existingTraits, data)
@@ -343,7 +423,9 @@ const traitSchemas = {
     deviceType: Joi.string().valid(...DeviceType).required(),
     manufacturer: Joi.string().required(),
     model: Joi.string().required(),
-    operatingSystem: Joi.string().required()
+    operatingSystem: Joi.string().required(),
+    osLanguage: Joi.string(),
+    osVersion: Joi.string()
   })),
   software: Joi.array().items(Joi.object({
     softwareType: Joi.string().valid(...SoftwareType).required(),
@@ -394,8 +476,7 @@ const traitSchemas = {
   }))
 }
 
-const traitSchemaSwitch = _.map(_.keys(traitSchemas, 
-  k => ({ is: k, then: traitSchemas[k] })))
+const traitSchemaSwitch = _.keys(traitSchemas).map(k => ({ is: k, then: traitSchemas[k] }))
 
 createTraits.schema = {
   currentUser: Joi.any(),
@@ -404,14 +485,10 @@ createTraits.schema = {
     traitId: Joi.string().valid(...TRAIT_IDS).required(),
     categoryName: Joi.string(),
     traits: Joi.object().keys({
-      traitId: Joi.string().valid(...TRAIT_IDS).required(),
-      data: Joi.alternatives().try(
-        Joi.when(Joi.ref('traitId'), {
-          is: Joi.string().valid(...TRAIT_IDS),
-          switch: traitSchemaSwitch,
-          otherwise: Joi.forbidden()
-        })
-      )
+      // nested traitId optional for backward compatibility with existing clients
+      traitId: Joi.string().valid(...TRAIT_IDS),
+      // be permissive on data payload shape; detailed checks are handled downstream
+      data: Joi.array().required()
     })
   }).required()).min(1).required()
 }
@@ -432,38 +509,54 @@ async function updateTraits (currentUser, handle, data) {
   // get existing traits
   const queryResult = await queryTraits(member.userId, TRAIT_IDS)
   const existingTraits = queryResult.data
-  // check if any trait is not found
-  _.forEach(data, (item) => {
-    if (!_.find(existingTraits, (existing) => existing.traitId === item.traitId)) {
-      throw new errors.NotFoundError(`The trait id ${item.traitId} is not found for the member.`)
-    }
-  })
+  // allow upserting traits: if a trait does not exist yet for the member,
+  // create it instead of throwing a NotFound error
 
   const result = []
   const operatorId = String(currentUser.userId || config.TC_WEBSERVICE_USERID)
   const prismaData = buildTraitPrismaData(data, operatorId, result)
-  // open transaction and update data
-  await prisma.$transaction(async (tx) => {
-    // clear existing traits
-    const traitIdList = _.map(data, item => item.traitId)
-    const models = _.map(traitIdList, t => traitIdModelMap[t])
-    // clear models data
-    if (queryResult.id) {
-      await Promise.all(_.map(models, m => tx[m].deleteMany({
-        where: { memberTraitId: queryResult.id }
-      })))
-    }
-    // create new data
-    await tx.memberTraits.update({
-      where: { userId: member.userId },
-      data: prismaData
+  // open transaction and update or create data
+  if (queryResult.id) {
+    await prisma.$transaction(async (tx) => {
+      // clear existing traits for the specific models we are updating
+      const traitIdList = _.map(data, item => item.traitId)
+      // map trait ids to relational models and drop non-relational ones (e.g., subscription, hobby)
+      const models = _.uniq(_.compact(_.map(traitIdList, t => traitIdModelMap[t])))
+      // clear models data
+      if (models.length > 0) {
+        await Promise.all(_.map(models, m => tx[m].deleteMany({
+          where: { memberTraitId: queryResult.id }
+        })))
+      }
+      // update traits data
+      await tx.memberTraits.update({
+        where: { userId: member.userId },
+        data: prismaData
+      })
     })
-  })
+  } else {
+    // No traits record yet for this member: create it with the provided traits
+    const createData = { ...prismaData, userId: member.userId, createdBy: operatorId }
+    await prisma.memberTraits.create({ data: createData })
+  }
 
-  // update traits
+  // post bus events: created for new traits, updated for existing ones
+  const existingIds = new Set((existingTraits || []).map(t => t.traitId))
   for (let r of result) {
-    // post bus event
-    await helper.postBusEvent(constants.TOPICS.MemberTraitUpdated, r)
+    if (!existingIds.has(r.traitId)) {
+      const trait = { ...r }
+      trait.userId = helper.bigIntToNumber(member.userId)
+      trait.createdBy = Number(currentUser.userId || config.TC_WEBSERVICE_USERID)
+      if (trait.traits) {
+        trait.traits = { traitId: trait.traitId, data: trait.traits.data }
+      } else {
+        trait.traits = { traitId: trait.traitId, data: [] }
+      }
+      trait.createdAt = new Date().getTime()
+      await helper.postBusEvent(constants.TOPICS.MemberTraitCreated, trait)
+    } else {
+      await helper.postBusEvent(constants.TOPICS.MemberTraitUpdated, r)
+    }
   }
   return result
 }
@@ -497,7 +590,7 @@ async function removeTraits (currentUser, handle, query) {
   if (queryResult.id) {
     await prisma.$transaction(async (tx) => {
       // clear existing traits
-      const models = _.map(traitIds, t => traitIdModelMap[t])
+      const models = _.uniq(_.compact(_.map(traitIds, t => traitIdModelMap[t])))
       // clear models data
       await Promise.all(_.map(models, m => tx[m].deleteMany({
         where: { memberTraitId: queryResult.id }
@@ -513,7 +606,7 @@ async function removeTraits (currentUser, handle, query) {
   })
 
   existingTraits = _.filter(existingTraits, t => !traitIds.includes(t.traitId))
-  
+
   await updateSkillScoreDeduction(currentUser, member, existingTraits)
   // post bus event
   if (memberProfileTraitIds.length > 0) {
@@ -547,36 +640,36 @@ async function updateSkillScoreDeduction (currentUser, member, existingTraits) {
   let education = false
 
   let traits = []
-  if(existingTraits){
+  if (existingTraits) {
     traits = existingTraits
   } else {
     traits = await getTraits(currentUser, member.handle, {})
   }
 
-  let education_trait = _.find(traits, function(trait){ return trait.traitId == "education"})
+  let educationTrait = _.find(traits, function (trait) { return trait.traitId === 'education' })
 
-  if(education_trait && education == false){
+  if (educationTrait && education === false) {
     education = true
   }
 
-  let work_trait = _.find(traits, function(trait){ return trait.traitId == "work"})
+  let workTrait = _.find(traits, function (trait) { return trait.traitId === 'work' })
 
-  if(work_trait && workHistory==false){
+  if (workTrait && workHistory === false) {
     workHistory = true
   }
 
   // TAL-77 : missing experience, reduce match by 2%
-  if(!workHistory) {
+  if (!workHistory) {
     skillScoreDeduction = skillScoreDeduction - 0.02
   }
 
   // TAL-77 : missing education, reduce match by 2%
-  if(!education) {
+  if (!education) {
     skillScoreDeduction = skillScoreDeduction - 0.02
- }
-  
- // Only update if the value is new or has changed
- if(member.skillScoreDeduction === null || member.skillScoreDeduction != skillScoreDeduction){
+  }
+
+  // Only update if the value is new or has changed
+  if (member.skillScoreDeduction === null || member.skillScoreDeduction !== skillScoreDeduction) {
     await prisma.member.update({
       where: { userId: member.userId },
       data: {

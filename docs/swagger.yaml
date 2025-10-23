@@ -1,0 +1,2840 @@
+swagger: '2.0'
+info:
+  version: V6
+  title: Topcoder Member API
+  description: >
+    Services that provide access and interaction with all sorts of member profile details.
+
+
+    # Pagination
+
+
+    - Requests that return multiple items will be paginated to 20 items by
+    default.
+
+
+    - You can specify further pages with the `page` parameter (1 based).
+
+
+    - You can also set a custom page size up to 100 with the `perPage`
+    parameter.
+
+
+    - Pagination response data is included in http headers.
+
+
+    - By default, the response header contains links with `next`, `last`,
+    `first`, `prev` resource links.
+
+    # Roles
+
+    Each API endpoint has described minimal role to access. Only users with
+    specific roles can access those endpoints (where required). For insufficient
+    role 403 Forbidden HTTP response will be returned.
+
+
+    ## User roles:
+
+      + `administrator`
+      + `Connect Manager` 
+      + `Connect Admin` 
+      + `copilot`
+      + `Client Manager` 
+      + `Connect Account Manager`
+      + `Connect Copilot Manager`
+
+    # Personally Identifiable Information
+
+    All endpoints that return member information must filter the response data
+    to exclude the personally identifiable information (properties from a
+    configurable array) unless the caller is a machine (M2M token), has
+    administrative privileges or is the member himself.
+
+    # Secure Member Fields
+    
+    ## Member Secure Fields
+    
+    Member identifiable info fields, only admin, M2M, or member himself can get these fields - `addresses`, `createdBy`, `updatedBy`
+    
+    ## Member Communication Fields 
+    
+    Member fields used for communication are accessible by managers, copilots, and admins.  These include: `firstName`, `lastName`, `email`
+    
+    ## Member Traits Secure Fields
+    
+    Member traits identifiable info fields, only admin, M2M, or member himself can fetch these fields - `createdBy`, `updatedBy`
+
+    ## Search Secure Fields
+    
+    Member search identifiable info fields, only admin, M2M, or member himself can get these fields - `firstName`, `lastName`, `email`, `addresses`, `createdBy`, `updatedBy`
+
+    ## Statistics Secure Fields
+    
+    Member statistics identifiable info fields, only admin, M2M, or member himself can fetch these fields - `createdBy`,`updatedBy`
+
+    ## Miscellaneous Secure Fields
+    
+    Miscellaneous identifiable info fields, only admin, M2M, or member himself can fetch these fields - `createdBy`,`updatedBy`
+    
+    
+    # Status codes:
+
+    The HTTP status codes to communicate with the API consumer.
+
+    + `200 OK` - Response to a successful GET, PUT, PATCH or DELETE.
+
+    + `201 Created` - When a resource is successfully created with POST.
+
+    + `400 Bad Request` - Malformed request; request body validation errors.
+
+    + `401 Unauthorized` - When no or invalid authentication details are
+    provided.
+
+    + `403 Forbidden` - User authenticated, but doesn't have access to the
+    resource.
+
+    + `404 Not Found` - When a non-existent resource is requested.
+
+    + `500 Server Error` - Something went wrong on the API end.
+    
+    
+    # Authorization:
+    
+    Authorization is when an entity proves a right to access.
+    
+    ## HTTP Authentication Schemes
+    
+    Bearer Authentication (also called token authentication) is an HTTP authentication scheme that involves security tokens called bearer tokens. We will be using Auth0 tokens that could be JWT or M2M
+    
+    
+    The client must send this token in the Authorization header when making requests to protected resources:
+    
+    
+    `Authorization: Bearer <token>`
+    
+    
+    ## Authorization via M2M tokens
+    
+    There are various areas in topcoder or third parties that need to communicate with each other like: service to service, daemon to backend, CLI client to internal service, IoT tools, for such scenarios we use machine to machine.
+    
+    
+    These M2M tokens are from Auth0, and based on scopes grant access to our functionality. Here are few scopes that should be adhered to: `create:user_profiles`, `read:user_profiles`, `update:user_profiles`, `delete:user_profiles`, `all:user_profiles`
+    
+    
+    ## Authorization via JWT tokens
+    
+    User based security tokens should be supported. Logic filtering of data should be achieved via the user based token and role. At least support for role admin vs user should be designed.
+    
+    
+    ## Important Note:
+    
+    + Tokens can be passed via headers.authorization / query.authToken, recommended way is to pass via headers.authorization.
+    
+    + While passing Authorize bearer token make sure to add `Bearer <token>`
+  license:
+    name: MIT
+    url: 'http://github.com/gruntjs/grunt/blob/master/LICENSE-MIT'
+basePath: /v6
+schemes:
+  - https
+  - http
+securityDefinitions:
+  bearer:
+    type: apiKey
+    name: Authorization
+    in: header
+produces:
+  - application/json
+consumes:
+  - application/json
+paths:
+  '/members/health':
+    get:
+      tags:
+        - Health
+      description: Get member distribution statistics
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/Health'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}':
+    get:
+      tags:
+        - Basic
+      description: |-
+        Get member profile with a specified member handle. You may filter on member response fields.
+
+        The authentication credential is optional and allows secured fields in the response.
+
+        Authorization:
+          - Public: Without a token responses omit secure and communication fields.
+          - JWT roles: The profile owner or `administrator`/`admin` roles may view secure fields. Autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`) may view communication fields.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN
+            
+            
+            parameter for choosing which fields of Member profile that will be included in response. By default, all will be returned.
+            
+            
+            The following fields are allowed
+            
+            + userId - Select the field 
+            
+            + handle - Select the field handle
+            
+            + handleLower - Select the field handleLower
+            
+            + firstName - Select the field firstName
+            
+            + lastName - Select the field lastName
+            
+            + tracks - Select the field tracks
+            
+            + status - Select the field status
+            
+            + addresses - Select the field addresses
+            
+            + description - Select the field description
+            
+            + email - Select the field email
+            
+            + homeCountryCode - Select the field homeCountryCode
+            
+            + competitionCountryCode - Select the field competitionCountryCode
+            
+            + photoURL - Select the field photoURL
+            
+            + maxRating - Select the field maxRating
+            
+            + createdAt - Select the field createdAt
+            
+            + createdBy - Select the field createdBy
+            
+            + updatedAt - Select the field updatedAt
+            
+            + updatedBy - Select the field updatedBy
+            
+            + verified - Select the field verified
+            
+            The following fields are secured, without a valid token will not be in response
+            
+            + firstName
+            
+            + lastName
+            
+            + addresses
+            
+            + email
+            
+            + createdBy
+            
+            + updatedBy
+            
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberProfile'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    put:
+      tags:
+        - Basic
+      description: |-
+        Update the member profile by handle.
+
+        If the email has been changed, the email change process starts and a verification email is sent to the new and old email address.
+
+        Authorization:
+          - JWT roles: Only the profile owner or users with `administrator`/`admin` roles may update member data.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: query
+          name: verifyUrl
+          required: false
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberProfile'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberProfile'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/profileCompleteness':
+    get:
+      tags:
+        - Basic
+      description: >
+        Compute profile completeness metadata for the specified member, including
+        which profile sections are complete and the next suggested item to finish.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or users with `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: query
+          name: toast
+          required: false
+          type: string
+          description: Override the suggested toast item in the response.
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/ProfileCompleteness'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/verify':
+    get:
+      tags:
+        - Basic
+      description: |-
+        Verify a member's new email address.
+
+        When the email has been changed, the email change process starts and a verification email is sent to the new and old addresses. The link from each email redirects the member to this API.
+
+        Both the old and new email address must be verified by the member to successfully complete the process.
+
+        Authorization:
+          - JWT roles: Only the profile owner or `administrator`/`admin` may verify the email change.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: query
+          name: token
+          type: string
+          required: true
+          description: the email verification token
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/EmailVerificationResult'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/photo':
+    post:
+      tags:
+        - Basic
+      description: |-
+        Upload a member's photo. The service saves the file from the request into AWS S3 and updates the member profile with the new photo URL.
+
+        Authorization:
+          - JWT roles: Only the profile owner or `administrator`/`admin` may upload a photo.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      consumes:
+        - multipart/form-data
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: formData
+          name: photo
+          type: file
+          required: true
+          description: The image file to upload
+      responses:
+        '200':
+          description: OK, it returns the uploaded photo URL
+          schema:
+            $ref: '#/definitions/UploadPhotoResult'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  /members:
+    get:
+      tags:
+        - Search
+      description: |-
+        Search members by `userId`, `userIds`, `handle`, `handles`, `handleLower`, or `handlesLower`, and retrieve profile details with stats and skills.
+
+        Searching by `handle` performs a like match, whereas `handleLower` performs an exact match against the data store.
+
+        Authentication credentials are optional. If the API is called by Admin or M2M, secured fields are included; otherwise they are excluded from the response.
+
+        Authorization:
+          - Public: Allowed without a token; responses omit secure and communication fields.
+          - JWT roles: Any authenticated member can query basic data. Secure fields require the caller to own the profile or hold `administrator`/`admin`. Email searches additionally require `administrator`, `admin`, or `tgadmin`. Communication fields (firstName, lastName, email) require autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`).
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          type: string
+          description: filter by userId
+        - name: userIds
+          in: query
+          required: false
+          type: string
+          description: filter by userIds. Example - [userId1,userId2,userId3,...,userIdN]
+        - name: handle
+          in: query
+          required: false
+          type: string
+          description: filter by handle. This will return like search.
+        - name: handles
+          in: query
+          required: false
+          type: string
+          description: filter by handles. This will return like search. Example - ["handle1","handle2","handle3",...,"handleN"]
+        - name: handleLower
+          in: query
+          required: false
+          type: string
+          description: filter by handle. This will return an exact search.
+        - name: handlesLower
+          in: query
+          required: false
+          type: string
+          description: filter by handles. This will return an exact search. Example - ["handle1","handle2","handle3",...,"handleN"]
+        - name: sort
+          in: query
+          required: false
+          type: string
+          description: sort by asc or desc
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN
+            
+            
+            parameter for choosing which fields of members profile that will be included in response.
+            
+            + userId - Select the field userId
+            
+            + handle - Select the field handle
+            
+            + handleLower - Select the field handleLower
+            
+            + firstName - Select the field firstName
+            
+            + lastName - Select the field lastName
+            
+            + status - Select the field status
+            
+            + addresses - Select the field addresses
+            
+            + photoURL - Select the field photoURL
+            
+            + homeCountryCode - Select the field homeCountryCode
+            
+            + competitionCountryCode - Select the field competitionCountryCode
+            
+            + description - Select the field description
+            
+            + email - Select the field email
+            
+            + tracks - Select the field tracks
+            
+            + maxRating - Select the field maxRating
+            
+            + wins - Select the field wins
+            
+            + createdAt - Select the field createdAt
+            
+            + createdBy - Select the field createdBy
+            
+            + updatedAt - Select the field updatedAt
+            
+            + updatedBy - Select the field updatedBy
+            
+            + skills - Select the field skills
+            
+            + stats - Select the field stats
+            
+            
+            The following fields are secured, without a valid token will not be in response
+            
+            + firstName
+            
+            + lastName
+            
+            + email
+            
+            + addresses
+            
+            + createdBy
+            
+            + updatedBy
+        - $ref: '#/parameters/page'
+        - $ref: '#/parameters/perPage'
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberSearchDataItem'
+          headers:
+            X-Next-Page:
+              type: integer
+              description: The index of the next page
+            X-Page:
+              type: integer
+              description: The index of the current page (starting at 1)
+            X-Per-Page:
+              type: integer
+              description: The number of items to list per page
+            X-Prev-Page:
+              type: integer
+              description: The index of the previous page
+            X-Total:
+              type: integer
+              description: The total number of items
+            X-Total-Pages:
+              type: integer
+              description: The total number of pages
+            Link:
+              type: string
+              description: Pagination link header.
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  "/members/autocomplete":
+    get:
+      tags:
+        - Search
+      description: |-
+        Search members by a term that matches their handle. Matching profiles return `userId`, `handle`, `firstName`, and `lastName`.
+
+        This service is best suited for autocomplete features where the payload should be lightweight and fast.
+
+        The service performs a like match and sorts results by whether the string appears before, after, or equals the given term in sort order.
+
+        Authorization:
+          - JWT roles: Requires an authenticated member. Communication fields (firstName, lastName, email) are returned only for autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`).
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - name: term
+          in: query
+          required: false
+          type: string
+          description: filter by term. term is mactehd with member handle.
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN
+            
+            
+            parameter for choosing which fields of members profile that will be included in response.
+            
+            + userId - Select the field userId
+            
+            + handle - Select the field handle
+            
+            + firstName - Select the field firstName
+            
+            + lastName - Select the field lastName
+        - $ref: '#/parameters/page'
+        - $ref: '#/parameters/perPage'
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberSearchAutocompleteDataItem'
+          headers:
+            X-Next-Page:
+              type: integer
+              description: The index of the next page
+            X-Page:
+              type: integer
+              description: The index of the current page (starting at 1)
+            X-Per-Page:
+              type: integer
+              description: The number of items to list per page
+            X-Prev-Page:
+              type: integer
+              description: The index of the previous page
+            X-Total:
+              type: integer
+              description: The total number of items
+            X-Total-Pages:
+              type: integer
+              description: The total number of pages
+            Link:
+              type: string
+              description: Pagination link header.
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  "/members/autocomplete/{term}":
+    get:
+      tags:
+        - Search
+      description: >
+        Returns members whose handle starts with the provided prefix. This endpoint
+        is restricted to logged-in users with copilot or administrator/admin roles, or
+        M2M tokens that include the `read:user_profiles` or `all:user_profiles` scope.
+      security:
+        - bearer: []
+      parameters:
+        - name: term
+          in: path
+          required: true
+          type: string
+          description: Handle prefix to match (case insensitive).
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberHandleAutocompleteItem'
+        '401':
+          description: Authentication token is missing or invalid
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/uid-signature':
+    get:
+      tags:
+        - Basic
+      description: >
+        Generates a deterministic HMAC signature for the calling member's userId,
+        enabling downstream integrations (such as Userflow) to verify identity.
+        
+        Authorization:
+          - JWT roles: Any authenticated member may request their own signature.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`; the token must include a `userId` claim.
+      security:
+        - bearer: []
+      parameters:
+        - in: query
+          name: type
+          required: true
+          type: string
+          enum:
+            - userflow
+          description: Integration identifier used to choose the configured HMAC secret.
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/UidSignature'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/searchBySkills':
+    get:
+      tags:
+        - Search
+      description: |-
+        Search members by EMSI skill ID(s). This API powers the talent search. Results default to sorting by the number of challenges won.
+
+        Authorization:
+          - JWT roles: Any authenticated member can query basic data. Secure and communication fields are visible only to the profile owner or `administrator`/`admin`, while autocomplete roles (`copilot`, `administrator`, `admin`, `Connect Copilot`, `Connect Account Manager`, `Connect Admin`, `Account Executive`) may view contact fields.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - name: skillID
+          in: query
+          required: true
+          type: string
+          description: >
+            skillId=skillID1&skillId=skillID2
+            EMSI skill id(s) to use when filtering members.  Members who match all of the skill IDs provided will be returned.
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN
+            
+            
+            parameter for choosing which fields of members profile that will be included in response.
+            
+            + userId - Select the field userId
+            
+            + handle - Select the field handle
+            
+            + firstName - Select the field firstName
+            
+            + lastName - Select the field lastName
+        - $ref: '#/parameters/page'
+        - $ref: '#/parameters/perPage'
+        - name: sortOrder
+          in: query
+          required: false
+          type: string
+          description: sort by asc or desc
+        - name: sortBy
+          in: query
+          required: false
+          type: string
+          description: Field to sort by.  Options include 'userId', 'country', 'handle', 'firstName', 'lastName',  'numberOfChallengesWon', 'numberOfChallengesPlaced'
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberSearchDataItem'
+          headers:
+            X-Next-Page:
+              type: integer
+              description: The index of the next page
+            X-Page:
+              type: integer
+              description: The index of the current page (starting at 1)
+            X-Per-Page:
+              type: integer
+              description: The number of items to list per page
+            X-Prev-Page:
+              type: integer
+              description: The index of the previous page
+            X-Total:
+              type: integer
+              description: The total number of items
+            X-Total-Pages:
+              type: integer
+              description: The total number of pages
+            Link:
+              type: string
+              description: Pagination link header.
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/traits':
+    get:
+      tags:
+        - Traits
+      description: >
+        Retrieve detailed member trait data (education, work history, personalization,
+        etc.).
+        
+        Authorization:
+          - Public: Anonymous callers receive only public trait categories (`education`, `languages`, `personalization`, `work`).
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure audit fields; other authenticated members see non-secure data only.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - name: traitIds
+          in: query
+          required: false
+          type: string
+          description: |
+            traitIds value separated with comma
+            + basic_id
+            + work
+            + skill
+            + education
+            + communities
+            + languages
+            + hobby
+            + organization
+            + device
+            + software
+            + service_provider
+            + subscription
+            + personalization
+            + connect_info
+            
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN
+            
+            
+            parameter for choosing which fields of Member Profile Trait that will be included in response. By default, all will be returned.
+            
+            + userId - Select the field userId
+            
+            + traitId - Select the field traitId
+            
+            + categoryName - Select the field categoryName
+            
+            + traits - Select the field traits
+            
+            + createdAt - Select the field createdAt
+            
+            + createdBy - Select the field createdBy
+            
+            + updatedAt - Select the field updatedAt
+            
+            + updatedBy - Select the field updatedBy
+            
+            
+            The following fields are secured, without a valid token will not be in response
+            
+            + createdBy
+            
+            + updatedBy
+            
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberProfileTrait'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    post:
+      tags:
+        - Traits
+      description: >
+        Create new trait entries for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `create:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberProfileTrait'
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberProfileTrait'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    put:
+      tags:
+        - Traits
+      description: >
+        Replace existing trait entries for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberProfileTrait'
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MemberProfileTrait'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    delete:
+      tags:
+        - Traits
+      description: >
+        Delete one or more trait entries for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `delete:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - name: traitIds
+          in: query
+          required: false
+          type: string
+          description: |
+            traitIds value separated with comma
+            + basic_id
+            + work
+            + skill
+            + education
+            + communities
+            + languages
+            + hobby
+            + organization
+            + device
+            + software
+            + service_provider
+            + subscription
+            + personalization
+            + connect_info
+      responses:
+        '200':
+          description: 'OK, response is empty'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats':
+    get:
+      tags:
+        - Statistics
+      description: >
+        Retrieve member statistics, optionally filtered by group.
+        
+        Authorization:
+          - Public: Anonymous callers receive only public statistics.
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure statistics and group-specific data.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - name: groupIds
+          in: query
+          required: false
+          type: string
+          description: comma separated group ids (returns public stats if group ids is not provided)
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN
+            
+            parameter for choosing which fields of MemberStats that will be included in response.
+
+
+            + userId - Select the field userId
+
+            + handle - Select the field handle
+
+            + handleLower - Select the field handleLower
+
+            + maxRating - Select the field maxRating
+
+            + challenges - Select the field challenges
+
+            + wins - Select the field wins
+
+            + develop - Select the field develop
+
+            + design - Select the field design
+
+            + dataScience - Select the field dataScience
+
+            + copilot - Select the field copilot
+
+            + updatedAt - Select the field updatedAt
+
+            + createdAt - Select the field createdAt
+
+            + createdBy - Select the field createdBy
+
+            + updatedBy - Select the field updatedBy
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    post:
+      tags:
+        - Statistics
+      description: >
+        Create or replace the aggregate statistics record for the member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    patch:
+      tags:
+        - Statistics
+      description: >
+        Partially update the member statistics record (only provided fields are changed).
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission to access the API
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats/history':
+    get:
+      tags:
+        - Statistics
+      description: >
+        Get member history statistics, by default only returns the public Topcoder history statistics.
+        
+        Authorization:
+          - Public: Anonymous callers receive only public history statistics.
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure history data.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - name: groupIds
+          in: query
+          required: false
+          type: string
+          description: comma separated group ids (returns members public history statistics if groupIds is not provided)
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN
+            
+            parameter for choosing which fields of Member History Stats that will be included in response.
+            
+            + userId - Select the field userId
+            
+            + groupId - Select the field groupId
+            
+            + handle - Select the field handle
+            
+            + handleLower - Select the field handleLower
+            
+            + DEVELOP - Select the field DEVELOP
+            
+            + DATA_SCIENCE - Select the field DATA_SCIENCE
+            
+            + createdAt - Select the field createdAt
+            
+            + createdBy - Select the field createdBy
+            
+            + updatedAt - Select the field updatedAt
+            
+            + updatedBy - Select the field updatedBy
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    post:
+      tags:
+        - Statistics
+      description: >
+        Create or replace member history statistics for the specified group(s).
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    patch:
+      tags:
+        - Statistics
+      description: >
+        Partially update member history statistics for the specified member.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberHistoryStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/skills':
+    get:
+      tags:
+        - Statistics
+      description: >
+        Get member skills, including self-entered data and aggregated values.
+        
+        Authorization:
+          - Public: Anonymous callers receive public skill summaries.
+          - JWT roles: The profile owner or `administrator`/`admin` may view secure metadata and audit fields.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberSkills'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/skills/verify':
+    post:
+      tags:
+        - Statistics
+      description: >
+        Bulk verify a set of skills for the member. Ensures each provided skill is associated with the member and sets the skill level to `verified`.
+        Existing levels for those skills are replaced by `verified`.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            properties:
+              skillIds:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+                description: List of skill IDs to verify
+            required:
+              - skillIds
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberSkills'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    post:
+      tags:
+        - Statistics
+      description: >
+        Create or replace the member's self-entered skills dataset.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `create:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberSkillsRequest'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberSkills'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+    patch:
+      tags:
+        - Statistics
+      description: >
+        Partially update the member's self-entered skills dataset.
+        
+        Authorization:
+          - JWT roles: Restricted to the profile owner or `administrator`/`admin` roles.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberSkillsRequest'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberSkills'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/stats/distribution':
+    get:
+      tags:
+        - Statistics
+      description: >
+        Get member distribution statistics grouped by track and sub-track.
+        
+        Authorization:
+          - Public: Endpoint is unauthenticated.
+      parameters:
+        - name: track
+          in: query
+          required: false
+          type: string
+          description: filter by track
+        - name: subTrack
+          in: query
+          required: false
+          type: string
+          description: filter by sub track
+        - name: fields
+          in: query
+          required: false
+          type: string
+          description: >
+            fields=fieldName1,fieldName2,...,fieldN  - parameter for choosing which fields of Member Distribution Stats that will be included in response.
+            
+            + track - Select the field track
+            
+            + subTrack - Select the field subTrack
+            
+            + distribution - Select the field distribution
+            
+            + updatedAt - Select the field updatedAt
+            
+            + createdAt - Select the field createdAt
+            
+            + createdBy - Select the field createdBy
+            
+            + updatedBy - Select the field updatedBy
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberDistributionStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+
+
+
+definitions:
+  Health:
+    type: object
+    properties:
+      checksRun:
+        type: number
+  MemberProfile:
+    type: object
+    properties:
+      userId:
+        type: integer
+      handle:
+        type: string
+      handleLower:
+        type: string
+      firstName:
+        type: string
+      lastName:
+        type: string
+      tracks:
+        type: array
+        items:
+          type: string
+      status:
+        type: string
+      verified:
+        type: boolean
+      addresses:
+        type: array
+        items:
+          type: object
+          properties:
+            streetAddr1:
+              type: string
+            streetAddr2:
+              type: string
+            city:
+              type: string
+            zip:
+              type: string
+            stateCode:
+              type: string
+            type:
+              type: string
+            updatedAt:
+              type: string
+              format: date-time
+              description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+            createdAt:
+              type: string
+              format: date-time
+              description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+            createdBy:
+              type: string
+            updatedBy:
+              type: string
+      description:
+        type: string
+      email:
+        type: string
+      homeCountryCode:
+        type: string
+      competitionCountryCode:
+        type: string
+      photoURL:
+        type: string
+      maxRating:
+        type: object
+        properties:
+          rating:
+            type: number
+            format: int64
+          track:
+            type: string
+          subTrack:
+            type: string
+      createdAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdBy:
+        type: string
+      updatedAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      updatedBy:
+        type: string
+  EmailVerificationResult:
+    type: object
+    properties:
+      emailChangeCompleted:
+        type: boolean
+      verifiedEmail:
+        type: string
+        description: One of (old|new)
+  UploadPhotoResult:
+    type: object
+    properties:
+      photoURL:
+        type: string
+  ProfileCompleteness:
+    type: object
+    properties:
+      userId:
+        type: number
+        format: int64
+      handle:
+        type: string
+      data:
+        type: object
+        properties:
+          skills:
+            type: boolean
+          gigAvailability:
+            type: boolean
+          bio:
+            type: boolean
+          profilePicture:
+            type: boolean
+          workHistory:
+            type: boolean
+          education:
+            type: boolean
+          percentComplete:
+            type: number
+            format: double
+            description: Value between 0 and 1 representing completion percent.
+      showToast:
+        type: string
+        description: Suggested profile element to prompt the user about (e.g. `skills`).
+  UidSignature:
+    type: object
+    properties:
+      uid_signature:
+        type: string
+        description: Hex encoded HMAC-SHA256 signature derived from the caller's userId.
+  MemberSearchDataItem:
+    properties:
+      userId:
+        type: number
+      firstName:
+        type: string
+      lastName:
+        type: string
+      createdAt:
+        type: number
+      photoURL:
+        type: string
+      description:
+        type: string
+      handle:
+        type: string
+      maxRating:
+        properties:
+          rating:
+            type: number
+          subTrack:
+            type: string
+          track:
+            type: string
+        type: object
+      competitionCountryCode:
+        type: string
+      tracks:
+        type: array
+        items:
+          type: string
+      skills:
+        $ref: '#/definitions/MemberSkills'
+      stats:
+        $ref: '#/definitions/MemberStats'
+  MemberSearchAutocompleteDataItem:
+    properties:
+      handle:
+        type: string
+      userId:
+        type: number
+      firstName:
+        type: string
+      lastName:
+        type: string
+  MemberHandleAutocompleteItem:
+    properties:
+      userId:
+        type: number
+      handle:
+        type: string
+      photoURL:
+        type: string
+      firstName:
+        type: string
+      lastName:
+        type: string
+      maxRating:
+        type: object
+        properties:
+          rating:
+            type: number
+            format: int64
+          track:
+            type: string
+          subTrack:
+            type: string
+          ratingColor:
+            type: string
+  MemberProfileTrait:
+    properties:
+      traitId:
+        type: string
+      categoryName:
+        type: string
+      createdAt:
+        type: string
+        format: date-time
+      createdBy:
+        type: number
+        format: int64
+      updatedAt:
+        type: string
+        format: date-time
+      updatedBy:
+        type: number
+        format: int64
+      traits:
+        $ref: '#/definitions/MemberProfileTraitData'
+  MemberProfileTraitData:
+    description: >-
+      the type should be one of the MemberProfileBasicInfo, MemberProfileWork,
+      MemberProfileSkill, MemberProfileCommunities and MemberProfileEducation, etc..
+    properties:
+      data:
+        type: array
+        items:
+          type: object
+  MemberProfileBasicInfo:
+    properties:
+      handle:
+        type: string
+      firstName:
+        type: string
+      lastName:
+        type: string
+      shortBio:
+        type: string
+      gender:
+        type: string
+      tshirtSize:
+        type: string
+      country:
+        type: string
+      primaryInterestInTopcoder:
+        type: string
+  MemberProfileEducation:
+    properties:
+      type:
+        type: string
+      schoolCollegeName:
+        type: string
+      major:
+        type: string
+      timePeriodFrom:
+        type: string
+        format: date-time
+      timePeriodTo:
+        type: string
+        format: date-time
+      graduated:
+        type: boolean
+  MemberProfileCommunities:
+    properties:
+      cognitive:
+        type: boolean
+      blockchain:
+        type: boolean
+  MemberProfileWork:
+    properties:
+      company:
+        type: string
+      position:
+        type: string
+      industry:
+        type: string
+      cityTown:
+        type: string
+      timePeriodFrom:
+        type: string
+        format: date-time
+      timePeriodTo:
+        type: string
+        format: date-time
+  MemberStats:
+    type: object
+    properties:
+      userId:
+        type: integer
+      handle:
+        type: string
+      handleLower:
+        type: string
+      maxRating:
+        type: object
+        properties:
+          rating:
+            type: number
+            format: int64
+          track:
+            type: string
+          subTrack:
+            type: string
+      challenges:
+        type: number
+        format: int64
+      wins:
+        type: number
+        format: int64
+      develop:
+        type: object
+        properties:
+          challenges:
+            type: number
+            format: int64
+          wins:
+            type: number
+            format: int64
+          subTracks:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: number
+                  format: int64
+                name:
+                  type: string
+                challenges:
+                  type: number
+                  format: int64
+                wins:
+                  type: number
+                  format: int64
+                rank:
+                  type: object
+                  properties:
+                    rating:
+                      type: number
+                      format: int64
+                    activePercentile:
+                      type: number
+                      format: double
+                    activeRank:
+                      type: number
+                      format: int64
+                    activeCountryRank:
+                      type: number
+                      format: int64
+                    activeSchoolRank:
+                      type: number
+                      format: int64
+                    overallPercentile:
+                      type: number
+                      format: double
+                    overallRank:
+                      type: number
+                      format: int64
+                    overallCountryRank:
+                      type: number
+                      format: int64
+                    overallSchoolRank:
+                      type: number
+                      format: int64
+                    volatility:
+                      type: number
+                      format: int64
+                    reliability:
+                      type: number
+                      format: double
+                    maxRating:
+                      type: number
+                      format: int64
+                    minRating:
+                      type: number
+                      format: int64
+                submissions:
+                  type: object
+                  properties:
+                    numInquiries:
+                      type: number
+                      format: int64
+                    submissions:
+                      type: number
+                      format: int64
+                    submissionRate:
+                      type: number
+                      format: double
+                    passedScreening:
+                      type: number
+                      format: int64
+                    screeningSuccessRate:
+                      type: number
+                      format: double
+                    passedReview:
+                      type: number
+                      format: int64
+                    reviewSuccessRate:
+                      type: number
+                      format: double
+                    appeals:
+                      type: number
+                      format: int64
+                    appealSuccessRate:
+                      type: number
+                      format: double
+                    maxScore:
+                      type: number
+                      format: double
+                    minScore:
+                      type: number
+                      format: double
+                    avgScore:
+                      type: number
+                      format: double
+                    avgPlacement:
+                      type: number
+                      format: double
+                    winPercent:
+                      type: number
+                      format: double
+                mostRecentEventDate:
+                  type: string
+                  format: date-time
+                  description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+                mostRecentSubmission:
+                  type: string
+                  format: date-time
+                  description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          mostRecentEventDate:
+            type: string
+            format: date-time
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          mostRecentSubmission:
+            type: string
+            format: date-time
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      design:
+        type: object
+        properties:
+          challenges:
+            type: number
+            format: int64
+          wins:
+            type: number
+            format: int64
+          subTracks:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: number
+                  format: int64
+                name:
+                  type: string
+                numInquiries:
+                  type: number
+                  format: int64
+                challenges:
+                  type: number
+                  format: int64
+                wins:
+                  type: number
+                  format: int64
+                winPercent:
+                  type: number
+                  format: double
+                avgPlacement:
+                  type: number
+                  format: double
+                submissions:
+                  type: number
+                  format: int64
+                submissionRate:
+                  type: number
+                  format: double
+                passedScreening:
+                  type: number
+                  format: int64
+                screeningSuccessRate:
+                  type: number
+                  format: double
+                mostRecentEventDate:
+                  type: string
+                  format: date-time
+                  description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+                mostRecentSubmission:
+                  type: string
+                  format: date-time
+                  description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          mostRecentEventDate:
+            type: string
+            format: date-time
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          mostRecentSubmission:
+            type: string
+            format: date-time
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      dataScience:
+        type: object
+        properties:
+          challenges:
+            type: number
+            format: int64
+          wins:
+            type: number
+            format: int64
+          srm:
+            type: object
+            properties:
+              challenges:
+                type: number
+                format: int64
+              wins:
+                type: number
+                format: int64
+              rank:
+                type: object
+                properties:
+                  rating:
+                    type: number
+                    format: int64
+                  percentile:
+                    type: number
+                    format: double
+                  rank:
+                    type: number
+                    format: int64
+                  countryRank:
+                    type: number
+                    format: int64
+                  schoolRank:
+                    type: number
+                    format: int64
+                  volatility:
+                    type: number
+                    format: double
+                  maximumRating:
+                    type: number
+                    format: int64
+                  minimumRating:
+                    type: number
+                    format: int64
+                  defaultLanguage:
+                    type: string
+                  competitions:
+                    type: number
+                    format: int64
+                  mostRecentEventName:
+                    type: string
+                  mostRecentEventDate:
+                    type: string
+                    format: date-time
+                    description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+              challengeDetails:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    levelName:
+                      type: string
+                    challenges:
+                      type: number
+                      format: int64
+                    failedChallenges:
+                      type: number
+                      format: int64
+              division1:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    levelName:
+                      type: string
+                    problemsSubmitted:
+                      type: number
+                      format: int64
+                    problemsFailed:
+                      type: number
+                      format: int64
+                    problemsSysByTest:
+                      type: number
+                      format: int64
+              division2:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    levelName:
+                      type: string
+                    problemsSubmitted:
+                      type: number
+                      format: int64
+                    problemsFailed:
+                      type: number
+                      format: int64
+                    problemsSysByTest:
+                      type: number
+                      format: int64
+              mostRecentEventName:
+                type: string
+              mostRecentEventDate:
+                type: string
+                format: date-time
+                description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+              mostRecentSubmission:
+                type: string
+                format: date-time
+                description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          marathonMatch:
+            type: object
+            properties:
+              challenges:
+                type: number
+                format: int64
+              wins:
+                type: number
+                format: int64
+              rank:
+                type: object
+                properties:
+                  rating:
+                    type: number
+                    format: int64
+                  competitions:
+                    type: number
+                    format: int64
+                  avgRank:
+                    type: number
+                    format: int64
+                  avgNumSubmissions:
+                    type: number
+                    format: int64
+                  bestRank:
+                    type: number
+                    format: int64
+                  topFiveFinishes:
+                    type: number
+                    format: int64
+                  topTenFinishes:
+                    type: number
+                    format: int64
+                  rank:
+                    type: number
+                    format: int64
+                  percentile:
+                    type: number
+                    format: double
+                  volatility:
+                    type: number
+                    format: double
+                  minimumRating:
+                    type: number
+                    format: int64
+                  maximumRating:
+                    type: number
+                    format: int64
+                  countryRank:
+                    type: number
+                    format: int64
+                  schoolRank:
+                    type: number
+                    format: int64
+                  defaultLanguage:
+                    type: string
+                  mostRecentEventName:
+                    type: string
+                  mostRecentEventDate:
+                    type: string
+                    format: date-time
+                    description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+              mostRecentEventName:
+                type: string
+              mostRecentEventDate:
+                type: string
+                format: date-time
+                description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+              mostRecentSubmission:
+                type: string
+                format: date-time
+                description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          mostRecentEventName:
+            type: string
+          mostRecentEventDate:
+            type: string
+            format: date-time
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          mostRecentSubmission:
+            type: string
+            format: date-time
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      copilot:
+        type: object
+        properties:
+          contests:
+            type: number
+            format: int64
+          projects:
+            type: number
+            format: int64
+          failures:
+            type: number
+            format: int64
+          reposts:
+            type: number
+            format: int64
+          activeContests:
+            type: number
+            format: int64
+          activeProjects:
+            type: number
+            format: int64
+          fulfillment:
+            type: number
+            format: double
+      updatedAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdBy:
+        type: string
+      updatedBy:
+        type: string
+  MemberHistoryStats:
+    type: object
+    properties:
+      userId:
+        type: integer
+      groupId:
+        type: integer
+      handle:
+        type: string
+      handleLower:
+        type: string
+      DEVELOP:
+        type: object
+        properties:
+          subTracks:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: number
+                  format: int64
+                name:
+                  type: string
+                history:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      challengeId:
+                        type: number
+                        format: int64
+                      challengeName:
+                        type: string
+                      ratingDate:
+                        type: string
+                        format: date-time
+                        description: >-
+                          ISO-8601 formatted date times
+                          (YYYY-MM-DDTHH:mm:ss.sssZ)
+                      newRating:
+                        type: number
+                        format: int64
+      DATA_SCIENCE:
+        type: object
+        properties:
+          SRM:
+            type: object
+            properties:
+              history:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    challengeId:
+                      type: number
+                      format: int64
+                    challengeName:
+                      type: string
+                    date:
+                      type: string
+                      format: date-time
+                      description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+                    rating:
+                      type: number
+                      format: double
+                    placement:
+                      type: number
+                      format: int64
+                    percentile:
+                      type: number
+                      format: double
+          MARATHON_MATCH:
+            type: object
+            properties:
+              history:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    challengeId:
+                      type: number
+                      format: int64
+                    challengeName:
+                      type: string
+                    date:
+                      type: string
+                      format: date-time
+                      description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+                    rating:
+                      type: number
+                      format: double
+                    placement:
+                      type: number
+                      format: int64
+                    percentile:
+                      type: number
+                      format: double
+      updatedAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdBy:
+        type: string
+      updatedBy:
+        type: string
+  MemberSkillsRequest:
+    type: object
+    properties:
+      key:
+        type: object
+        properties:
+          skillId:
+            type: string
+            format: uuid
+            description: skill id
+          displayModeId:
+            type: string
+            format: uuid
+            description: skill display mode id
+          levels:
+            type: array
+            items:
+              type: string
+              format: uuid
+              description: skill level id
+  MemberSkills:
+    type: object
+    properties:
+      id:
+        type: string
+        format: uuid
+      name:
+        type: string
+        example: 'Advanced Mathematics'
+      category:
+        type: object
+        properties:
+          id: 
+            type: string
+            format: uuid
+          name:
+            type: string
+            example: 'Mathematics and Statistics'
+      displayMode:
+        type: object
+        properties:
+          id: 
+            type: string
+            format: uuid
+          name:
+            type: string
+            example: 'additional'
+      levels:
+        type: array
+        items:
+          type: object
+          properties:
+            id: 
+              type: string
+              format: uuid
+            name:
+              type: string
+              example: 'verified'
+            description:
+              type: string
+              example: 'Skill verified by proof of capability'
+
+  MemberDistributionStats:
+    type: object
+    properties:
+      track:
+        type: string
+      subTrack:
+        type: string
+      distribution:
+        type: object
+        properties:
+          ratingRange0To099:
+            type: number
+            format: int64
+          ratingRange100To199:
+            type: number
+            format: int64
+          ratingRange200To299:
+            type: number
+            format: int64
+          ratingRange300To399:
+            type: number
+            format: int64
+          ratingRange400To499:
+            type: number
+            format: int64
+          ratingRange500To599:
+            type: number
+            format: int64
+          ratingRange600To699:
+            type: number
+            format: int64
+          ratingRange700To799:
+            type: number
+            format: int64
+          ratingRange800To899:
+            type: number
+            format: int64
+          ratingRange900To999:
+            type: number
+            format: int64
+          ratingRange1000To1099:
+            type: number
+            format: int64
+          ratingRange1100To1199:
+            type: number
+            format: int64
+          ratingRange1200To1299:
+            type: number
+            format: int64
+          ratingRange1300To1399:
+            type: number
+            format: int64
+          ratingRange1400To1499:
+            type: number
+            format: int64
+          ratingRange1500To1599:
+            type: number
+            format: int64
+          ratingRange1600To1699:
+            type: number
+            format: int64
+          ratingRange1700To1799:
+            type: number
+            format: int64
+          ratingRange1800To1899:
+            type: number
+            format: int64
+          ratingRange1900To1999:
+            type: number
+            format: int64
+          ratingRange2000To2099:
+            type: number
+            format: int64
+          ratingRange2100To2199:
+            type: number
+            format: int64
+          ratingRange2200To2299:
+            type: number
+            format: int64
+          ratingRange2300To2399:
+            type: number
+            format: int64
+          ratingRange2400To2499:
+            type: number
+            format: int64
+          ratingRange2500To2599:
+            type: number
+            format: int64
+          ratingRange2600To2699:
+            type: number
+            format: int64
+          ratingRange2700To2799:
+            type: number
+            format: int64
+          ratingRange2800To2899:
+            type: number
+            format: int64
+          ratingRange2900To2999:
+            type: number
+            format: int64
+          ratingRange3000To3099:
+            type: number
+            format: int64
+          ratingRange3100To3199:
+            type: number
+            format: int64
+          ratingRange3200To3299:
+            type: number
+            format: int64
+          ratingRange3300To3399:
+            type: number
+            format: int64
+          ratingRange3400To3499:
+            type: number
+            format: int64
+          ratingRange3500To3599:
+            type: number
+            format: int64
+          ratingRange3600To3699:
+            type: number
+            format: int64
+          ratingRange3700To3799:
+            type: number
+            format: int64
+          ratingRange3800To3899:
+            type: number
+            format: int64
+          ratingRange3900To3999:
+            type: number
+            format: int64
+      updatedAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdBy:
+        type: string
+      updatedBy:
+        type: string
+  MemberFinancial:
+    type: object
+    properties:
+      userId:
+        type: number
+        format: int64
+      amount:
+        type: number
+        format: double
+      status:
+        type: string
+      updatedAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdAt:
+        type: string
+        format: date-time
+        description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+      createdBy:
+        type: string
+      updatedBy:
+        type: string
+  MemberRewards:
+    type: object
+    properties:
+      awardedOn:
+        type: string
+      expiryOn:
+        type: string
+      isExpired:
+        type: boolean
+      id:
+        type: string
+      awarded:
+        type: object
+        properties:
+          awardedType:
+            type: string
+          message:
+            type: string
+          name:
+            type: string
+          type:
+            type: string
+          reward:
+            type: object
+            properties:
+              active:
+                type: boolean
+              attrs:
+                type: object
+              id:
+                type: string
+              imageUrl:
+                type: string
+              mimeType:
+                type: string
+              message:
+                type: string
+              hint:
+                type: string
+  ErrorModel:
+    type: object
+    properties:
+      message:
+        type: string
+        description: the error message
+parameters:
+  page:
+    name: page
+    in: query
+    description: The page number.
+    required: false
+    type: integer
+    default: 1
+  perPage:
+    name: perPage
+    in: query
+    description: The number of items to list per page.
+    required: false
+    type: integer
+    default: 50
+    maximum: 100

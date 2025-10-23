@@ -13,6 +13,9 @@ const HttpStatus = require('http-status-codes')
 const logger = require('./src/common/logger')
 const interceptor = require('express-interceptor')
 const fileUpload = require('express-fileupload')
+const path = require('path')
+const swaggerUi = require('swagger-ui-express')
+const YAML = require('yamljs')
 
 // setup express app
 const app = express()
@@ -34,6 +37,18 @@ app.use(fileUpload({
 app.use(bodyParser.json())
 app.use(bodyParser.urlencoded({ extended: true }))
 app.set('port', config.PORT)
+
+// Swagger / OpenAPI documentation
+const swaggerDocument = YAML.load(path.join(__dirname, 'docs', 'swagger.yaml'))
+swaggerDocument.basePath = `/${config.API_VERSION}`
+const docsRoute = `/${config.API_VERSION}/members/api-docs`
+app.use(docsRoute, swaggerUi.serve, swaggerUi.setup(swaggerDocument, {
+  swaggerOptions: { docExpansion: 'list' },
+  customSiteTitle: 'Topcoder Member API v6 Documentation'
+}))
+app.get(`${docsRoute}.json`, (req, res) => {
+  res.json(swaggerDocument)
+})
 
 // intercept the response body from jwtAuthenticator
 app.use(interceptor((req, res) => {

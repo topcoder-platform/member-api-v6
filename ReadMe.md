@@ -20,11 +20,12 @@ docker run -d --name memberdb -p 5432:5432 \
 After that, please set db URL environment variables:
 ```bash
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
+export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
 ```
 
-This variable is important since it's required by prisma.
+These variables are important since they're required by Prisma clients.
 
-If you want to do anything with database, this variable is necessary.
+If you want to do anything with database, these variables are necessary.
 
 ## Database Scripts
 
@@ -33,6 +34,7 @@ Before running db scripts, please make sure you have setup db and config db url 
 ```bash
 # set db url values
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
+export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
 
 # install dependencies
 npm install
@@ -61,7 +63,7 @@ I have created a script to download data from dev environment and a script to lo
 To use them, you should:
 - Make sure you have started db.
 - Check configs in `src/scripts/config.js`. Add some handle if you like.
-- Open a terminal and navigate to codebase folder. Set `DATABASE_URL` above.
+- Open a terminal and navigate to codebase folder. Set `DATABASE_URL` and `SKILLS_DB_URL` above.
 - Run `npm install`.
 - Use `node src/scripts/download.js` to download profile data.
 - Run `npm run clear-db` to clear db data first
@@ -86,7 +88,7 @@ The following parameters can be set in config files or in env variables:
 - BUSAPI_URL: Bus API URL
 - KAFKA_ERROR_TOPIC: Kafka error topic used by bus API wrapper
 - GROUPS_API_URL: Groups API URL
-- AMAZON.AWS_ACCESS_KEY_ID: The Amazon certificate key to use when connecting. 
+- AMAZON.AWS_ACCESS_KEY_ID: The Amazon certificate key to use when connecting.
 - AMAZON.AWS_SECRET_ACCESS_KEY: The Amazon certificate access key to use when connecting.
 - AMAZON.AWS.SESSION_TOKEN: The user session token, used when developing locally against the TC dev AWS services
 - AMAZON.AWS_REGION: The Amazon certificate region to use when connecting.
@@ -138,6 +140,8 @@ To make local development easier, I create a mock server at `mock`.
 
 You can start it with `node mock/mock-api.js` and it will listen to port `4000`
 
+This mock service will simulate request and responses for other APIs like auth0 and event bus API.
+
 ## Local Configs
 
 Please run following commands to set necessary configs:
@@ -147,13 +151,11 @@ export AUTH0_URL="http://localhost:4000/v5/auth0"
 export BUSAPI_URL="http://localhost:4000/v5"
 export AUTH0_CLIENT_ID=xyz
 export AUTH0_CLIENT_SECRET=xyz
-export LOOKER_API_BASE_URL="http://localhost:4000/v5/looker"
-export LOOKER_API_CLIENT_ID=xyz
-export LOOKER_API_CLIENT_SECRET=xyz
 export USERFLOW_PRIVATE_KEY=mysecret
+export GROUPS_API_URL="http://localhost:4000/v5/groups"
 ```
 
-These commands will set auth0, event bus pi and looker api to local mock server.
+These commands will set auth0 and event bus api to local mock server.
 
 ## Local Deployment
 
@@ -167,12 +169,11 @@ These commands will set auth0, event bus pi and looker api to local mock server.
 ## Tests
 
 
-Make sure you have followed above steps to 
+Make sure you have followed above steps to
 - setup db and config db url
 - setup local mock api and set local configs
   - it will really call service and mock api
 
-Unit tests use `aws-sdk-mock` to mock S3 operations. So you can safely run tests without S3 configs.
 
 Then you can run:
 ```bash

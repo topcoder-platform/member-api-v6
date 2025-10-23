@@ -54,6 +54,7 @@ Just be careful about the schemas used for different kind of trait.
 There are some changes to prisma schema.
 
 - Add memberTraits.hobby
+- Update memberSkill.displayMode to optional
 - Remove displayMode.memberSkills @ignore
 - Add stats fields as discussed in forum
 
