@@ -372,7 +372,10 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
     }
 
     const candidates = await prisma.member.findMany({
-      where: { userId: { in: memberIds } },
+      where: {
+        userId: { in: memberIds },
+        availableForGigs: { not: false }
+      },
       select: {
         userId: true,
         availableForGigs: true,
@@ -383,12 +386,11 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
       }
     })
 
-    const eligibleCandidates = candidates.filter(c => c.availableForGigs !== false)
-    if (!eligibleCandidates.length) {
+    if (!candidates.length) {
       return { total: 0, page: query.page, perPage: query.perPage, result: [] }
     }
 
-    const userIdsAsNumbers = eligibleCandidates.map(c => helper.bigIntToNumber(c.userId))
+    const userIdsAsNumbers = candidates.map(c => helper.bigIntToNumber(c.userId))
     const userSkills = await skillsPrisma.userSkill.findMany({
       where: {
         userId: { in: userIdsAsNumbers },
@@ -400,7 +402,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
     })
     const skillsByUser = _.groupBy(userSkills, 'userId')
 
-    const scored = eligibleCandidates.map(candidate => ({
+    const scored = candidates.map(candidate => ({
       userId: candidate.userId,
       skillScore: computeSkillScoreForCandidate(candidate, skillsByUser, skillIds)
     }))

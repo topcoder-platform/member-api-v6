@@ -74,6 +74,9 @@ model member {
 
   @@index([handleLower])
   @@index([email])
+  @@index([status, handleLower])
+  @@index([lastLoginDate])
+  @@index([availableForGigs])
   @@schema("members")
 }
 
@@ -95,6 +98,7 @@ model memberAddress {
   updatedBy   String?
 
   @@index([userId])
+  @@index([userId, type])
   @@schema("members")
 }
 
@@ -208,6 +212,7 @@ model memberHistoryStats {
 
   @@index([userId])
   @@index([groupId])
+  @@index([userId, isPrivate])
   @@schema("members")
 }
 
@@ -281,6 +286,7 @@ model memberStats {
   updatedBy   String?
 
   @@index([userId])
+  @@index([userId, groupId])
   @@schema("members")
 }
 

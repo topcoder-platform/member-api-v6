@@ -10,4 +10,4 @@ WORKDIR /member-api-v6
 # Install the dependencies from package.json
 RUN yarn
 
-CMD node app.js
+CMD ["sh", "-c", "npx prisma migrate deploy && node app.js"]
