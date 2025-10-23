@@ -2660,6 +2660,7 @@ async function importDistributionStats () {
       ratingRange3800To3899: 0,
       ratingRange3900To3999: 0
     }
+    const maxDistributionBucket = 39
 
     while (current <= total) {
       const records = await tx.memberMaxRating.findMany({
@@ -2679,9 +2680,10 @@ async function importDistributionStats () {
           distributionValue = cloneDeep(distributionStat)
         }
 
-        const idxVal = Math.floor(record.rating / 100)
+        const idxValRaw = Math.floor(record.rating / 100)
+        const idxVal = Math.max(0, Math.min(idxValRaw, maxDistributionBucket))
         const ratingKey = idxVal === 0 ? 'ratingRange0To099' : `ratingRange${idxVal}00To${idxVal}99`
-        distributionValue[ratingKey] += 1
+        distributionValue[ratingKey] = (distributionValue[ratingKey] ?? 0) + 1
         uniqueMap.set(mapKey, distributionValue)
       })
 
