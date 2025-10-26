@@ -48,6 +48,9 @@ const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/
 const FALLBACK_RECORD_DATE_FIELDS = ['lastLoginDate', 'modified', 'modifiedAt', 'modified_on', 'modifiedOn', 'lastModified', 'lastModifiedAt', 'lastModifiedOn', 'timestamp', 'lastActivityDate']
 const NULL_BYTE_REGEX = /\u0000/g
 
+const SKILL_IMPORT_LOG_PATH = path.join(MIGRATE_DIR, 'skill-import.log')
+let skillImportLogStream
+
 const skillCaches = {
   categoriesById: new Map(),
   skillsById: new Map(),
@@ -87,6 +90,17 @@ function normalizeUserId (value) {
   }
 
   return null
+}
+
+function appendSkillImportLog (message) {
+  if (!skillImportLogStream) {
+    const logDir = path.dirname(SKILL_IMPORT_LOG_PATH)
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true })
+    }
+    skillImportLogStream = fs.createWriteStream(SKILL_IMPORT_LOG_PATH, { flags: 'a' })
+  }
+  skillImportLogStream.write(`${new Date().toISOString()} ${message}\n`)
 }
 
 async function ensureSkillCategory (tx, category) {
@@ -270,7 +284,7 @@ async function ensureSkillDisplayMode (tx, displayMode) {
   return existing
 }
 
-async function syncMemberSkills (userId, memberSkills) {
+async function syncMemberSkills (userId, memberSkills, handle = null) {
   if (!Array.isArray(memberSkills) || memberSkills.length === 0) {
     return
   }
@@ -295,6 +309,7 @@ async function syncMemberSkills (userId, memberSkills) {
       const key = `${record.skillId}:${record.userSkillLevelId}`
       existingMap.set(key, record)
     })
+    const processedSkillIds = new Set()
 
     for (const skill of memberSkills) {
       if (!skill || !skill.id || !skill.name || !skill.category) {
@@ -324,6 +339,7 @@ async function syncMemberSkills (userId, memberSkills) {
         continue
       }
 
+      let skillProcessed = false
       for (const level of uniqueLevels) {
         const levelRecord = await ensureSkillLevel(skillsTx, level)
         if (!levelRecord) {
@@ -352,7 +368,16 @@ async function syncMemberSkills (userId, memberSkills) {
           })
           existingMap.set(compositeKey, created)
         }
+        skillProcessed = true
       }
+      if (skillProcessed) {
+        processedSkillIds.add(skillRecord.id)
+      }
+    }
+
+    if (processedSkillIds.size > 0) {
+      const identifier = handle || `userId:${normalizedUserId}`
+      appendSkillImportLog(`Imported ${processedSkillIds.size} skills for user ${identifier}`)
     }
   })
 }
@@ -2119,7 +2144,7 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
   }
 
   if (memberObj.memberSkills && memberObj.memberSkills.length > 0) {
-    await syncMemberSkills(memberObj.userId, memberObj.memberSkills)
+    await syncMemberSkills(memberObj.userId, memberObj.memberSkills, memberObj.handle)
   }
 }
 
