@@ -48,6 +48,300 @@ const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/
 const FALLBACK_RECORD_DATE_FIELDS = ['lastLoginDate', 'modified', 'modifiedAt', 'modified_on', 'modifiedOn', 'lastModified', 'lastModifiedAt', 'lastModifiedOn', 'timestamp', 'lastActivityDate']
 const NULL_BYTE_REGEX = /\u0000/g
 
+const skillCaches = {
+  categoriesById: new Map(),
+  skillsById: new Map(),
+  skillLevelsById: new Map(),
+  skillLevelsByName: new Map(),
+  displayModesById: new Map(),
+  displayModesByName: new Map()
+}
+
+function resetSkillCaches () {
+  skillCaches.categoriesById.clear()
+  skillCaches.skillsById.clear()
+  skillCaches.skillLevelsById.clear()
+  skillCaches.skillLevelsByName.clear()
+  skillCaches.displayModesById.clear()
+  skillCaches.displayModesByName.clear()
+}
+
+function normalizeUserId (value) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value)
+  }
+
+  if (typeof value === 'bigint') {
+    return Number(value)
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) {
+      return Math.trunc(parsed)
+    }
+  }
+
+  return null
+}
+
+async function ensureSkillCategory (tx, category) {
+  if (!category || !category.id || !category.name) {
+    return null
+  }
+
+  if (skillCaches.categoriesById.has(category.id)) {
+    return skillCaches.categoriesById.get(category.id)
+  }
+
+  let existing = await tx.skillCategory.findUnique({
+    where: { id: category.id }
+  })
+
+  if (!existing) {
+    existing = await tx.skillCategory.findFirst({
+      where: { name: category.name }
+    })
+  }
+
+  if (!existing) {
+    existing = await tx.skillCategory.create({
+      data: {
+        id: category.id,
+        name: category.name,
+        description: category.description || null
+      }
+    })
+  }
+
+  skillCaches.categoriesById.set(existing.id, existing)
+  return existing
+}
+
+async function ensureSkillDefinition (tx, skill, categoryId) {
+  if (!skill || !skill.id || !skill.name) {
+    return null
+  }
+
+  if (skillCaches.skillsById.has(skill.id)) {
+    return skillCaches.skillsById.get(skill.id)
+  }
+
+  let existing = await tx.skill.findUnique({
+    where: { id: skill.id }
+  })
+
+  if (!existing) {
+    existing = await tx.skill.findFirst({
+      where: { name: skill.name }
+    })
+  }
+
+  if (!existing) {
+    const data = {
+      id: skill.id,
+      name: skill.name,
+      description: skill.description || null
+    }
+
+    if (categoryId) {
+      data.categoryId = categoryId
+    }
+
+    existing = await tx.skill.create({ data })
+  } else if (categoryId && existing.categoryId !== categoryId) {
+    existing = await tx.skill.update({
+      where: { id: existing.id },
+      data: { categoryId }
+    })
+  }
+
+  skillCaches.skillsById.set(existing.id, existing)
+  return existing
+}
+
+async function ensureSkillLevel (tx, level) {
+  if (!level || (!level.id && !level.name)) {
+    return null
+  }
+
+  const idKey = level.id
+  const nameKey = level.name
+
+  if (idKey && skillCaches.skillLevelsById.has(idKey)) {
+    return skillCaches.skillLevelsById.get(idKey)
+  }
+
+  if (nameKey && skillCaches.skillLevelsByName.has(nameKey)) {
+    return skillCaches.skillLevelsByName.get(nameKey)
+  }
+
+  let existing = null
+
+  if (idKey) {
+    existing = await tx.userSkillLevel.findUnique({
+      where: { id: idKey }
+    })
+  }
+
+  if (!existing && nameKey) {
+    existing = await tx.userSkillLevel.findFirst({
+      where: { name: nameKey }
+    })
+  }
+
+  if (!existing) {
+    const data = {
+      name: nameKey || String(idKey),
+      description: level.description || null
+    }
+
+    if (idKey) {
+      data.id = idKey
+    }
+
+    existing = await tx.userSkillLevel.create({ data })
+  }
+
+  if (existing.id) {
+    skillCaches.skillLevelsById.set(existing.id, existing)
+  }
+
+  if (existing.name) {
+    skillCaches.skillLevelsByName.set(existing.name, existing)
+  }
+
+  return existing
+}
+
+async function ensureSkillDisplayMode (tx, displayMode) {
+  const fallbackName = 'principal'
+  const payload = displayMode && (displayMode.id || displayMode.name) ? displayMode : { name: fallbackName }
+  const idKey = payload.id
+  const nameKey = payload.name || fallbackName
+
+  if (idKey && skillCaches.displayModesById.has(idKey)) {
+    return skillCaches.displayModesById.get(idKey)
+  }
+
+  if (nameKey && skillCaches.displayModesByName.has(nameKey)) {
+    return skillCaches.displayModesByName.get(nameKey)
+  }
+
+  let existing = null
+
+  if (idKey) {
+    existing = await tx.userSkillDisplayMode.findUnique({
+      where: { id: idKey }
+    })
+  }
+
+  if (!existing && nameKey) {
+    existing = await tx.userSkillDisplayMode.findFirst({
+      where: { name: nameKey }
+    })
+  }
+
+  if (!existing) {
+    const data = {
+      name: nameKey,
+      description: payload.description || null
+    }
+
+    if (idKey) {
+      data.id = idKey
+    }
+
+    existing = await tx.userSkillDisplayMode.create({ data })
+  }
+
+  if (existing.id) {
+    skillCaches.displayModesById.set(existing.id, existing)
+  }
+
+  if (existing.name) {
+    skillCaches.displayModesByName.set(existing.name, existing)
+  }
+
+  return existing
+}
+
+async function syncMemberSkills (userId, memberSkills) {
+  if (!Array.isArray(memberSkills) || memberSkills.length === 0) {
+    return
+  }
+
+  const normalizedUserId = normalizeUserId(userId)
+  if (normalizedUserId === null) {
+    return
+  }
+
+  await skillsPrisma.$transaction(async (skillsTx) => {
+    await skillsTx.userSkill.deleteMany({
+      where: { userId: normalizedUserId }
+    })
+
+    for (const skill of memberSkills) {
+      if (!skill || !skill.id || !skill.name || !skill.category) {
+        continue
+      }
+
+      const categoryRecord = await ensureSkillCategory(skillsTx, skill.category)
+      if (!categoryRecord) {
+        continue
+      }
+
+      const skillRecord = await ensureSkillDefinition(skillsTx, skill, categoryRecord.id)
+      if (!skillRecord) {
+        continue
+      }
+
+      const displayModeRecord = await ensureSkillDisplayMode(skillsTx, skill.displayMode)
+      if (!displayModeRecord) {
+        continue
+      }
+
+      const levelCandidates = isArray(skill.levels) ? skill.levels : []
+      const filteredLevels = levelCandidates.filter(level => level && (level.id || level.name))
+      const uniqueLevels = uniqBy(filteredLevels, level => level.id || level.name)
+
+      if (uniqueLevels.length === 0) {
+        continue
+      }
+
+      for (const level of uniqueLevels) {
+        const levelRecord = await ensureSkillLevel(skillsTx, level)
+        if (!levelRecord) {
+          continue
+        }
+
+        await skillsTx.userSkill.upsert({
+          where: {
+            userId_skillId_userSkillLevelId: {
+              userId: normalizedUserId,
+              skillId: skillRecord.id,
+              userSkillLevelId: levelRecord.id
+            }
+          },
+          update: {
+            userSkillDisplayModeId: displayModeRecord.id
+          },
+          create: {
+            userId: normalizedUserId,
+            skillId: skillRecord.id,
+            userSkillLevelId: levelRecord.id,
+            userSkillDisplayModeId: displayModeRecord.id
+          }
+        })
+      }
+    }
+  })
+}
+
 /**
  * Clear All DB.
  */
@@ -87,21 +381,19 @@ async function clearDB () {
   await prisma.memberTraitSoftware.deleteMany()
   await prisma.memberTraitWork.deleteMany()
   await prisma.memberTraits.deleteMany()
-  // delete member skills
+  // delete member skill assignments and definitions
   console.log('Clearing member skills data')
-  await prisma.memberSkillLevel.deleteMany()
-  await prisma.memberSkill.deleteMany()
+  await skillsPrisma.userSkill.deleteMany()
+  console.log('Clearing skill reference data')
+  await skillsPrisma.userSkillDisplayMode.deleteMany()
+  await skillsPrisma.userSkillLevel.deleteMany()
+  await skillsPrisma.skill.deleteMany()
+  await skillsPrisma.skillCategory.deleteMany()
+  resetSkillCaches()
   // delete member
   console.log('Clearing maxRating and member data')
   await prisma.memberMaxRating.deleteMany()
   await prisma.member.deleteMany()
-
-  // delete skills
-  console.log('Clearing skill data')
-  await skillsPrisma.skillLevel.deleteMany()
-  await skillsPrisma.skill.deleteMany()
-  await skillsPrisma.skillCategory.deleteMany()
-  await prisma.displayMode.deleteMany()
 
   // delete distribution
   console.log('Clearing rating distribution data')
@@ -1808,131 +2100,11 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
         await updateTraitElement(memberObj.memberTraits.community, tx.memberTraitCommunity, memberTraitsDB.id, CREATED_BY)
       }
 
-      if (memberObj.memberSkills) {
-        await tx.memberSkill.deleteMany({
-          where: {
-            userId: memberObj.userId
-          }
-        })
-
-        let allCategories = await tx.skillCategory.findMany()
-        let allDisplayModes = await tx.displayMode.findMany()
-        let allSkillLevels = await tx.skillLevel.findMany()
-        let allSkills = await tx.skill.findMany()
-        let newCategories = []
-        let newDisplayModes = []
-        let newSkillLevels = []
-        let newSkills = []
-        memberObj.memberSkills.forEach(elemItem => {
-          if (elemItem.category && !find(allCategories, category => category.id === elemItem.category.id)) {
-            newCategories.push({
-              ...elemItem.category,
-              createdBy: CREATED_BY
-            })
-          }
-          if (elemItem.displayMode && !find(allDisplayModes, displayMode => displayMode.id === elemItem.displayMode.id)) {
-            newDisplayModes.push({
-              ...elemItem.displayMode,
-              createdBy: CREATED_BY
-            })
-          }
-          if (elemItem.levels && elemItem.levels.length > 0) {
-            elemItem.levels.forEach(levelItem => {
-              if (!find(allSkillLevels, level => levelItem.id === level.id)) {
-                newSkillLevels.push({
-                  ...levelItem,
-                  createdBy: CREATED_BY
-                })
-              }
-            })
-          }
-          if (!find(allSkills, skill => skill.id === elemItem.id)) {
-            newSkills.push({
-              id: elemItem.id,
-              name: elemItem.name,
-              categoryId: elemItem.category.id,
-              createdBy: CREATED_BY
-            })
-          }
-        })
-
-        newCategories = uniqBy(newCategories, elemItem => elemItem.id)
-        newDisplayModes = uniqBy(newDisplayModes, elemItem => elemItem.id)
-        newSkillLevels = uniqBy(newSkillLevels, elemItem => elemItem.id)
-        newSkills = uniqBy(newSkills, elemItem => elemItem.id)
-        if (newCategories.length > 0) {
-          await tx.skillCategory.createMany({
-            data: newCategories
-          })
-        }
-        if (newDisplayModes.length > 0) {
-          await tx.displayMode.createMany({
-            data: newDisplayModes
-          })
-        }
-        if (newSkillLevels.length > 0) {
-          await tx.skillLevel.createMany({
-            data: newSkillLevels
-          })
-        }
-        if (newSkills.length > 0) {
-          await tx.skill.createMany({
-            data: newSkills
-          })
-        }
-
-        const toCreateArr = memberObj.memberSkills.map(elemItem => {
-          const skillObj = {
-            id: uuidv4(),
-            skill: {
-              connect: {
-                id: elemItem.id
-              }
-            },
-            member: {
-              connect: {
-                userId: memberObj.userId
-              }
-            },
-            createdBy: CREATED_BY
-          }
-          if (elemItem.levels) {
-            skillObj.levels = {
-              create: elemItem.levels.map(level => ({
-                skillLevel: {
-                  connect: {
-                    id: level.id
-                  }
-                },
-                createdBy: CREATED_BY
-              }))
-            }
-          }
-          if (elemItem.displayMode) {
-            skillObj.displayMode = {
-              connect: {
-                id: elemItem.displayMode.id
-              }
-            }
-          }
-          return skillObj
-        })
-
-        for (const skillObj of toCreateArr) {
-          const exist = await tx.memberSkill.findFirst({
-            where: {
-              userId: memberObj.userId,
-              skillId: skillObj.skill.connect.id
-            }
-          })
-          if (!exist) {
-            await tx.memberSkill.create({
-              data: skillObj
-            })
-          }
-        }
-      }
     })
+  }
+
+  if (memberObj.memberSkills && memberObj.memberSkills.length > 0) {
+    await syncMemberSkills(memberObj.userId, memberObj.memberSkills)
   }
 }
 
@@ -2766,12 +2938,12 @@ async function main () {
               await prisma.memberTraitWork.deleteMany()
               await prisma.memberTraits.deleteMany()
 
-              await prisma.memberSkillLevel.deleteMany()
-              await prisma.memberSkill.deleteMany()
-              await skillsPrisma.skillLevel.deleteMany()
+              await skillsPrisma.userSkill.deleteMany()
+              await skillsPrisma.userSkillDisplayMode.deleteMany()
+              await skillsPrisma.userSkillLevel.deleteMany()
               await skillsPrisma.skill.deleteMany()
               await skillsPrisma.skillCategory.deleteMany()
-              await prisma.displayMode.deleteMany()
+              resetSkillCaches()
 
               const memberElasticsearchFilename = 'members-2020-01.json'
               await importElasticSearchMember(memberElasticsearchFilename, dateFilter)
