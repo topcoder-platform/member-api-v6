@@ -281,8 +281,19 @@ async function syncMemberSkills (userId, memberSkills) {
   }
 
   await skillsPrisma.$transaction(async (skillsTx) => {
-    await skillsTx.userSkill.deleteMany({
-      where: { userId: normalizedUserId }
+    const existingUserSkills = await skillsTx.userSkill.findMany({
+      where: { userId: normalizedUserId },
+      select: {
+        id: true,
+        skillId: true,
+        userSkillLevelId: true,
+        userSkillDisplayModeId: true
+      }
+    })
+    const existingMap = new Map()
+    existingUserSkills.forEach(record => {
+      const key = `${record.skillId}:${record.userSkillLevelId}`
+      existingMap.set(key, record)
     })
 
     for (const skill of memberSkills) {
@@ -319,24 +330,28 @@ async function syncMemberSkills (userId, memberSkills) {
           continue
         }
 
-        await skillsTx.userSkill.upsert({
-          where: {
-            userId_skillId_userSkillLevelId: {
+        const compositeKey = `${skillRecord.id}:${levelRecord.id}`
+        const existingEntry = existingMap.get(compositeKey)
+
+        if (existingEntry) {
+          if (existingEntry.userSkillDisplayModeId !== displayModeRecord.id) {
+            const updated = await skillsTx.userSkill.update({
+              where: { id: existingEntry.id },
+              data: { userSkillDisplayModeId: displayModeRecord.id }
+            })
+            existingMap.set(compositeKey, updated)
+          }
+        } else {
+          const created = await skillsTx.userSkill.create({
+            data: {
               userId: normalizedUserId,
               skillId: skillRecord.id,
-              userSkillLevelId: levelRecord.id
+              userSkillLevelId: levelRecord.id,
+              userSkillDisplayModeId: displayModeRecord.id
             }
-          },
-          update: {
-            userSkillDisplayModeId: displayModeRecord.id
-          },
-          create: {
-            userId: normalizedUserId,
-            skillId: skillRecord.id,
-            userSkillLevelId: levelRecord.id,
-            userSkillDisplayModeId: displayModeRecord.id
-          }
-        })
+          })
+          existingMap.set(compositeKey, created)
+        }
       }
     }
   })
@@ -2937,13 +2952,6 @@ async function main () {
               await prisma.memberTraitSoftware.deleteMany()
               await prisma.memberTraitWork.deleteMany()
               await prisma.memberTraits.deleteMany()
-
-              await skillsPrisma.userSkill.deleteMany()
-              await skillsPrisma.userSkillDisplayMode.deleteMany()
-              await skillsPrisma.userSkillLevel.deleteMany()
-              await skillsPrisma.skill.deleteMany()
-              await skillsPrisma.skillCategory.deleteMany()
-              resetSkillCaches()
 
               const memberElasticsearchFilename = 'members-2020-01.json'
               await importElasticSearchMember(memberElasticsearchFilename, dateFilter)
