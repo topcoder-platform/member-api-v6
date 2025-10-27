@@ -1,7 +1,7 @@
 const path = require('path')
 const fs = require('fs')
 const readline = require('readline')
-const { concat, isArray, isBoolean, isEmpty, isEqual, isInteger, find, omit, pick, isNumber, forEach, map, uniqBy, isString, cloneDeep } = require('lodash')
+const { concat, isArray, isBoolean, isEmpty, isEqual, isInteger, find, omit, pick, isNumber, forEach, map, uniqBy, isString, cloneDeep, flattenDeep } = require('lodash')
 const { v4: uuidv4 } = require('uuid')
 const config = require('./config')
 const prismaManager = require('../common/prisma')
@@ -1898,10 +1898,23 @@ async function fixMemberUpdateData (memberItem, dbItem) {
         }]
       }
     } else if (memberItem.traits.traitId === 'hobby') {
-      memberItemUpdate.memberTraits.hobby = []
+      const hobbyValues = []
       forEach(memberItem.traits.data, traitData => {
-        memberItemUpdate.memberTraits.hobby.push(traitData.hobby)
+        if (!traitData || traitData.hobby === undefined || traitData.hobby === null) {
+          return
+        }
+        const rawValues = isArray(traitData.hobby) ? flattenDeep(traitData.hobby) : [traitData.hobby]
+        forEach(rawValues, hobbyValue => {
+          if (isString(hobbyValue) && hobbyValue.trim()) {
+            hobbyValues.push(hobbyValue)
+          } else if (hobbyValue !== undefined && hobbyValue !== null) {
+            console.warn(`[WARN] Skipping invalid hobby value for user ${memberItem.userId}: ${JSON.stringify(hobbyValue)}`)
+          }
+        })
       })
+      if (!isEmpty(hobbyValues)) {
+        memberItemUpdate.memberTraits.hobby = hobbyValues
+      }
     } else if (memberItem.traits.traitId === 'subscription') {
       memberItemUpdate.memberTraits.subscription = []
       forEach(memberItem.traits.data, traitData => {
@@ -2119,6 +2132,21 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
           }
           if (memberObj.memberTraits.hobby && memberObj.memberTraits.hobby.length > 0) {
             toUpdateObj.hobby = memberObj.memberTraits.hobby
+          }
+          if (toUpdateObj.hobby) {
+            const sanitizedHobbies = []
+            const hobbySource = isArray(toUpdateObj.hobby) ? flattenDeep(toUpdateObj.hobby) : [toUpdateObj.hobby]
+            forEach(hobbySource, hobbyValue => {
+              if (isString(hobbyValue) && hobbyValue.trim()) {
+                sanitizedHobbies.push(hobbyValue)
+              }
+            })
+            if (isEmpty(sanitizedHobbies)) {
+              delete toUpdateObj.hobby
+              console.warn(`[WARN] Skipping hobby update for user ${memberObj.userId} due to invalid values`)
+            } else {
+              toUpdateObj.hobby = sanitizedHobbies
+            }
           }
           await tx.memberTraits.update({
             where: {
