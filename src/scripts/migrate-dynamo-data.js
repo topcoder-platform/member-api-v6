@@ -1760,6 +1760,9 @@ async function importElasticSearchMember (filename, dateFilter = null) {
     })
 
     const dataObj = await fixMemberUpdateData(dataItem._source, dbItem || {})
+    if (!dataObj) {
+      continue
+    }
 
     await updateMembersWithTraitsAndSkills(dataObj)
     total += 1
