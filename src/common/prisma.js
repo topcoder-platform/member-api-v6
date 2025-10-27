@@ -4,8 +4,12 @@ const {
   Prisma
 } = require('../../prisma/generated/client')
 const { PrismaClient: SkillsPrismaClient } = require('../../prisma/generated/skills-client')
+const config = require('config')
 
 const clientOptions = {
+  transactionOptions: {
+    timeout: config.MEMBER_SERVICE_PRISMA_TIMEOUT,
+  },
   log: [
     { level: 'query', emit: 'event' },
     { level: 'info', emit: 'event' },
