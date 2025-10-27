@@ -1774,6 +1774,84 @@ async function importElasticSearchMember (filename, dateFilter = null) {
 }
 
 /**
+ * Update member status values from ElasticSearch snapshot
+ * @param {String} filename filename
+ * @param {Date|null} [dateFilter=null] optional date filter threshold
+ */
+async function updateMemberStatusFromElasticSearch (filename, dateFilter = null) {
+  const memberElasticFilePath = path.join(MIGRATE_DIR, filename)
+
+  const lineCount = await countFileLines(memberElasticFilePath)
+  console.log(`${filename} has ${lineCount} lines in total`)
+
+  const rlRead = readline.createInterface({
+    input: fs.createReadStream(memberElasticFilePath),
+    crlfDelay: Infinity // To recognize all instances of CR LF as a single line break
+  })
+
+  let currentLine = 0
+  let count = 0
+  let total = 0
+  let skipped = 0
+  let unchanged = 0
+  for await (const line of rlRead) {
+    currentLine += 1
+    if (currentLine % 10 === 0) {
+      const percentage = ((currentLine / lineCount) * 100).toFixed(2)
+      process.stdout.clearLine()
+      process.stdout.cursorTo(0)
+      process.stdout.write(`Migrate Progress: ${percentage}%, read ${count} items, skipped ${skipped}, unchanged ${unchanged}`)
+    }
+
+    count += 1
+    const parsedLine = JSON.parse(line.trim())
+    const dataItem = parsedLine._source || parsedLine
+
+    if (!shouldProcessRecord(dataItem, dateFilter)) {
+      skipped += 1
+      continue
+    }
+
+    const normalizedUserId = normalizeUserId(dataItem.userId)
+    const statusValue = dataItem.status
+    if (!normalizedUserId || !isString(statusValue)) {
+      skipped += 1
+      continue
+    }
+
+    let normalizedStatus = statusValue
+    if (normalizedStatus === 'INACTIVE') {
+      normalizedStatus = 'INACTIVE_USER_REQUEST'
+    } else if (!MEMBER_STATUS.includes(normalizedStatus)) {
+      skipped += 1
+      continue
+    }
+
+    const updateResult = await prisma.member.updateMany({
+      where: {
+        userId: normalizedUserId,
+        NOT: {
+          status: normalizedStatus
+        }
+      },
+      data: {
+        status: normalizedStatus
+      }
+    })
+
+    if (updateResult.count > 0) {
+      total += updateResult.count
+    } else {
+      unchanged += 1
+    }
+  }
+
+  console.log(`\nIt has updated ${total} items totally, skipped ${skipped} items, unchanged ${unchanged} items`)
+
+  console.log(`Finished reading the file: ${filename}\n`)
+}
+
+/**
  * Fix the member data structure for updating
  * @param {Object} memberItem member item
  * @param {Object} dbItem the member in DB
@@ -2968,6 +3046,7 @@ async function main () {
   console.log('4. Update ElasticSearch MemberStat')
   console.log('5. Import Dynamo MemberStatHistory')
   console.log('6. Import Distribution Stats')
+  console.log('7. Update ElasticSearch Member Status')
   console.log('')
 
   const rl = readline.createInterface({
@@ -2975,8 +3054,8 @@ async function main () {
     output: process.stdout
   })
 
-  rl.question('Please select your step to run (0-6): ', async (step) => {
-    if (step !== '0' && step !== '1' && step !== '2' && step !== '3' && step !== '4' && step !== '5' && step !== '6') {
+  rl.question('Please select your step to run (0-7): ', async (step) => {
+    if (step !== '0' && step !== '1' && step !== '2' && step !== '3' && step !== '4' && step !== '5' && step !== '6' && step !== '7') {
       rl.close()
     } else {
       console.log(`Running step ${step} ...`)
@@ -3047,13 +3126,16 @@ async function main () {
               await prisma.distributionStats.deleteMany()
 
               await importDistributionStats()
+            } else if (step === '7') {
+              const memberElasticsearchFilename = 'members-2020-01.json'
+              await updateMemberStatusFromElasticSearch(memberElasticsearchFilename, dateFilter)
             }
 
             console.log('Script is finished.')
             rl.close()
           }
 
-          const needsDateFilter = ['1', '2', '3', '4', '5'].includes(step)
+          const needsDateFilter = ['1', '2', '3', '4', '5', '7'].includes(step)
           if (needsDateFilter) {
             rl.question('Enter date filter (YYYY-MM-DD UTC; timestamp-less records will be skipped, or press Enter to skip): ', async (dateFilterInput) => {
               const dateFilter = parseDateFilter(dateFilterInput)
