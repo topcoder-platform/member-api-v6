@@ -2186,7 +2186,8 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
 async function updateTraitElement (objArr, txObject, memberTraitId, createdBy) {
   if (objArr && objArr.length > 0) {
     const toUpdateArr = objArr.map(elemItem => {
-      const traitItem = { ...(elemItem || {}) }
+      const traitItem = cloneDeep(elemItem || {})
+      sanitizeNullBytesDeep(traitItem)
 
       if (Object.prototype.hasOwnProperty.call(traitItem, 'industry')) {
         const { industry } = traitItem
