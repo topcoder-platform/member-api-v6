@@ -2127,7 +2127,7 @@ async function fixMemberUpdateData (memberItem, dbItem) {
  */
 async function updateMembersWithTraitsAndSkills (memberObj) {
   if (!isEmpty(omit(memberObj, ['userId', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'lastLoginDate']))) {
-    await prisma.$transaction(async (tx) => {
+    await executeWithTransactionRetry(() => prisma.$transaction(async (tx) => {
       const onlyMemberObj = omit(memberObj, ['userId', 'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'lastLoginDate', 'skills', 'maxRating', 'addresses', 'memberTraits', 'memberSkills'])
 
       if (onlyMemberObj.status === 'INACTIVE') {
@@ -2249,7 +2249,9 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
         await updateTraitElement(memberObj.memberTraits.community, tx.memberTraitCommunity, memberTraitsDB.id, CREATED_BY)
       }
 
-    })
+    }, {
+      timeout: TRANSACTION_TIMEOUT_MS
+    }))
   }
 
   if (memberObj.memberSkills && memberObj.memberSkills.length > 0) {
