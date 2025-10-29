@@ -1,0 +1,9 @@
+export NODE_ENV=test
+export AUTH0_URL="http://localhost:4000/v5/auth0"
+export BUSAPI_URL="http://localhost:4000/v5"
+export AUTH0_CLIENT_ID=xyz
+export AUTH0_CLIENT_SECRET=xyz
+export USERFLOW_PRIVATE_KEY=mysecret
+export GROUPS_API_URL="http://localhost:4000/v5/groups"
+export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
+export LOG_LEVEL=silent

@@ -14,6 +14,10 @@
     "reset-db": "prisma migrate reset",
     "test": "mocha -t 20000 test/unit/*.test.js --exit",
     "test:cov": "nyc --reporter=html --reporter=text npm test",
+
+    "e2e": "mocha test/e2e/*.test.js --exit --reporter spec --bail",
+    "e2e:cov": "nyc --all --eager --include=\"src/**/*.js\" --include=\"app*.js\" --include=\"config/**/*.js\" --exclude=\"test/**/*.js\" --reporter=html --reporter=text --reporter=text-summary mocha test/e2e/*.test.js --exit --reporter spec --bail",
+
     "migrate-dynamo-data": "node src/scripts/migrate-dynamo-data.js"
   },
   "author": "TCSCODER",
