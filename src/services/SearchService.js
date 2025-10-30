@@ -162,9 +162,18 @@ async function searchMembers (currentUser, query) {
   }
 
   // search for the members based on query
+  // Allow sanitized responses for explicit lookups even without elevated privileges.
+  const isExplicitMemberLookup =
+    query.userId != null ||
+    (_.isArray(query.userIds) && query.userIds.length > 0) ||
+    (!_.isEmpty(query.handle)) ||
+    (_.isArray(query.handles) && query.handles.length > 0) ||
+    (!_.isEmpty(query.handleLower)) ||
+    (_.isArray(query.handlesLower) && query.handlesLower.length > 0)
+
   const canBypassStatusRestriction = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
   const prismaFilter = prismaHelper.buildSearchMemberFilter(query, {
-    restrictStatus: !canBypassStatusRestriction
+    restrictStatus: !(canBypassStatusRestriction || isExplicitMemberLookup)
   })
   logger.debug(`searchMembers: prisma filter ${stringifyForLog(prismaFilter)}`)
   const searchData = await fillMembers(prismaFilter, query, fields)
