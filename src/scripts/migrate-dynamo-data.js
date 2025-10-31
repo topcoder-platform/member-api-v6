@@ -72,7 +72,14 @@ const destructiveApprovals = new Map()
 
 function logWithLevel (level, message, context = null) {
   const timestamp = new Date().toISOString()
-  const contextSuffix = context ? ` | ${JSON.stringify(context)}` : ''
+  let contextSuffix = ''
+  if (context) {
+    try {
+      contextSuffix = ` | ${JSON.stringify(context, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}`
+    } catch (serializeErr) {
+      contextSuffix = ` | ${JSON.stringify({ serializationError: serializeErr.message })}`
+    }
+  }
   const output = `[${level}] ${timestamp} ${message}${contextSuffix}`
   if (level === LOG_LEVELS.ERROR) {
     console.error(output)
@@ -93,6 +100,14 @@ function logWarn (message, context) {
 
 function logError (message, context) {
   logWithLevel(LOG_LEVELS.ERROR, message, context)
+}
+
+function isBigIntSerializationError (err) {
+  if (!err) {
+    return false
+  }
+  const message = err.message || `${err}`
+  return typeof message === 'string' && message.toLowerCase().includes('serialize a bigint')
 }
 
 async function executeWrite (description, operation, context = {}) {
@@ -1169,6 +1184,7 @@ async function importDynamoMember (filename, dateFilter = null) {
   let total = 0
   // count skipped items due to date filter
   let skipped = 0
+  let skippedDueToErrors = 0
   // store the temp json object string
   let stringObject = ''
   // store batch items
@@ -2225,11 +2241,18 @@ async function importElasticSearchMember (filename, dateFilter = null) {
       continue
     }
 
-    await updateMembersWithTraitsAndSkills(dataObj)
-    total += 1
+    const updated = await updateMembersWithTraitsAndSkills(dataObj)
+    if (updated) {
+      total += 1
+    } else {
+      skippedDueToErrors += 1
+    }
   }
 
   console.log(`\nIt has updated ${total} items totally, skipped ${skipped} items`)
+  if (skippedDueToErrors > 0) {
+    console.log(`Skipped due to errors: ${skippedDueToErrors}`)
+  }
 
   console.log(`Finished reading the file: ${filename}\n`)
 }
@@ -2750,6 +2773,10 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
       }))
     } catch (err) {
       logError('Failed to update member with traits and skills', { ...context, error: err?.message })
+      if (isBigIntSerializationError(err)) {
+        logWarn('Skipping member update due to BigInt serialization error', context)
+        return false
+      }
       throw err
     }
   }
@@ -2759,9 +2786,15 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
       await syncMemberSkills(memberObj.userId, memberObj.memberSkills, memberObj.handle)
     } catch (err) {
       logError('Failed to sync member skills', { ...context, error: err?.message })
+      if (isBigIntSerializationError(err)) {
+        logWarn('Skipping member skill sync due to BigInt serialization error', context)
+        return false
+      }
       throw err
     }
   }
+
+  return true
 }
 
 async function syncMemberAddresses (tx, userId, addresses = []) {
