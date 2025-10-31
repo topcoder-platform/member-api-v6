@@ -1446,6 +1446,29 @@ function isInvalidUtf8Error (err) {
   return message.includes('invalid byte sequence for encoding "UTF8"') || message.includes('0x00')
 }
 
+function isUniqueConstraintError (err) {
+  if (!err) {
+    return false
+  }
+  if (err.code === 'P2002') {
+    return true
+  }
+  const message = err.message || ''
+  return message.includes('Unique constraint failed')
+}
+
+function logUniqueConstraintSkip (memberItem, err) {
+  const identifier = compactObject({
+    userId: memberItem?.userId,
+    handle: memberItem?.handle,
+    handleLower: memberItem?.handleLower
+  })
+  logWarn('Skipping member due to unique constraint violation', {
+    ...identifier,
+    target: err?.meta?.target
+  })
+}
+
 async function createMembersIndividually (memberItems) {
   for (const memberItem of memberItems) {
     try {
@@ -1457,6 +1480,10 @@ async function createMembersIndividually (memberItems) {
         timeout: TRANSACTION_TIMEOUT_MS
       }))
     } catch (err) {
+      if (isUniqueConstraintError(err)) {
+        logUniqueConstraintSkip(memberItem, err)
+        continue
+      }
       if (isInvalidUtf8Error(err)) {
         console.warn(`Skipping member ${memberItem.userId || memberItem.handleLower || 'unknown'} due to invalid UTF-8 data`)
         continue
@@ -1492,6 +1519,11 @@ async function createMembers (memberItems) {
   } catch (err) {
     if (isInvalidUtf8Error(err)) {
       console.warn('Batch insert failed due to invalid UTF-8 data. Falling back to per-member inserts.')
+      await createMembersIndividually(memberItems)
+      return
+    }
+    if (isUniqueConstraintError(err)) {
+      console.warn('Batch insert failed due to unique constraint violation. Falling back to per-member inserts.')
       await createMembersIndividually(memberItems)
       return
     }
