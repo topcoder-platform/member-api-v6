@@ -121,5 +121,6 @@ module.exports = {
 
   HASHING_KEYS: {
     USERFLOW: process.env.USERFLOW_PRIVATE_KEY
-  }
+  },
+  MEMBER_SERVICE_PRISMA_TIMEOUT: process.env.MEMBER_SERVICE_PRISMA_TIMEOUT ? parseInt(process.env.MEMBER_SERVICE_PRISMA_TIMEOUT, 10) : 10000,
 }
