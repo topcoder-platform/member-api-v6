@@ -153,6 +153,8 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
   _.forEach(ret, r => {
     r.createdAt = r.createdAt ? r.createdAt.getTime() : null
     r.updatedAt = r.updatedAt ? r.updatedAt.getTime() : null
+    r.createdBy = helper.bigIntToNumber(r.createdBy)
+    r.updatedBy = helper.bigIntToNumber(r.updatedBy)
   })
   return ret
 }
