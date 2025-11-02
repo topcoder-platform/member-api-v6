@@ -24,6 +24,7 @@ async function updateTraitsFromFile (filename) {
   let updated = 0
   let skippedNoMember = 0
   let skippedNoTraits = 0
+  let skippedDueToErrors = 0
 
   for await (const line of rl) {
     const trimmed = line.trim()
@@ -67,8 +68,12 @@ async function updateTraitsFromFile (filename) {
       memberTraits: updateData.memberTraits
     }
 
-    await updateMembersWithTraitsAndSkills(traitUpdate)
-    updated += 1
+    const updatedSuccessfully = await updateMembersWithTraitsAndSkills(traitUpdate)
+    if (updatedSuccessfully) {
+      updated += 1
+    } else {
+      skippedDueToErrors += 1
+    }
 
     if (processed % 100 === 0) {
       console.log(`Processed ${processed} lines, updated ${updated} members`)
@@ -80,6 +85,9 @@ async function updateTraitsFromFile (filename) {
   console.log(`Members updated: ${updated}`)
   console.log(`Skipped (no matching member): ${skippedNoMember}`)
   console.log(`Skipped (no trait changes): ${skippedNoTraits}`)
+  if (skippedDueToErrors > 0) {
+    console.log(`Skipped due to errors: ${skippedDueToErrors}`)
+  }
 }
 
 async function main () {
