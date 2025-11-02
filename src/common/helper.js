@@ -564,6 +564,25 @@ function bigIntToNumber (value) {
   return null
 }
 
+function convertBigIntDeep (value) {
+  if (value === null || value === undefined) {
+    return value
+  }
+  if (typeof value === 'bigint') {
+    return bigIntToNumber(value)
+  }
+  if (Array.isArray(value)) {
+    return value.map(convertBigIntDeep)
+  }
+  if (value instanceof Date) {
+    return value
+  }
+  if (typeof value === 'object') {
+    return _.mapValues(value, convertBigIntDeep)
+  }
+  return value
+}
+
 module.exports = {
   wrapExpress,
   autoWrapExpress,
@@ -591,5 +610,6 @@ module.exports = {
   getParamsFromQueryAsArray,
   secureMemberAddressData,
   truncateLastName,
-  bigIntToNumber
+  bigIntToNumber,
+  convertBigIntDeep
 }

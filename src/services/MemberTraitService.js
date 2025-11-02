@@ -241,7 +241,7 @@ async function getTraits (currentUser, handle, query) {
   if (!currentUser) {
     result = _.filter(result, (item) => _.includes(config.MEMBER_PUBLIC_TRAITS, item.traitId))
   }
-  return result
+  return helper.convertBigIntDeep(result)
 }
 
 getTraits.schema = {
