@@ -377,6 +377,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
     const skillIds = query.skillIds || []
 
     if (!_.isArray(memberIds) || memberIds.length === 0 || !_.isArray(skillIds) || skillIds.length === 0) {
+      logger.debug(`Returns empty response - ${stringifyForLog(query)}`)
       return { total: 0, page: query.page, perPage: query.perPage, result: [] }
     }
 
