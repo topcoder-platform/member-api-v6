@@ -378,7 +378,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
 
     if (!_.isArray(memberIds) || memberIds.length === 0 || !_.isArray(skillIds) || skillIds.length === 0) {
       logger.debug(`Returns empty response - ${stringifyForLog(query)}`)
-      return { total: 0, page: query.page, perPage: query.perPage, result: [] }
+      return { total: 0, page: query.page, perPage: query.perPage, result: [], empty: [] }
     }
 
     const candidates = await prisma.member.findMany({
@@ -612,6 +612,7 @@ searchMembersBySkills.schema = {
 async function autocomplete (currentUser, query) {
   const fields = omitMemberAttributes(currentUser, query, MEMBER_AUTOCOMPLETE_FIELDS)
 
+  logger.debug(`Term autocomplete - ${query.term}`)
   if (!query.term || query.term.length === 0) {
     return { total: 0, page: query.page, perPage: query.perPage, result: [] }
   }
@@ -623,9 +624,13 @@ async function autocomplete (currentUser, query) {
     }
   }
   const total = await prisma.member.count(prismaFilter)
+  logger.debug(`total length - ${total}`)
+  logger.debug(`Prisma filter autocomplete - ${stringifyForLog(prismaFilter)}`)
   if (total === 0) {
     return { total: 0, page: query.page, perPage: query.perPage, result: [] }
   }
+
+  logger.debug(`There is some values`)
   const selectFields = {}
   _.forEach(fields, f => {
     selectFields[f] = true
@@ -638,6 +643,8 @@ async function autocomplete (currentUser, query) {
     take: query.perPage,
     orderBy: { handle: query.sortOrder }
   })
+
+  logger.debug(`Response from member table - ${stringifyForLog(records)}`)
   records = _.map(records, item => {
     const t = _.pick(item, fields)
     if (t.userId) {
