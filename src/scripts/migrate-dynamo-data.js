@@ -2598,11 +2598,18 @@ async function fixMemberUpdateData (memberItem, dbItem) {
         }]
       }
     } else if (memberItem.traits.traitId === 'languages') {
-      const traitData = pick(memberItem.traits.data[0], TRAIT_LANGUAGE)
-      if (traitData.language) {
-        memberItemUpdate.memberTraits.language = [{
-          ...traitData
-        }]
+      const languageTraits = []
+      forEach(memberItem.traits.data, traitData => {
+        if (!traitData) {
+          return
+        }
+        const normalizedTrait = pick(traitData, TRAIT_LANGUAGE)
+        if (normalizedTrait.language) {
+          languageTraits.push(normalizedTrait)
+        }
+      })
+      if (!isEmpty(languageTraits)) {
+        memberItemUpdate.memberTraits.language = languageTraits
       }
     } else if (memberItem.traits.traitId === 'education') {
       const educationTraits = []
@@ -2626,20 +2633,29 @@ async function fixMemberUpdateData (memberItem, dbItem) {
         memberItemUpdate.memberTraits.education = educationTraits
       }
     } else if (memberItem.traits.traitId === 'service_provider') {
-      const traitData = pick(memberItem.traits.data[0], TRAIT_SERVICE_PROVIDER)
-      if (traitData.serviceProviderType && traitData.name) {
-        let providerType = traitData.serviceProviderType
-        if (providerType === 'Internet Service Provider') {
-          providerType = 'InternetServiceProvider'
-        } else if (providerType === 'Mobile Carrier') {
-          providerType = 'MobileCarrier'
-        } else if (providerType === 'Financial Institution') {
-          providerType = 'FinancialInstitution'
+      const serviceProviders = []
+      forEach(memberItem.traits.data, traitData => {
+        if (!traitData) {
+          return
         }
-        memberItemUpdate.memberTraits.serviceProvider = [{
-          type: providerType,
-          name: traitData.name
-        }]
+        const normalizedTrait = pick(traitData, TRAIT_SERVICE_PROVIDER)
+        if (normalizedTrait.serviceProviderType && normalizedTrait.name) {
+          let providerType = normalizedTrait.serviceProviderType
+          if (providerType === 'Internet Service Provider') {
+            providerType = 'InternetServiceProvider'
+          } else if (providerType === 'Mobile Carrier') {
+            providerType = 'MobileCarrier'
+          } else if (providerType === 'Financial Institution') {
+            providerType = 'FinancialInstitution'
+          }
+          serviceProviders.push({
+            type: providerType,
+            name: normalizedTrait.name
+          })
+        }
+      })
+      if (!isEmpty(serviceProviders)) {
+        memberItemUpdate.memberTraits.serviceProvider = serviceProviders
       }
     } else if (memberItem.traits.traitId === 'hobby') {
       const hobbyValues = []
@@ -2660,10 +2676,15 @@ async function fixMemberUpdateData (memberItem, dbItem) {
         memberItemUpdate.memberTraits.hobby = hobbyValues
       }
     } else if (memberItem.traits.traitId === 'subscription') {
-      memberItemUpdate.memberTraits.subscription = []
+      const subscriptions = []
       forEach(memberItem.traits.data, traitData => {
-        memberItemUpdate.memberTraits.subscription.push(traitData.name)
+        if (traitData && traitData.name) {
+          subscriptions.push(traitData.name)
+        }
       })
+      if (!isEmpty(subscriptions)) {
+        memberItemUpdate.memberTraits.subscriptions = subscriptions
+      }
     } else if (memberItem.traits.traitId === 'device') {
       memberItemUpdate.memberTraits.device = []
       forEach(memberItem.traits.data, traitData => {
@@ -4122,5 +4143,7 @@ if (require.main === module) {
 
 module.exports = {
   fixMemberUpdateData,
-  updateMembersWithTraitsAndSkills
+  updateMembersWithTraitsAndSkills,
+  parseDateFilter,
+  shouldProcessRecord
 }
