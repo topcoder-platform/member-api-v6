@@ -178,6 +178,21 @@ function resetSkillCaches () {
   skillCaches.displayModesByName.clear()
 }
 
+const MEMBER_STATS_FULL_INCLUDE = {
+  maxRating: true,
+  develop: { include: { items: true } },
+  design: { include: { items: true } },
+  dataScience: {
+    include: {
+      srm: { include: { challengeDetails: true, divisions: true } },
+      marathon: true
+    }
+  },
+  copilot: true
+}
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key)
+
 function normalizeUserId (value) {
   if (value === null || value === undefined) {
     return null
@@ -195,6 +210,40 @@ function normalizeUserId (value) {
     const parsed = Number(value)
     if (Number.isFinite(parsed)) {
       return Math.trunc(parsed)
+    }
+  }
+
+  return null
+}
+
+function normalizeGroupId (value) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value === 'bigint') {
+    return value
+  }
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return null
+    }
+    return BigInt(Math.trunc(value))
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) {
+      return null
+    }
+    if (!/^-?\d+$/.test(trimmed)) {
+      return null
+    }
+    try {
+      return BigInt(trimmed)
+    } catch (err) {
+      return null
     }
   }
 
@@ -1668,8 +1717,11 @@ async function importDynamoMemberStat (filename, dateFilter = null) {
 function fixDynamoMemberStatData (dataItem) {
   const memberStat = {
     challenges: dataItem.challenges,
-    wins: dataItem.wins,
-    groupId: dataItem.groupId
+    wins: dataItem.wins
+  }
+
+  if (Object.prototype.hasOwnProperty.call(dataItem, 'groupId')) {
+    memberStat.groupId = normalizeGroupId(dataItem.groupId)
   }
 
   if (dataItem.DEVELOP) {
@@ -3234,6 +3286,127 @@ async function importElasticSearchMemberStat (filename, dateFilter = null) {
   console.log(`Finished reading the file: ${filename}\n`)
 }
 
+async function syncElasticSearchMemberGroupStats (filename, targetGroupIdInput, dateFilter = null) {
+  const normalizedGroupId = normalizeGroupId(targetGroupIdInput)
+  if (normalizedGroupId === null) {
+    throw new Error(`Invalid groupId provided: ${targetGroupIdInput}`)
+  }
+
+  const groupIdLabel = normalizedGroupId.toString()
+  const memberStatElasticFilePath = path.join(MIGRATE_DIR, filename)
+  if (!fs.existsSync(memberStatElasticFilePath)) {
+    throw new Error(`ElasticSearch member stat file not found at ${memberStatElasticFilePath}`)
+  }
+
+  const lineCount = await countFileLines(memberStatElasticFilePath)
+  console.log(`${filename} has ${lineCount} lines in total`)
+
+  const rlRead = readline.createInterface({
+    input: fs.createReadStream(memberStatElasticFilePath),
+    crlfDelay: Infinity
+  })
+
+  let currentLine = 0
+  let matchedGroupRecords = 0
+  let processed = 0
+  let updated = 0
+  let alreadyAligned = 0
+  let skippedByFilter = 0
+  let missingMembers = 0
+  let parseErrors = 0
+
+  for await (const line of rlRead) {
+    currentLine += 1
+    if (currentLine % 50 === 0) {
+      const percentage = ((currentLine / lineCount) * 100).toFixed(2)
+      process.stdout.clearLine()
+      process.stdout.cursorTo(0)
+      process.stdout.write(`Sync Progress: ${percentage}%, processed ${processed}, updated ${updated}, aligned ${alreadyAligned}`)
+    }
+
+    const trimmed = line.trim()
+    if (!trimmed) {
+      continue
+    }
+
+    let parsed
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch (err) {
+      parseErrors += 1
+      logWarn('Skipping malformed ElasticSearch member stat entry', { lineNumber: currentLine, error: err?.message })
+      continue
+    }
+
+    const dataItem = parsed._source ? parsed._source : parsed
+    const recordGroupId = normalizeGroupId(dataItem.groupId)
+    if (recordGroupId === null || recordGroupId !== normalizedGroupId) {
+      continue
+    }
+
+    matchedGroupRecords += 1
+
+    if (!shouldProcessRecord(dataItem, dateFilter)) {
+      skippedByFilter += 1
+      continue
+    }
+
+    const member = await prisma.member.findFirst({
+      where: {
+        userId: dataItem.userId
+      },
+      include: {
+        maxRating: true
+      }
+    })
+
+    if (!member) {
+      missingMembers += 1
+      logWarn('Member not found for group stat entry; skipping', { userId: dataItem.userId, groupId: groupIdLabel })
+      continue
+    }
+
+    const targetMemberStat = fixElasticSearchMemberStatData(dataItem)
+    targetMemberStat.groupId = normalizedGroupId
+
+    const existingMemberStat = await prisma.memberStats.findFirst({
+      where: {
+        userId: member.userId,
+        groupId: normalizedGroupId
+      },
+      include: MEMBER_STATS_FULL_INCLUDE
+    })
+
+    const normalizedTarget = normalizeFixedMemberStat(targetMemberStat)
+    const normalizedExisting = normalizeFixedMemberStat(buildFixedMemberStatFromDbRecord(existingMemberStat, member))
+
+    if (existingMemberStat && normalizedExisting && isEqual(normalizedExisting, normalizedTarget)) {
+      alreadyAligned += 1
+      processed += 1
+      continue
+    }
+
+    await updateMemberStat(targetMemberStat, member, CREATED_BY)
+    updated += 1
+    processed += 1
+  }
+
+  process.stdout.clearLine()
+  process.stdout.cursorTo(0)
+
+  console.log(`\nFinished syncing member stats for group ${groupIdLabel}`)
+  console.log(` - Group records encountered: ${matchedGroupRecords}`)
+  console.log(` - Records processed: ${processed}`)
+  console.log(` - Records updated: ${updated}`)
+  console.log(` - Already aligned: ${alreadyAligned}`)
+  console.log(` - Missing members: ${missingMembers}`)
+  console.log(` - Skipped by date filter: ${skippedByFilter}`)
+  if (parseErrors > 0) {
+    console.log(` - Parse errors: ${parseErrors}`)
+  }
+  console.log('')
+}
+
 /**
  * Fix elastic search member stat data
  * @param {Object} dataItem item to be fixed
@@ -3242,8 +3415,11 @@ async function importElasticSearchMemberStat (filename, dateFilter = null) {
 function fixElasticSearchMemberStatData (dataItem) {
   const memberStat = {
     challenges: dataItem.challenges,
-    wins: dataItem.wins,
-    groupId: dataItem.groupId
+    wins: dataItem.wins
+  }
+
+  if (Object.prototype.hasOwnProperty.call(dataItem, 'groupId')) {
+    memberStat.groupId = normalizeGroupId(dataItem.groupId)
   }
 
   if (dataItem.maxRating && isInteger(dataItem.maxRating.rating) && isString(dataItem.maxRating.track) && isString(dataItem.maxRating.subTrack)) {
@@ -3662,6 +3838,678 @@ async function updateArrayLevelItems (updateItems, existingItems, txModel, paren
 }
 
 /**
+ * Convert numeric-like values into a comparable representation.
+ * Preserves significant digits for BigInt values by falling back to string conversion when unsafe.
+ * @param {*} value input value
+ * @returns {Number|String|null|undefined} comparable number/string/null
+ */
+function toComparableNumber (value) {
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === null) {
+    return null
+  }
+  if (typeof value === 'bigint') {
+    const asNumber = Number(value)
+    if (Number.isSafeInteger(asNumber)) {
+      return asNumber
+    }
+    return value.toString()
+  }
+  const parsed = Number(value)
+  if (Number.isNaN(parsed)) {
+    return null
+  }
+  return parsed
+}
+
+/**
+ * Convert date-like values to ISO strings to support structural equality checks.
+ * @param {*} value date input
+ * @returns {String|null|undefined} ISO string, null, or undefined
+ */
+function toComparableDate (value) {
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === null) {
+    return null
+  }
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  return date.toISOString()
+}
+
+function assignIfPresent (target, key, value) {
+  if (value !== undefined) {
+    target[key] = value
+  }
+}
+
+function normalizeFixedMemberStat (fixed) {
+  if (!fixed) {
+    return null
+  }
+
+  const normalized = {}
+
+  if (hasOwn(fixed, 'challenges')) {
+    assignIfPresent(normalized, 'challenges', toComparableNumber(fixed.challenges))
+  }
+  if (hasOwn(fixed, 'wins')) {
+    assignIfPresent(normalized, 'wins', toComparableNumber(fixed.wins))
+  }
+  if (hasOwn(fixed, 'groupId')) {
+    const normalizedGroupId = normalizeGroupId(fixed.groupId)
+    normalized.groupId = normalizedGroupId !== null ? normalizedGroupId.toString() : null
+  }
+
+  if (fixed.maxRating) {
+    const source = fixed.maxRating
+    const maxRating = {}
+    if (hasOwn(source, 'rating')) {
+      assignIfPresent(maxRating, 'rating', toComparableNumber(source.rating))
+    }
+    if (hasOwn(source, 'track')) {
+      assignIfPresent(maxRating, 'track', source.track ?? null)
+    }
+    if (hasOwn(source, 'subTrack')) {
+      assignIfPresent(maxRating, 'subTrack', source.subTrack ?? null)
+    }
+    if (hasOwn(source, 'ratingColor')) {
+      assignIfPresent(maxRating, 'ratingColor', source.ratingColor ?? null)
+    }
+    if (Object.keys(maxRating).length > 0) {
+      normalized.maxRating = maxRating
+    }
+  }
+
+  if (fixed.develop) {
+    const develop = {}
+    const source = fixed.develop
+    if (hasOwn(source, 'challenges')) {
+      assignIfPresent(develop, 'challenges', toComparableNumber(source.challenges))
+    }
+    if (hasOwn(source, 'wins')) {
+      assignIfPresent(develop, 'wins', toComparableNumber(source.wins))
+    }
+    if (hasOwn(source, 'mostRecentSubmission')) {
+      assignIfPresent(develop, 'mostRecentSubmission', toComparableDate(source.mostRecentSubmission))
+    }
+    if (hasOwn(source, 'mostRecentEventDate')) {
+      assignIfPresent(develop, 'mostRecentEventDate', toComparableDate(source.mostRecentEventDate))
+    }
+    if (hasOwn(source, 'createdBy')) {
+      assignIfPresent(develop, 'createdBy', source.createdBy ?? null)
+    }
+    if (Array.isArray(source.items) && source.items.length > 0) {
+      const normalizedItems = source.items.map(item => {
+        const normalizedItem = {}
+        if (hasOwn(item, 'subTrackId')) {
+          assignIfPresent(normalizedItem, 'subTrackId', toComparableNumber(item.subTrackId))
+        }
+        if (hasOwn(item, 'name')) {
+          assignIfPresent(normalizedItem, 'name', item.name ?? null)
+        }
+        if (hasOwn(item, 'challenges')) {
+          assignIfPresent(normalizedItem, 'challenges', toComparableNumber(item.challenges))
+        }
+        if (hasOwn(item, 'wins')) {
+          assignIfPresent(normalizedItem, 'wins', toComparableNumber(item.wins))
+        }
+        if (hasOwn(item, 'mostRecentSubmission')) {
+          assignIfPresent(normalizedItem, 'mostRecentSubmission', toComparableDate(item.mostRecentSubmission))
+        }
+        if (hasOwn(item, 'mostRecentEventDate')) {
+          assignIfPresent(normalizedItem, 'mostRecentEventDate', toComparableDate(item.mostRecentEventDate))
+        }
+        const numericFields = ['numInquiries', 'submissions', 'passedScreening', 'passedReview', 'appeals', 'rating',
+          'minRating', 'maxRating', 'volatility', 'overallRank', 'overallSchoolRank', 'overallCountryRank', 'activeRank',
+          'activeSchoolRank', 'activeCountryRank']
+        numericFields.forEach(field => {
+          if (hasOwn(item, field)) {
+            assignIfPresent(normalizedItem, field, toComparableNumber(item[field]))
+          }
+        })
+        const floatFields = ['submissionRate', 'screeningSuccessRate', 'reviewSuccessRate', 'appealSuccessRate',
+          'minScore', 'maxScore', 'avgScore', 'avgPlacement', 'winPercent', 'reliability', 'overallPercentile', 'activePercentile']
+        floatFields.forEach(field => {
+          if (hasOwn(item, field)) {
+            assignIfPresent(normalizedItem, field, toComparableNumber(item[field]))
+          }
+        })
+        if (hasOwn(item, 'createdBy')) {
+          assignIfPresent(normalizedItem, 'createdBy', item.createdBy ?? null)
+        }
+        return normalizedItem
+      })
+      normalizedItems.sort((a, b) => {
+        const left = a.subTrackId ?? 0
+        const right = b.subTrackId ?? 0
+        if (left !== right) {
+          return left - right
+        }
+        const leftName = a.name || ''
+        const rightName = b.name || ''
+        return leftName.localeCompare(rightName)
+      })
+      develop.items = normalizedItems
+    }
+    normalized.develop = develop
+  }
+
+  if (fixed.design) {
+    const design = {}
+    const source = fixed.design
+    if (hasOwn(source, 'challenges')) {
+      assignIfPresent(design, 'challenges', toComparableNumber(source.challenges))
+    }
+    if (hasOwn(source, 'wins')) {
+      assignIfPresent(design, 'wins', toComparableNumber(source.wins))
+    }
+    if (hasOwn(source, 'mostRecentSubmission')) {
+      assignIfPresent(design, 'mostRecentSubmission', toComparableDate(source.mostRecentSubmission))
+    }
+    if (hasOwn(source, 'mostRecentEventDate')) {
+      assignIfPresent(design, 'mostRecentEventDate', toComparableDate(source.mostRecentEventDate))
+    }
+    if (hasOwn(source, 'createdBy')) {
+      assignIfPresent(design, 'createdBy', source.createdBy ?? null)
+    }
+    if (Array.isArray(source.items) && source.items.length > 0) {
+      const normalizedItems = source.items.map(item => {
+        const normalizedItem = {}
+        if (hasOwn(item, 'subTrackId')) {
+          assignIfPresent(normalizedItem, 'subTrackId', toComparableNumber(item.subTrackId))
+        }
+        if (hasOwn(item, 'name')) {
+          assignIfPresent(normalizedItem, 'name', item.name ?? null)
+        }
+        const numericFields = ['challenges', 'wins', 'numInquiries', 'submissions', 'passedScreening']
+        numericFields.forEach(field => {
+          if (hasOwn(item, field)) {
+            assignIfPresent(normalizedItem, field, toComparableNumber(item[field]))
+          }
+        })
+        const floatFields = ['avgPlacement', 'screeningSuccessRate', 'submissionRate', 'winPercent']
+        floatFields.forEach(field => {
+          if (hasOwn(item, field)) {
+            assignIfPresent(normalizedItem, field, toComparableNumber(item[field]))
+          }
+        })
+        if (hasOwn(item, 'mostRecentSubmission')) {
+          assignIfPresent(normalizedItem, 'mostRecentSubmission', toComparableDate(item.mostRecentSubmission))
+        }
+        if (hasOwn(item, 'mostRecentEventDate')) {
+          assignIfPresent(normalizedItem, 'mostRecentEventDate', toComparableDate(item.mostRecentEventDate))
+        }
+        if (hasOwn(item, 'createdBy')) {
+          assignIfPresent(normalizedItem, 'createdBy', item.createdBy ?? null)
+        }
+        return normalizedItem
+      })
+      normalizedItems.sort((a, b) => {
+        const left = a.subTrackId ?? 0
+        const right = b.subTrackId ?? 0
+        if (left !== right) {
+          return left - right
+        }
+        const leftName = a.name || ''
+        const rightName = b.name || ''
+        return leftName.localeCompare(rightName)
+      })
+      design.items = normalizedItems
+    }
+    normalized.design = design
+  }
+
+  if (fixed.dataScience) {
+    const source = fixed.dataScience
+    const dataScience = {}
+    if (hasOwn(source, 'challenges')) {
+      assignIfPresent(dataScience, 'challenges', toComparableNumber(source.challenges))
+    }
+    if (hasOwn(source, 'wins')) {
+      assignIfPresent(dataScience, 'wins', toComparableNumber(source.wins))
+    }
+    if (hasOwn(source, 'mostRecentEventName')) {
+      assignIfPresent(dataScience, 'mostRecentEventName', source.mostRecentEventName ?? null)
+    }
+    if (hasOwn(source, 'mostRecentSubmission')) {
+      assignIfPresent(dataScience, 'mostRecentSubmission', toComparableDate(source.mostRecentSubmission))
+    }
+    if (hasOwn(source, 'mostRecentEventDate')) {
+      assignIfPresent(dataScience, 'mostRecentEventDate', toComparableDate(source.mostRecentEventDate))
+    }
+    if (hasOwn(source, 'createdBy')) {
+      assignIfPresent(dataScience, 'createdBy', source.createdBy ?? null)
+    }
+
+    if (source.srm) {
+      const srmSource = source.srm
+      const srm = {}
+      const srmNumericFields = ['challenges', 'wins', 'rating', 'percentile', 'rank', 'countryRank', 'schoolRank', 'volatility',
+        'maximumRating', 'minimumRating', 'competitions']
+      srmNumericFields.forEach(field => {
+        if (hasOwn(srmSource, field)) {
+          assignIfPresent(srm, field, toComparableNumber(srmSource[field]))
+        }
+      })
+      if (hasOwn(srmSource, 'mostRecentSubmission')) {
+        assignIfPresent(srm, 'mostRecentSubmission', toComparableDate(srmSource.mostRecentSubmission))
+      }
+      if (hasOwn(srmSource, 'mostRecentEventDate')) {
+        assignIfPresent(srm, 'mostRecentEventDate', toComparableDate(srmSource.mostRecentEventDate))
+      }
+      if (hasOwn(srmSource, 'mostRecentEventName')) {
+        assignIfPresent(srm, 'mostRecentEventName', srmSource.mostRecentEventName ?? null)
+      }
+      if (hasOwn(srmSource, 'defaultLanguage')) {
+        assignIfPresent(srm, 'defaultLanguage', srmSource.defaultLanguage ?? null)
+      }
+      if (hasOwn(srmSource, 'createdBy')) {
+        assignIfPresent(srm, 'createdBy', srmSource.createdBy ?? null)
+      }
+
+      if (Array.isArray(srmSource.challengeDetails) && srmSource.challengeDetails.length > 0) {
+        const details = srmSource.challengeDetails.map(detail => {
+          const normalizedDetail = {}
+          if (hasOwn(detail, 'levelName')) {
+            assignIfPresent(normalizedDetail, 'levelName', detail.levelName ?? null)
+          }
+          if (hasOwn(detail, 'challenges')) {
+            assignIfPresent(normalizedDetail, 'challenges', toComparableNumber(detail.challenges))
+          }
+          if (hasOwn(detail, 'failedChallenges')) {
+            assignIfPresent(normalizedDetail, 'failedChallenges', toComparableNumber(detail.failedChallenges))
+          }
+          if (hasOwn(detail, 'createdBy')) {
+            assignIfPresent(normalizedDetail, 'createdBy', detail.createdBy ?? null)
+          }
+          return normalizedDetail
+        })
+        details.sort((a, b) => {
+          const left = a.levelName || ''
+          const right = b.levelName || ''
+          return left.localeCompare(right)
+        })
+        srm.challengeDetails = details
+      }
+
+      if (Array.isArray(srmSource.division1) && srmSource.division1.length > 0) {
+        const division1 = srmSource.division1.map(entry => {
+          const normalizedDivision = {}
+          if (hasOwn(entry, 'levelName')) {
+            assignIfPresent(normalizedDivision, 'levelName', entry.levelName ?? null)
+          }
+          const numericFields = ['problemsSubmitted', 'problemsSysByTest', 'problemsFailed']
+          numericFields.forEach(field => {
+            if (hasOwn(entry, field)) {
+              assignIfPresent(normalizedDivision, field, toComparableNumber(entry[field]))
+            }
+          })
+          if (hasOwn(entry, 'divisionName')) {
+            assignIfPresent(normalizedDivision, 'divisionName', entry.divisionName ?? null)
+          }
+          if (hasOwn(entry, 'createdBy')) {
+            assignIfPresent(normalizedDivision, 'createdBy', entry.createdBy ?? null)
+          }
+          return normalizedDivision
+        })
+        division1.sort((a, b) => {
+          const left = a.levelName || ''
+          const right = b.levelName || ''
+          return left.localeCompare(right)
+        })
+        srm.division1 = division1
+      }
+
+      if (Array.isArray(srmSource.division2) && srmSource.division2.length > 0) {
+        const division2 = srmSource.division2.map(entry => {
+          const normalizedDivision = {}
+          if (hasOwn(entry, 'levelName')) {
+            assignIfPresent(normalizedDivision, 'levelName', entry.levelName ?? null)
+          }
+          const numericFields = ['problemsSubmitted', 'problemsSysByTest', 'problemsFailed']
+          numericFields.forEach(field => {
+            if (hasOwn(entry, field)) {
+              assignIfPresent(normalizedDivision, field, toComparableNumber(entry[field]))
+            }
+          })
+          if (hasOwn(entry, 'divisionName')) {
+            assignIfPresent(normalizedDivision, 'divisionName', entry.divisionName ?? null)
+          }
+          if (hasOwn(entry, 'createdBy')) {
+            assignIfPresent(normalizedDivision, 'createdBy', entry.createdBy ?? null)
+          }
+          return normalizedDivision
+        })
+        division2.sort((a, b) => {
+          const left = a.levelName || ''
+          const right = b.levelName || ''
+          return left.localeCompare(right)
+        })
+        srm.division2 = division2
+      }
+
+      dataScience.srm = srm
+    }
+
+    if (source.marathon) {
+      const marathonSource = source.marathon
+      const marathon = {}
+      const marathonNumericFields = ['challenges', 'wins', 'rating', 'percentile', 'rank', 'avgRank', 'avgNumSubmissions',
+        'bestRank', 'countryRank', 'schoolRank', 'volatility', 'maximumRating', 'minimumRating', 'competitions',
+        'topFiveFinishes', 'topTenFinishes']
+      marathonNumericFields.forEach(field => {
+        if (hasOwn(marathonSource, field)) {
+          assignIfPresent(marathon, field, toComparableNumber(marathonSource[field]))
+        }
+      })
+      if (hasOwn(marathonSource, 'mostRecentSubmission')) {
+        assignIfPresent(marathon, 'mostRecentSubmission', toComparableDate(marathonSource.mostRecentSubmission))
+      }
+      if (hasOwn(marathonSource, 'mostRecentEventDate')) {
+        assignIfPresent(marathon, 'mostRecentEventDate', toComparableDate(marathonSource.mostRecentEventDate))
+      }
+      if (hasOwn(marathonSource, 'mostRecentEventName')) {
+        assignIfPresent(marathon, 'mostRecentEventName', marathonSource.mostRecentEventName ?? null)
+      }
+      if (hasOwn(marathonSource, 'defaultLanguage')) {
+        assignIfPresent(marathon, 'defaultLanguage', marathonSource.defaultLanguage ?? null)
+      }
+      if (hasOwn(marathonSource, 'createdBy')) {
+        assignIfPresent(marathon, 'createdBy', marathonSource.createdBy ?? null)
+      }
+      if (Object.keys(marathon).length > 0) {
+        dataScience.marathon = marathon
+      }
+    }
+
+    normalized.dataScience = dataScience
+  }
+
+  if (fixed.copilot) {
+    const source = fixed.copilot
+    const copilot = {}
+    const copilotNumericFields = ['contests', 'projects', 'failures', 'reposts', 'activeContests', 'activeProjects']
+    copilotNumericFields.forEach(field => {
+      if (hasOwn(source, field)) {
+        assignIfPresent(copilot, field, toComparableNumber(source[field]))
+      }
+    })
+    if (hasOwn(source, 'fulfillment')) {
+      assignIfPresent(copilot, 'fulfillment', toComparableNumber(source.fulfillment))
+    }
+    if (hasOwn(source, 'createdBy')) {
+      assignIfPresent(copilot, 'createdBy', source.createdBy ?? null)
+    }
+    normalized.copilot = copilot
+  }
+
+  return normalized
+}
+
+function buildFixedMemberStatFromDbRecord (memberStatRecord, member) {
+  if (!memberStatRecord) {
+    return null
+  }
+
+  const fixed = {}
+
+  if (hasOwn(memberStatRecord, 'challenges')) {
+    fixed.challenges = memberStatRecord.challenges
+  }
+  if (hasOwn(memberStatRecord, 'wins')) {
+    fixed.wins = memberStatRecord.wins
+  }
+  if (hasOwn(memberStatRecord, 'groupId')) {
+    fixed.groupId = memberStatRecord.groupId
+  }
+
+  const maxRatingSource = memberStatRecord.maxRating || member?.maxRating
+  if (maxRatingSource) {
+    fixed.maxRating = {
+      rating: maxRatingSource.rating,
+      track: maxRatingSource.track,
+      subTrack: maxRatingSource.subTrack,
+      ratingColor: maxRatingSource.ratingColor || DEFAULT_RATING_COLOR
+    }
+  }
+
+  if (memberStatRecord.develop) {
+    const developRecord = memberStatRecord.develop
+    const develop = {}
+    if (hasOwn(developRecord, 'challenges')) {
+      develop.challenges = developRecord.challenges
+    }
+    if (hasOwn(developRecord, 'wins')) {
+      develop.wins = developRecord.wins
+    }
+    if (hasOwn(developRecord, 'mostRecentSubmission')) {
+      develop.mostRecentSubmission = developRecord.mostRecentSubmission
+    }
+    if (hasOwn(developRecord, 'mostRecentEventDate')) {
+      develop.mostRecentEventDate = developRecord.mostRecentEventDate
+    }
+    if (hasOwn(developRecord, 'createdBy')) {
+      develop.createdBy = developRecord.createdBy
+    }
+    if (Array.isArray(developRecord.items) && developRecord.items.length > 0) {
+      develop.items = developRecord.items.map(item => {
+        const mapped = {
+          subTrackId: item.subTrackId,
+          name: item.name,
+          challenges: item.challenges,
+          wins: item.wins,
+          mostRecentSubmission: item.mostRecentSubmission,
+          mostRecentEventDate: item.mostRecentEventDate,
+          numInquiries: item.numInquiries,
+          submissions: item.submissions,
+          passedScreening: item.passedScreening,
+          passedReview: item.passedReview,
+          appeals: item.appeals,
+          submissionRate: item.submissionRate,
+          screeningSuccessRate: item.screeningSuccessRate,
+          reviewSuccessRate: item.reviewSuccessRate,
+          appealSuccessRate: item.appealSuccessRate,
+          minScore: item.minScore,
+          maxScore: item.maxScore,
+          avgScore: item.avgScore,
+          avgPlacement: item.avgPlacement,
+          winPercent: item.winPercent,
+          rating: item.rating,
+          minRating: item.minRating,
+          maxRating: item.maxRating,
+          volatility: item.volatility,
+          reliability: item.reliability,
+          overallRank: item.overallRank,
+          overallSchoolRank: item.overallSchoolRank,
+          overallCountryRank: item.overallCountryRank,
+          overallPercentile: item.overallPercentile,
+          activeRank: item.activeRank,
+          activeSchoolRank: item.activeSchoolRank,
+          activeCountryRank: item.activeCountryRank,
+          activePercentile: item.activePercentile,
+          createdBy: item.createdBy
+        }
+        return mapped
+      })
+    }
+    fixed.develop = develop
+  }
+
+  if (memberStatRecord.design) {
+    const designRecord = memberStatRecord.design
+    const design = {}
+    if (hasOwn(designRecord, 'challenges')) {
+      design.challenges = designRecord.challenges
+    }
+    if (hasOwn(designRecord, 'wins')) {
+      design.wins = designRecord.wins
+    }
+    if (hasOwn(designRecord, 'mostRecentSubmission')) {
+      design.mostRecentSubmission = designRecord.mostRecentSubmission
+    }
+    if (hasOwn(designRecord, 'mostRecentEventDate')) {
+      design.mostRecentEventDate = designRecord.mostRecentEventDate
+    }
+    if (hasOwn(designRecord, 'createdBy')) {
+      design.createdBy = designRecord.createdBy
+    }
+    if (Array.isArray(designRecord.items) && designRecord.items.length > 0) {
+      design.items = designRecord.items.map(item => ({
+        subTrackId: item.subTrackId,
+        name: item.name,
+        challenges: item.challenges,
+        wins: item.wins,
+        mostRecentSubmission: item.mostRecentSubmission,
+        mostRecentEventDate: item.mostRecentEventDate,
+        numInquiries: item.numInquiries,
+        submissions: item.submissions,
+        passedScreening: item.passedScreening,
+        avgPlacement: item.avgPlacement,
+        screeningSuccessRate: item.screeningSuccessRate,
+        submissionRate: item.submissionRate,
+        winPercent: item.winPercent,
+        createdBy: item.createdBy
+      }))
+    }
+    fixed.design = design
+  }
+
+  if (memberStatRecord.dataScience) {
+    const dataScienceRecord = memberStatRecord.dataScience
+    const dataScience = {}
+    if (hasOwn(dataScienceRecord, 'challenges')) {
+      dataScience.challenges = dataScienceRecord.challenges
+    }
+    if (hasOwn(dataScienceRecord, 'wins')) {
+      dataScience.wins = dataScienceRecord.wins
+    }
+    if (hasOwn(dataScienceRecord, 'mostRecentEventName')) {
+      dataScience.mostRecentEventName = dataScienceRecord.mostRecentEventName
+    }
+    if (hasOwn(dataScienceRecord, 'mostRecentSubmission')) {
+      dataScience.mostRecentSubmission = dataScienceRecord.mostRecentSubmission
+    }
+    if (hasOwn(dataScienceRecord, 'mostRecentEventDate')) {
+      dataScience.mostRecentEventDate = dataScienceRecord.mostRecentEventDate
+    }
+    if (hasOwn(dataScienceRecord, 'createdBy')) {
+      dataScience.createdBy = dataScienceRecord.createdBy
+    }
+
+    if (dataScienceRecord.srm) {
+      const srmRecord = dataScienceRecord.srm
+      const srm = {
+        challenges: srmRecord.challenges,
+        wins: srmRecord.wins,
+        mostRecentSubmission: srmRecord.mostRecentSubmission,
+        mostRecentEventDate: srmRecord.mostRecentEventDate,
+        mostRecentEventName: srmRecord.mostRecentEventName,
+        rating: srmRecord.rating,
+        percentile: srmRecord.percentile,
+        rank: srmRecord.rank,
+        countryRank: srmRecord.countryRank,
+        schoolRank: srmRecord.schoolRank,
+        volatility: srmRecord.volatility,
+        maximumRating: srmRecord.maximumRating,
+        minimumRating: srmRecord.minimumRating,
+        defaultLanguage: srmRecord.defaultLanguage,
+        competitions: srmRecord.competitions,
+        createdBy: srmRecord.createdBy
+      }
+
+      if (Array.isArray(srmRecord.challengeDetails) && srmRecord.challengeDetails.length > 0) {
+        srm.challengeDetails = srmRecord.challengeDetails.map(detail => ({
+          levelName: detail.levelName,
+          challenges: detail.challenges,
+          failedChallenges: detail.failedChallenges,
+          createdBy: detail.createdBy
+        }))
+      }
+
+      if (Array.isArray(srmRecord.divisions) && srmRecord.divisions.length > 0) {
+        const division1 = []
+        const division2 = []
+        srmRecord.divisions.forEach(division => {
+          const mapped = {
+            levelName: division.levelName,
+            divisionName: division.divisionName,
+            problemsSubmitted: division.problemsSubmitted,
+            problemsSysByTest: division.problemsSysByTest,
+            problemsFailed: division.problemsFailed,
+            createdBy: division.createdBy
+          }
+          if (division.divisionName === 'division1') {
+            division1.push(mapped)
+          } else if (division.divisionName === 'division2') {
+            division2.push(mapped)
+          }
+        })
+        if (division1.length > 0) {
+          srm.division1 = division1
+        }
+        if (division2.length > 0) {
+          srm.division2 = division2
+        }
+      }
+
+      dataScience.srm = srm
+    }
+
+    if (dataScienceRecord.marathon) {
+      const marathonRecord = dataScienceRecord.marathon
+      dataScience.marathon = {
+        challenges: marathonRecord.challenges,
+        wins: marathonRecord.wins,
+        mostRecentSubmission: marathonRecord.mostRecentSubmission,
+        mostRecentEventDate: marathonRecord.mostRecentEventDate,
+        mostRecentEventName: marathonRecord.mostRecentEventName,
+        rating: marathonRecord.rating,
+        percentile: marathonRecord.percentile,
+        rank: marathonRecord.rank,
+        avgRank: marathonRecord.avgRank,
+        avgNumSubmissions: marathonRecord.avgNumSubmissions,
+        bestRank: marathonRecord.bestRank,
+        countryRank: marathonRecord.countryRank,
+        schoolRank: marathonRecord.schoolRank,
+        volatility: marathonRecord.volatility,
+        maximumRating: marathonRecord.maximumRating,
+        minimumRating: marathonRecord.minimumRating,
+        defaultLanguage: marathonRecord.defaultLanguage,
+        competitions: marathonRecord.competitions,
+        topFiveFinishes: marathonRecord.topFiveFinishes,
+        topTenFinishes: marathonRecord.topTenFinishes,
+        createdBy: marathonRecord.createdBy
+      }
+    }
+
+    fixed.dataScience = dataScience
+  }
+
+  if (memberStatRecord.copilot) {
+    const copilotRecord = memberStatRecord.copilot
+    fixed.copilot = {
+      contests: copilotRecord.contests,
+      projects: copilotRecord.projects,
+      failures: copilotRecord.failures,
+      reposts: copilotRecord.reposts,
+      activeContests: copilotRecord.activeContests,
+      activeProjects: copilotRecord.activeProjects,
+      fulfillment: copilotRecord.fulfillment,
+      createdBy: copilotRecord.createdBy
+    }
+  }
+
+  return fixed
+}
+
+/**
  * Update member stats
  * @param {Object} data the member stats data
  * @param {Object} member the member
@@ -3669,43 +4517,47 @@ async function updateArrayLevelItems (updateItems, existingItems, txModel, paren
  */
 async function updateMemberStat (data, member, operatorId) {
   return prisma.$transaction(async (tx) => {
+    const hasGroupIdField = Object.prototype.hasOwnProperty.call(data, 'groupId')
+    const normalizedGroupId = hasGroupIdField ? normalizeGroupId(data.groupId) : normalizeGroupId(null)
+    const targetGroupId = normalizedGroupId !== null ? normalizedGroupId : null
+    if (hasGroupIdField || normalizedGroupId !== null) {
+      data.groupId = targetGroupId
+    }
+
+    const statWhere = {
+      userId: member.userId,
+      groupId: targetGroupId
+    }
+
     // update model memberStats
-    let memberStatDB = await prisma.memberStats.findFirst({
-      where: {
-        userId: member.userId
-      },
-      include: {
-        develop: { include: { items: true } },
-        design: { include: { items: true } },
-        dataScience: { include: {
-          srm: { include: { challengeDetails: true, divisions: true } },
-          marathon: true
-        } },
-        copilot: true
-      }
+    let memberStatDB = await tx.memberStats.findFirst({
+      where: statWhere,
+      include: MEMBER_STATS_FULL_INCLUDE
     })
 
     if (memberStatDB) {
-      await prisma.memberStats.update({
+      memberStatDB = await tx.memberStats.update({
         where: {
           id: memberStatDB.id
         },
         data: {
           challenges: data.challenges,
           wins: data.wins,
-          groupId: data.groupId,
+          groupId: targetGroupId,
           updatedBy: operatorId
-        }
+        },
+        include: MEMBER_STATS_FULL_INCLUDE
       })
     } else {
-      memberStatDB = await prisma.memberStats.create({
+      memberStatDB = await tx.memberStats.create({
         data: {
           userId: member.userId,
           challenges: data.challenges,
           wins: data.wins,
-          groupId: data.groupId,
+          groupId: targetGroupId,
           createdBy: operatorId
-        }
+        },
+        include: MEMBER_STATS_FULL_INCLUDE
       })
     }
 
@@ -3716,14 +4568,14 @@ async function updateMemberStat (data, member, operatorId) {
 
     // update DEVELOP
     if (data.develop) {
-      const developData = pick(data.DEVELOP, ['challenges', 'wins', 'mostRecentSubmission', 'mostRecentEventDate'])
+      const developData = pick(data.develop, ['challenges', 'wins', 'mostRecentSubmission', 'mostRecentEventDate'])
       const newDevelop = await updateOrCreateModel(developData, memberStatDB.develop, tx.memberDevelopStats, { memberStatsId: memberStatDB.id }, operatorId)
       if (newDevelop) {
         memberStatDB.develop = newDevelop
       }
 
       // update develop subTracks
-      if (data.develop.items) {
+      if (data.develop.items && memberStatDB.develop) {
         const developStatsId = memberStatDB.develop.id
         const existingItems = memberStatDB.develop.items || []
 
@@ -3740,7 +4592,7 @@ async function updateMemberStat (data, member, operatorId) {
       }
 
       // update design subTracks
-      if (data.design.items) {
+      if (data.design.items && memberStatDB.design) {
         const designStatsId = memberStatDB.design.id
         const existingItems = memberStatDB.design.items || []
 
@@ -3757,7 +4609,7 @@ async function updateMemberStat (data, member, operatorId) {
       }
 
       // update data science srm
-      if (data.dataScience.srm) {
+      if (data.dataScience.srm && memberStatDB.dataScience) {
         const dataScienceSrmData = omit(data.dataScience.srm, ['challengeDetails', 'division1', 'division2'])
         const newDataScienceSrm = await updateOrCreateModel(dataScienceSrmData, memberStatDB.dataScience.srm, tx.memberSrmStats, { dataScienceStatsId: memberStatDB.dataScience.id }, operatorId)
         if (newDataScienceSrm) {
@@ -3779,7 +4631,7 @@ async function updateMemberStat (data, member, operatorId) {
       }
 
       // update data science marathon
-      if (data.dataScience.marathon) {
+      if (data.dataScience.marathon && memberStatDB.dataScience) {
         await updateOrCreateModel(data.dataScience.marathon, memberStatDB.dataScience.marathon, tx.memberMarathonStats, { dataScienceStatsId: memberStatDB.dataScience.id }, operatorId)
       }
     }
@@ -3914,7 +4766,7 @@ async function runMigrationStep (step, dateFilter, askQuestion) {
   migrationRuntimeState.dateFilter = dateFilter
   destructiveApprovals.delete(step)
 
-  const shouldRunIntegrityCheck = ['1', '2', '3', '4', '5', '7', '8'].includes(step)
+  const shouldRunIntegrityCheck = ['1', '2', '3', '4', '5', '7', '8', '9'].includes(step)
 
   try {
     if (shouldRunIntegrityCheck) {
@@ -4047,6 +4899,13 @@ async function runMigrationStep (step, dateFilter, askQuestion) {
         await importDynamoBasicInfoTraits(memberTraitFilename, dateFilter)
         break
       }
+      case '9': {
+        const defaultGroupPrompt = (await askQuestion('Enter groupId to sync (default 10): ')).trim()
+        const targetGroupId = defaultGroupPrompt || '10'
+        const memberStatElasticsearchFilename = 'memberstats-2020-01.json'
+        await syncElasticSearchMemberGroupStats(memberStatElasticsearchFilename, targetGroupId, dateFilter)
+        break
+      }
       default:
         throw new Error(`Unsupported step "${step}"`)
     }
@@ -4084,6 +4943,7 @@ async function main () {
   console.log('6. Import Distribution Stats')
   console.log('7. Update ElasticSearch Member Status')
   console.log('8. Import Dynamo Basic Info Traits')
+  console.log('9. Sync ElasticSearch Member Stats for a group')
   console.log('')
   console.log('Destructive clears require --full-reset or ALLOW_DESTRUCTIVE=true and an explicit confirmation. Incremental runs retain existing data by default.')
 
@@ -4096,8 +4956,8 @@ async function main () {
 
   let selectedStep = null
   try {
-    selectedStep = (await askQuestion('Please select your step to run (0-8): ')).trim()
-    const validSteps = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8'])
+    selectedStep = (await askQuestion('Please select your step to run (0-9): ')).trim()
+    const validSteps = new Set(['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'])
     if (!validSteps.has(selectedStep)) {
       console.log('Unsupported step selected. Script is finished.')
       return
@@ -4111,7 +4971,7 @@ async function main () {
     }
 
     let dateFilter = null
-    if (['1', '2', '3', '4', '5', '7', '8'].includes(selectedStep)) {
+    if (['1', '2', '3', '4', '5', '7', '8', '9'].includes(selectedStep)) {
       const dateFilterInput = (await askQuestion('Enter date filter (YYYY-MM-DD UTC; timestamp-less records will be skipped, or press Enter to skip): ')).trim()
       if (dateFilterInput) {
         const parsed = parseDateFilter(dateFilterInput)
