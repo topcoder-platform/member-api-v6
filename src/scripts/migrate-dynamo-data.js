@@ -17,7 +17,8 @@ const TRANSACTION_RETRY_DELAY_MS = 1000
 const DEFAULT_RATING_COLOR = '#EF3A3A'
 const DEFAULT_SRM_ID = 101
 const DEFAULT_MARATHON_MATCH_ID = 102
-const DRY_RUN = process.env.MEMBER_MIGRATION_DRY_RUN === 'true'
+const DRY_RUN = process.env.MEMBER_MIGRATION_DRY_RUN === 'true' || process.env.MEMBER_MIGRATINO_DRY_RUN === 'true'
+const DRY_RUN_GROUP_SYNC_USER_IDS = DRY_RUN ? new Set(['151743', '40612623', '40882797']) : null
 const LOG_LEVELS = {
   INFO: 'INFO',
   WARN: 'WARN',
@@ -211,6 +212,40 @@ function normalizeUserId (value) {
     if (Number.isFinite(parsed)) {
       return Math.trunc(parsed)
     }
+  }
+
+  return null
+}
+
+function normalizeUserIdToBigInt (value) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  try {
+    if (typeof value === 'bigint') {
+      return value
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      if (!trimmed) {
+        return null
+      }
+      if (!/^-?\d+$/.test(trimmed)) {
+        return null
+      }
+      return BigInt(trimmed)
+    }
+
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value)) {
+        return null
+      }
+      return BigInt(Math.trunc(value))
+    }
+  } catch (err) {
+    return null
   }
 
   return null
@@ -3314,6 +3349,7 @@ async function syncElasticSearchMemberGroupStats (filename, targetGroupIdInput, 
   let skippedByFilter = 0
   let missingMembers = 0
   let parseErrors = 0
+  let skippedByDryRunFilter = 0
 
   for await (const line of rlRead) {
     currentLine += 1
@@ -3344,6 +3380,14 @@ async function syncElasticSearchMemberGroupStats (filename, targetGroupIdInput, 
       continue
     }
 
+    const normalizedUserIdBigInt = normalizeUserIdToBigInt(dataItem.userId)
+    const normalizedUserIdKey = normalizedUserIdBigInt !== null ? normalizedUserIdBigInt.toString() : null
+
+    if (DRY_RUN_GROUP_SYNC_USER_IDS && (!normalizedUserIdKey || !DRY_RUN_GROUP_SYNC_USER_IDS.has(normalizedUserIdKey))) {
+      skippedByDryRunFilter += 1
+      continue
+    }
+
     matchedGroupRecords += 1
 
     if (!shouldProcessRecord(dataItem, dateFilter)) {
@@ -3351,9 +3395,17 @@ async function syncElasticSearchMemberGroupStats (filename, targetGroupIdInput, 
       continue
     }
 
+    if (normalizedUserIdKey === null || normalizedUserIdBigInt === null) {
+      skippedByFilter += 1
+      logWarn('Skipping member stat entry due to unrecognized userId', { groupId: groupIdLabel, lineNumber: currentLine })
+      continue
+    }
+
+    const memberUserIdForQuery = normalizedUserIdBigInt
+
     const member = await prisma.member.findFirst({
       where: {
-        userId: dataItem.userId
+        userId: memberUserIdForQuery
       },
       include: {
         maxRating: true
@@ -3362,7 +3414,7 @@ async function syncElasticSearchMemberGroupStats (filename, targetGroupIdInput, 
 
     if (!member) {
       missingMembers += 1
-      logWarn('Member not found for group stat entry; skipping', { userId: dataItem.userId, groupId: groupIdLabel })
+      logWarn('Member not found for group stat entry; skipping', { userId: normalizedUserIdKey, groupId: groupIdLabel })
       continue
     }
 
@@ -3401,6 +3453,9 @@ async function syncElasticSearchMemberGroupStats (filename, targetGroupIdInput, 
   console.log(` - Already aligned: ${alreadyAligned}`)
   console.log(` - Missing members: ${missingMembers}`)
   console.log(` - Skipped by date filter: ${skippedByFilter}`)
+  if (skippedByDryRunFilter > 0) {
+    console.log(` - Skipped by dry run filter: ${skippedByDryRunFilter}`)
+  }
   if (parseErrors > 0) {
     console.log(` - Parse errors: ${parseErrors}`)
   }
