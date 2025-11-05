@@ -15,7 +15,8 @@
     "test": "mocha -t 20000 test/unit/*.test.js --exit",
     "test:cov": "nyc --reporter=html --reporter=text npm test",
     "migrate-dynamo-data": "node src/scripts/migrate-dynamo-data.js",
-    "migrate-dynamo-traits-backfill": "node src/scripts/backfill-missing-member-traits.js"
+    "migrate-dynamo-traits-backfill": "node src/scripts/backfill-missing-member-traits.js",
+    "migrate-dynamo-stats-backfill": "node src/scripts/backfill-missing-member-stats.js"
   },
   "author": "TCSCODER",
   "license": "none",

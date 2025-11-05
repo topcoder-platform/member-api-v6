@@ -4145,5 +4145,6 @@ module.exports = {
   fixMemberUpdateData,
   updateMembersWithTraitsAndSkills,
   parseDateFilter,
-  shouldProcessRecord
+  shouldProcessRecord,
+  fixDynamoMemberStatData
 }
