@@ -630,7 +630,7 @@ async function deleteMember (currentUser, handle, data) {
         updatedAt: now,
         updatedBy: operatorId
       }
-    }
+    })
 
     return tx.member.update({
       where: { userId: member.userId },
