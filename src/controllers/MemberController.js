@@ -62,11 +62,22 @@ async function uploadPhoto (req, res) {
   res.send(result)
 }
 
+/**
+ * Delete member data
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function deleteMember (req, res) {
+  const result = await service.deleteMember(req.authUser, req.params.handle, req.body)
+  res.send(result)
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
   getMemberUserIdSignature,
   updateMember,
   verifyEmail,
-  uploadPhoto
+  uploadPhoto,
+  deleteMember
 }

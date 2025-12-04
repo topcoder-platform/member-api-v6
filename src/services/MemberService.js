@@ -11,6 +11,7 @@ const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
 const constants = require('../../app-constants')
+const mailchimp = require('../common/mailchimp')
 const memberTraitService = require('./MemberTraitService')
 const mime = require('mime-types')
 const fileType = require('file-type')
@@ -19,6 +20,7 @@ const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
+const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 
@@ -560,11 +562,169 @@ async function uploadPhoto (currentUser, handle, files) {
   return { photoURL }
 }
 
+/**
+ * Delete member profile data and scrub personal details.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Object} the deletion result
+ */
+async function deleteMember (currentUser, handle, data) {
+  if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
+    throw new errors.ForbiddenError('You are not allowed to delete the member.')
+  }
+
+  if (!data || !data.ticketUrl) {
+    throw new errors.BadRequestError('ticketUrl is required for deletion.')
+  }
+
+  const member = await helper.getMemberByHandle(handle)
+  const operatorId = currentUser.userId || currentUser.sub || config.TC_WEBSERVICE_USERID
+  const nanoId = generateNanoId()
+  const deletedHandle = `DELETED_USER_${nanoId}`
+  const deletedEmail = `${nanoId}@topcoder.com`
+  const identityUserId = helper.bigIntToNumber(member.userId)
+  const now = new Date()
+  const ticketUrl = data.ticketUrl
+
+  const updatedMember = await prisma.$transaction(async (tx) => {
+    const traitsRecord = await tx.memberTraits.findUnique({
+      where: { userId: member.userId },
+      select: { id: true }
+    })
+
+    let memberTraitId = traitsRecord ? traitsRecord.id : null
+
+    if (!memberTraitId) {
+      const createdTraits = await tx.memberTraits.create({
+        data: {
+          userId: member.userId,
+          createdBy: operatorId,
+          updatedBy: operatorId
+        }
+      })
+      memberTraitId = createdTraits.id
+    }
+
+    await tx.memberTraitWork.deleteMany({ where: { memberTraitId } })
+    await tx.memberTraitEducation.deleteMany({ where: { memberTraitId } })
+    await tx.memberTraitPersonalization.deleteMany({
+      where: {
+        memberTraitId,
+        key: { in: ['quote', 'Quote'] }
+      }
+    })
+
+    await tx.memberTraitPersonalization.create({
+      data: {
+        memberTraitId,
+        key: 'delete_ticket',
+        value: ticketUrl,
+        createdBy: operatorId,
+        updatedBy: operatorId
+      }
+    })
+
+    await tx.memberTraits.update({
+      where: { id: memberTraitId },
+      data: {
+        updatedAt: now,
+        updatedBy: operatorId
+      }
+    }
+
+    return tx.member.update({
+      where: { userId: member.userId },
+      data: {
+        photoURL: null,
+        homeCountryCode: null,
+        competitionCountryCode: null,
+        aggregatedSkills: null,
+        enteredSkills: null,
+        email: deletedEmail,
+        newEmail: null,
+        newEmailVerifyToken: null,
+        newEmailVerifyTokenDate: null,
+        emailVerifyToken: null,
+        emailVerifyTokenDate: null,
+        handle: deletedHandle,
+        handleLower: deletedHandle.toLowerCase(),
+        updatedAt: now,
+        updatedBy: operatorId
+      }
+    })
+  })
+
+  await skillsPrisma.userSkill.deleteMany({ where: { userId: identityUserId } })
+  await updateIdentityRecords(identityUserId, deletedHandle, deletedEmail, now)
+
+  try {
+    await mailchimp.deleteSubscriber(member.email)
+  } catch (err) {
+    logger.error(`MailChimp deletion failed for ${member.email}: ${err.message}`)
+    throw err
+  }
+
+  prismaHelper.convertMember(updatedMember)
+  await helper.postBusEvent(constants.TOPICS.MemberUpdated, updatedMember)
+
+  return {
+    handle: deletedHandle,
+    email: deletedEmail
+  }
+}
+
+function generateNanoId (size = 21) {
+  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+  const bytes = crypto.randomBytes(size)
+  let id = ''
+  for (let i = 0; i < size; i += 1) {
+    id += alphabet[bytes[i] % alphabet.length]
+  }
+  return id
+}
+
+async function updateIdentityRecords (userId, handle, email, timestamp) {
+  const identityPrisma = identityPrismaManager.getIdentityClient()
+  const lowerHandle = handle.toLowerCase()
+  const updatedAt = timestamp || new Date()
+
+  let userResult
+  let emailResult
+  try {
+    userResult = await identityPrisma.$executeRaw`
+      UPDATE identity."user"
+      SET handle=${handle}, handle_lower=${lowerHandle}, modify_date=${updatedAt}
+      WHERE user_id=${userId}
+    `
+
+    emailResult = await identityPrisma.$executeRaw`
+      UPDATE identity.email
+      SET address=${email}, modify_date=${updatedAt}
+      WHERE user_id=${userId}
+    `
+  } catch (err) {
+    logger.error(`Failed to update identity records for user ${userId}: ${err.message}`)
+    throw err
+  }
+
+  if (userResult === 0 || emailResult === 0) {
+    throw new Error(`Identity records not updated for user ${userId}`)
+  }
+}
+
 uploadPhoto.schema = {
   currentUser: Joi.any(),
   handle: Joi.string().required(),
   files: Joi.object().keys({
     photo: Joi.object().required()
+  }).required()
+}
+
+deleteMember.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required(),
+  data: Joi.object().keys({
+    ticketUrl: Joi.string().uri().required()
   }).required()
 }
 
@@ -574,7 +734,8 @@ module.exports = {
   getMemberUserIdSignature,
   updateMember,
   verifyEmail,
-  uploadPhoto
+  uploadPhoto,
+  deleteMember
 }
 
 logger.buildService(module.exports)
