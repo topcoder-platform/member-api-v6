@@ -661,7 +661,6 @@ async function deleteMember (currentUser, handle, data) {
     await mailchimp.deleteSubscriber(member.email)
   } catch (err) {
     logger.error(`MailChimp deletion failed for ${member.email}: ${err.message}`)
-    throw err
   }
 
   prismaHelper.convertMember(updatedMember)
