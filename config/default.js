@@ -8,6 +8,7 @@ module.exports = {
   API_VERSION: process.env.API_VERSION || 'v6',
   AUTH_SECRET: process.env.AUTH_SECRET || 'mysecret',
   VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
+  IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
 
   // used to get M2M token
   AUTH0_URL: process.env.AUTH0_URL,
@@ -69,6 +70,7 @@ module.exports = {
       ALL: process.env.SCOPE_MEMBERS_ALL || 'all:user_profiles'
     }
   },
+  DELETE_USER_SCOPE: process.env.SCOPE_DELETE_USER || 'delete:user',
 
   // Member identifiable info fields, copilots, admins, or M2M can get these fields
   // Anyone in the constants.AUTOCOMPLETE_ROLES will have access to these fields
@@ -123,4 +125,10 @@ module.exports = {
     USERFLOW: process.env.USERFLOW_PRIVATE_KEY
   },
   MEMBER_SERVICE_PRISMA_TIMEOUT: process.env.MEMBER_SERVICE_PRISMA_TIMEOUT ? parseInt(process.env.MEMBER_SERVICE_PRISMA_TIMEOUT, 10) : 10000,
+
+  MAILCHIMP: {
+    API_KEY: process.env.MAILCHIMP_API_KEY,
+    SERVER_PREFIX: process.env.MAILCHIMP_SERVER_PREFIX,
+    LIST_FETCH_COUNT: process.env.MAILCHIMP_LIST_FETCH_COUNT ? Number(process.env.MAILCHIMP_LIST_FETCH_COUNT) : 1000
+  }
 }

@@ -1,9 +1,13 @@
 /**
  * Contains all routes
  */
-const { SCOPES: {
-  MEMBERS
-} } = require('config')
+const {
+  SCOPES: {
+    MEMBERS
+  },
+  DELETE_USER_SCOPE
+} = require('config')
+const constants = require('../app-constants')
 
 module.exports = {
   '/members/health': {
@@ -68,6 +72,13 @@ module.exports = {
       method: 'updateMember',
       auth: 'jwt',
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    },
+    delete: {
+      controller: 'MemberController',
+      method: 'deleteMember',
+      auth: 'jwt',
+      scopes: [DELETE_USER_SCOPE],
+      access: constants.ADMIN_ROLES
     }
   },
   '/members/:handle/profileCompleteness': {

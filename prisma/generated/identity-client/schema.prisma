@@ -1,0 +1,36 @@
+generator identityClient {
+  provider = "prisma-client-js"
+  output   = "./generated/identity-client"
+}
+
+datasource identitydb {
+  provider = "postgresql"
+  url      = env("IDENTITY_DB_URL")
+  schemas  = ["identity"]
+}
+
+model user {
+  user_id      Decimal   @id(map: "u175_45") @default(dbgenerated("nextval('sequence_user_seq'::regclass)")) @identitydb.Decimal(10, 0)
+  handle       String    @identitydb.VarChar(50)
+  handle_lower String?   @identitydb.VarChar(50)
+  modify_date  DateTime? @default(now()) @identitydb.Timestamp(6)
+  status       String    @identitydb.VarChar(3)
+
+  @@index([handle])
+  @@index([handle_lower], map: "user_lower_handle_idx")
+  @@index([status, handle_lower])
+  @@map("user")
+  @@schema("identity")
+}
+
+model email {
+  email_id    Decimal   @id(map: "u110_23") @default(dbgenerated("nextval('sequence_email_seq'::regclass)")) @identitydb.Decimal(10, 0)
+  user_id     Decimal?  @identitydb.Decimal(10, 0)
+  address     String?   @identitydb.VarChar(100)
+  modify_date DateTime? @default(now()) @identitydb.Timestamp(6)
+
+  @@index([user_id], map: "email_user_id_idx")
+  @@index([address])
+  @@map("email")
+  @@schema("identity")
+}
