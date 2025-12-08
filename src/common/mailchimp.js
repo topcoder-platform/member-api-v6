@@ -50,18 +50,25 @@ async function deleteSubscriber (email) {
     throw err
   }
 
-  for (const list of lists) {
-    try {
-      await axios.post(`${baseUrl}/lists/${list.id}/members/${subscriberHash}/actions/delete-permanent`, null, { headers })
-    } catch (err) {
-      // A 404 means the subscriber was not present in that list, which is fine
-      if (err.response && err.response.status === 404) {
-        logger.info(`MailChimp subscriber not found in list ${list.id}`)
-      } else {
-        logger.error(`Failed to delete MailChimp subscriber from list ${list.id}: ${err.message}`)
-        throw err
+  const deletionResults = await Promise.allSettled(
+    lists.map(async (list) => {
+      try {
+        await axios.post(`${baseUrl}/lists/${list.id}/members/${subscriberHash}/actions/delete-permanent`, null, { headers })
+      } catch (err) {
+        // A 404 means the subscriber was not present in that list, which is fine
+        if (err.response && err.response.status === 404) {
+          logger.info(`MailChimp subscriber not found in list ${list.id}`)
+        } else {
+          logger.error(`Failed to delete MailChimp subscriber from list ${list.id}: ${err.message}`)
+          throw err
+        }
       }
-    }
+    })
+  )
+
+  const failedDeletion = deletionResults.find((result) => result.status === 'rejected')
+  if (failedDeletion) {
+    throw failedDeletion.reason
   }
 }
 

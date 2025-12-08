@@ -657,11 +657,14 @@ async function deleteMember (currentUser, handle, data) {
   await skillsPrisma.userSkill.deleteMany({ where: { userId: identityUserId } })
   await updateIdentityRecords(identityUserId, deletedHandle, deletedEmail, now)
 
-  try {
-    await mailchimp.deleteSubscriber(member.email)
-  } catch (err) {
-    logger.error(`MailChimp deletion failed for ${member.email}: ${err.message}`)
-  }
+  // Kick off MailChimp deletion without blocking the API response.
+  ;(async () => {
+    try {
+      await mailchimp.deleteSubscriber(member.email)
+    } catch (err) {
+      logger.error(`MailChimp deletion failed for ${member.email}: ${err.message}`)
+    }
+  })()
 
   prismaHelper.convertMember(updatedMember)
   await helper.postBusEvent(constants.TOPICS.MemberUpdated, updatedMember)
