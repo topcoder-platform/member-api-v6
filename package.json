@@ -67,5 +67,10 @@
   },
   "overrides": {
     "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
+  },
+  "pnpm": {
+    "overrides": {
+      "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
+    }
   }
 }
