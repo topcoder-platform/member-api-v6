@@ -10,12 +10,8 @@ const { buildProfileTemplate } = require('./templates/ProfileTemplate')
  * @returns {Stream} PDF stream
  */
 async function generatePDF (memberData) {
-  // Build the React element tree using the template
   const document = buildProfileTemplate(memberData)
-
-  // Render to stream (memory efficient for AWS Fargate)
   const stream = await ReactPDF.renderToStream(document)
-
   return stream
 }
 
