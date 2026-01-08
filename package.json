@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.10.1",
+    "@react-pdf/renderer": "^3.4.4",
     "aws-sdk": "^2.466.0",
     "axios": "^0.27.2",
     "bluebird": "^3.5.1",
@@ -49,10 +50,11 @@
     "mime-types": "^2.1.35",
     "moment": "^2.27.0",
     "prisma": "^6.10.1",
+    "react": "^18.3.1",
     "request": "^2.88.2",
     "sharp": "^0.34.1",
     "swagger-ui-express": "^5.0.1",
-    "tc-core-library-js": "github:appirio-tech/tc-core-library-js.git#v2.6.5",
+    "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master",
     "topcoder-bus-api-wrapper": "^1.0.1",
     "uuid": "^3.3.2",
     "winston": "^3.1.0",
@@ -62,5 +64,16 @@
     "env": [
       "mocha"
     ]
+  },
+  "overrides": {
+    "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
+  },
+  "pnpm": {
+    "overrides": {
+      "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
+    }
+  },
+  "resolutions": {
+    "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
   }
 }

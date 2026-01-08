@@ -149,6 +149,25 @@ function hasAutocompleteRole (authUser) {
 }
 
 /**
+ * Check if the user has PM role
+ * @param {Object} authUser the user
+ * @returns {Boolean} whether the user has PM role
+ */
+function hasPMRole (authUser) {
+  if (!authUser || !authUser.roles) {
+    return false
+  }
+  for (let i = 0; i < authUser.roles.length; i += 1) {
+    for (let j = 0; j < constants.PM_ROLES.length; j += 1) {
+      if (authUser.roles[i].toLowerCase() === constants.PM_ROLES[j].toLowerCase()) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
  * Check if exists.
  *
  * @param {Array} source the array in which to search for the term
@@ -335,6 +354,36 @@ function canManageMember (currentUser, member) {
   // only admin, M2M or member himself can manage the member data
   return currentUser && (currentUser.isMachine || hasAdminRole(currentUser) ||
     (currentUser.handle && currentUser.handle.toLowerCase() === member.handleLower.toLowerCase()))
+}
+
+/**
+ * Check whether the current user can download the member profile PDF
+ * @param {Object} currentUser the user who performs operation
+ * @param {Object} member the member profile data
+ * @returns {Boolean} whether the current user can download the profile PDF
+ */
+function canDownloadProfile (currentUser, member) {
+  if (!currentUser) {
+    return false
+  }
+  // M2M tokens can download
+  if (currentUser.isMachine) {
+    return true
+  }
+  // Admin can download
+  if (hasAdminRole(currentUser)) {
+    return true
+  }
+  // PM can download
+  if (hasPMRole(currentUser)) {
+    return true
+  }
+  // Member can download their own profile
+  if (currentUser.handle && member.handleLower &&
+      currentUser.handle.toLowerCase() === member.handleLower.toLowerCase()) {
+    return true
+  }
+  return false
 }
 
 function cleanupSkills (memberEnteredSkill, member) {
@@ -590,12 +639,14 @@ module.exports = {
   hasAdminRole,
   hasAutocompleteRole,
   hasSearchByEmailRole,
+  hasPMRole,
   getMemberByHandle,
   uploadPhotoToS3,
   postBusEvent,
   parseCommaSeparatedString,
   setResHeaders,
   canManageMember,
+  canDownloadProfile,
   cleanupSkills,
   mergeSkills,
   mergeAggregatedSkill,
