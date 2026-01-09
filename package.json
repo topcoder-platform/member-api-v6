@@ -54,8 +54,8 @@
     "request": "^2.88.2",
     "sharp": "^0.34.1",
     "swagger-ui-express": "^5.0.1",
-    "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master",
-    "topcoder-bus-api-wrapper": "^1.0.1",
+    "tc-core-library-js": "topcoder-platform/tc-core-library-js.git#master",
+    "topcoder-bus-api-wrapper": "topcoder-platform/tc-bus-api-wrapper.git",
     "uuid": "^3.3.2",
     "winston": "^3.1.0",
     "yamljs": "^0.3.0"
@@ -64,16 +64,5 @@
     "env": [
       "mocha"
     ]
-  },
-  "overrides": {
-    "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
-  },
-  "pnpm": {
-    "overrides": {
-      "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
-    }
-  },
-  "resolutions": {
-    "tc-core-library-js": "git+https://github.com/topcoder-platform/tc-core-library-js.git#master"
   }
 }
