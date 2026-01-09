@@ -8,7 +8,8 @@ const config = require('config')
 const chai = require('chai')
 const fs = require('fs')
 const path = require('path')
-const awsMock = require('aws-sdk-mock')
+const { S3Client } = require('@aws-sdk/client-s3')
+const { Upload } = require('@aws-sdk/lib-storage')
 const service = require('../../src/services/MemberService')
 const testHelper = require('../testHelper')
 
@@ -21,26 +22,43 @@ describe('member service unit tests', () => {
   let member1
   let member2
 
+  // Store original implementations for restoration
+  let originalS3ClientSend
+  let originalUpload
+
   before(async () => {
     await testHelper.createData()
     const data = testHelper.getData()
     member1 = data.member1
     member2 = data.member2
 
-    // mock S3 before creating S3 instance
-    awsMock.mock('S3', 'getObject', (params, callback) => {
-      callback(null, { Body: Buffer.from(photoContent) })
-    })
+    // Mock S3Client's send method for getObject operations
+    originalS3ClientSend = S3Client.prototype.send
+    S3Client.prototype.send = async function (command) {
+      const commandName = command.constructor.name
+      if (commandName === 'GetObjectCommand') {
+        return { Body: Buffer.from(photoContent) }
+      }
+      return {}
+    }
 
-    awsMock.mock('S3', 'upload', (params, callback) => {
-      callback(null)
-    })
+    // Mock Upload class's done method for upload operations
+    originalUpload = Upload.prototype.done
+    Upload.prototype.done = async function () {
+      return Promise.resolve()
+    }
   })
 
   after(async () => {
     await testHelper.clearData()
 
-    awsMock.restore('S3')
+    // Restore original implementations
+    if (originalS3ClientSend) {
+      S3Client.prototype.send = originalS3ClientSend
+    }
+    if (originalUpload) {
+      Upload.prototype.done = originalUpload
+    }
   })
 
   describe('get member tests', () => {

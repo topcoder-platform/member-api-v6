@@ -4,7 +4,8 @@
 const _ = require('lodash')
 const constants = require('../../app-constants')
 const errors = require('./errors')
-const AWS = require('aws-sdk')
+const { S3Client } = require('@aws-sdk/client-s3')
+const { Upload } = require('@aws-sdk/lib-storage')
 const config = require('config')
 const busApi = require('topcoder-bus-api-wrapper')
 const querystring = require('querystring')
@@ -32,24 +33,25 @@ const RATING_COLORS = [{
 // Bus API Client
 let busApiClient
 
-const awsConfig = {
-  s3: config.AMAZON.S3_API_VERSION,
+// S3 Client configuration
+const s3ClientConfig = {
   region: config.AMAZON.AWS_REGION
 }
 if (config.AMAZON.AWS_ACCESS_KEY_ID && config.AMAZON.AWS_SECRET_ACCESS_KEY) {
-  awsConfig.accessKeyId = config.AMAZON.AWS_ACCESS_KEY_ID
-  awsConfig.secretAccessKey = config.AMAZON.AWS_SECRET_ACCESS_KEY
+  s3ClientConfig.credentials = {
+    accessKeyId: config.AMAZON.AWS_ACCESS_KEY_ID,
+    secretAccessKey: config.AMAZON.AWS_SECRET_ACCESS_KEY
+  }
 }
-AWS.config.update(awsConfig)
 
-let s3
+let s3Client
 
 // lazy loading to allow mock tests
-function getS3 () {
-  if (!s3) {
-    s3 = new AWS.S3()
+function getS3Client () {
+  if (!s3Client) {
+    s3Client = new S3Client(s3ClientConfig)
   }
-  return s3
+  return s3Client
 }
 
 const m2mAuth = require('tc-core-library-js').auth.m2m
@@ -236,8 +238,12 @@ async function uploadPhotoToS3 (data, mimetype, fileName) {
       fileName
     }
   }
-  // Upload to S3
-  await getS3().upload(params).promise()
+  // Upload to S3 using AWS SDK v3 Upload class
+  const upload = new Upload({
+    client: getS3Client(),
+    params
+  })
+  await upload.done()
   // construct photo URL
   return config.PHOTO_URL_TEMPLATE.replace('<key>', fileName)
 }
