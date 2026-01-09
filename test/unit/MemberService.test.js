@@ -22,7 +22,6 @@ describe('member service unit tests', () => {
   let member1
   let member2
 
-  // Store original implementations for restoration
   let originalS3ClientSend
   let originalUpload
 
@@ -32,7 +31,6 @@ describe('member service unit tests', () => {
     member1 = data.member1
     member2 = data.member2
 
-    // Mock S3Client's send method for getObject operations
     originalS3ClientSend = S3Client.prototype.send
     S3Client.prototype.send = async function (command) {
       const commandName = command.constructor.name

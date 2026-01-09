@@ -238,7 +238,7 @@ async function uploadPhotoToS3 (data, mimetype, fileName) {
       fileName
     }
   }
-  // Upload to S3 using AWS SDK v3 Upload class
+  // Upload to S3
   const upload = new Upload({
     client: getS3Client(),
     params
