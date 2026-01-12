@@ -2,7 +2,7 @@
  * App constants
  */
 const ADMIN_ROLES = ['administrator', 'admin']
-const PM_ROLES = ['project manager']
+const PROFILE_DOWNLOAD_ROLES = ['project manager', 'Talent Manager']
 const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin')
 const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive']
 
@@ -33,7 +33,7 @@ const BOOLEAN_OPERATOR = {
 }
 module.exports = {
   ADMIN_ROLES,
-  PM_ROLES,
+  PROFILE_DOWNLOAD_ROLES,
   SEARCH_BY_EMAIL_ROLES,
   AUTOCOMPLETE_ROLES,
   EVENT_ORIGINATOR,

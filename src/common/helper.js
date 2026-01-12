@@ -150,17 +150,17 @@ function hasAutocompleteRole (authUser) {
 }
 
 /**
- * Check if the user has PM role
+ * Check if the user has a role which can download profile
  * @param {Object} authUser the user
  * @returns {Boolean} whether the user has PM role
  */
-function hasPMRole (authUser) {
+function hasProfileDownloadableRole (authUser) {
   if (!authUser || !authUser.roles) {
     return false
   }
   for (let i = 0; i < authUser.roles.length; i += 1) {
-    for (let j = 0; j < constants.PM_ROLES.length; j += 1) {
-      if (authUser.roles[i].toLowerCase() === constants.PM_ROLES[j].toLowerCase()) {
+    for (let j = 0; j < constants.PROFILE_DOWNLOAD_ROLES.length; j += 1) {
+      if (authUser.roles[i].toLowerCase() === constants.PROFILE_DOWNLOAD_ROLES[j].toLowerCase()) {
         return true
       }
     }
@@ -377,7 +377,7 @@ function canDownloadProfile (currentUser, member) {
     return true
   }
   // PM can download
-  if (hasPMRole(currentUser)) {
+  if (hasProfileDownloadableRole(currentUser)) {
     return true
   }
   // Member can download their own profile
@@ -641,7 +641,7 @@ module.exports = {
   hasAdminRole,
   hasAutocompleteRole,
   hasSearchByEmailRole,
-  hasPMRole,
+  hasProfileDownloadableRole,
   getMemberByHandle,
   uploadPhotoToS3,
   postBusEvent,
