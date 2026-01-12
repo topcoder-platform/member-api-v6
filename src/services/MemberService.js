@@ -23,6 +23,7 @@ const prismaManager = require('../common/prisma')
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
+const profilePDFService = require('./ProfilePDFService')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
@@ -730,6 +731,35 @@ deleteMember.schema = {
   }).required()
 }
 
+/**
+ * Download member profile as PDF
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Stream} PDF stream
+ */
+async function downloadProfile (currentUser, handle) {
+  // Validate handle exists
+  const member = await helper.getMemberByHandle(handle)
+
+  // Check authorization
+  if (!helper.canDownloadProfile(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to download this member profile.')
+  }
+
+  // Fetch full member data for PDF
+  const memberData = await getMember(currentUser, handle, {})
+
+  // Generate PDF stream
+  const pdfStream = await profilePDFService.generatePDF(memberData)
+
+  return pdfStream
+}
+
+downloadProfile.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required()
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
@@ -737,7 +767,8 @@ module.exports = {
   updateMember,
   verifyEmail,
   uploadPhoto,
-  deleteMember
+  deleteMember,
+  downloadProfile
 }
 
 logger.buildService(module.exports)
