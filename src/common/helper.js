@@ -32,7 +32,6 @@ const RATING_COLORS = [{
 // Bus API Client
 let busApiClient
 
-// S3 Client configuration
 const awsConfig = {
   s3: config.AMAZON.S3_API_VERSION,
   region: config.AMAZON.AWS_REGION
@@ -41,6 +40,8 @@ if (config.AMAZON.AWS_ACCESS_KEY_ID && config.AMAZON.AWS_SECRET_ACCESS_KEY) {
   awsConfig.accessKeyId = config.AMAZON.AWS_ACCESS_KEY_ID
   awsConfig.secretAccessKey = config.AMAZON.AWS_SECRET_ACCESS_KEY
 }
+
+AWS.config.update(awsConfig)
 
 let s3
 
