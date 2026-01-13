@@ -11,6 +11,8 @@ const logger = require('../common/logger')
 const errors = require('../common/errors')
 const constants = require('../../app-constants')
 const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const skillsPrisma = prismaManager.getSkillsClient()
 
 const TRAIT_IDS = ['basic_info', 'education', 'work', 'communities', 'languages', 'hobby', 'organization', 'device', 'software', 'service_provider', 'subscription', 'personalization', 'connect_info', 'onboarding_checklist']
 
@@ -254,6 +256,23 @@ getTraits.schema = {
 }
 
 /**
+ * Validate that all provided skill IDs exist in the system
+ * @param {Array<String>} skillIds array of skill UUIDs to validate
+ * @throws {BadRequestError} if any skill IDs are invalid
+ */
+async function validateWorkAssociatedSkills (skillIds) {
+  if (!skillIds || skillIds.length === 0) {
+    return
+  }
+  const skillsCount = await skillsPrisma.skill.count({
+    where: { id: { in: skillIds } }
+  })
+  if (skillsCount < skillIds.length) {
+    throw new errors.BadRequestError('One or more provided skill IDs do not exist in the system')
+  }
+}
+
+/**
  * Build prisma data for creating/updating traits
  * @param {Object} data query data
  * @param {Number} operatorId operator user id
@@ -377,6 +396,16 @@ async function createTraits (currentUser, handle, data) {
       throw new errors.BadRequestError(`The trait id ${item.traitId} already exists for the member.`)
     }
   })
+  // validate work trait associatedSkills if present
+  for (const item of data) {
+    if (item.traitId === 'work' && item.traits && item.traits.data) {
+      for (const workItem of item.traits.data) {
+        if (workItem.associatedSkills && workItem.associatedSkills.length > 0) {
+          await validateWorkAssociatedSkills(workItem.associatedSkills)
+        }
+      }
+    }
+  }
   // create traits
   const result = []
   const operatorId = String(currentUser.userId || config.TC_WEBSERVICE_USERID)
@@ -443,7 +472,9 @@ const traitSchemas = {
     position: Joi.string().required(),
     startDate: Joi.date().iso().allow(null),
     endDate: Joi.date().iso().allow(null),
-    working: Joi.boolean().allow(null)
+    working: Joi.boolean().allow(null),
+    description: Joi.string().allow(null, ''),
+    associatedSkills: Joi.array().items(Joi.string().uuid()).allow(null)
   })),
   education: Joi.array().items(Joi.object({
     collegeName: Joi.string().required(),
@@ -513,6 +544,17 @@ async function updateTraits (currentUser, handle, data) {
   const existingTraits = queryResult.data
   // allow upserting traits: if a trait does not exist yet for the member,
   // create it instead of throwing a NotFound error
+
+  // validate work trait associatedSkills if present
+  for (const item of data) {
+    if (item.traitId === 'work' && item.traits && item.traits.data) {
+      for (const workItem of item.traits.data) {
+        if (workItem.associatedSkills && workItem.associatedSkills.length > 0) {
+          await validateWorkAssociatedSkills(workItem.associatedSkills)
+        }
+      }
+    }
+  }
 
   const result = []
   const operatorId = String(currentUser.userId || config.TC_WEBSERVICE_USERID)

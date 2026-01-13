@@ -726,6 +726,8 @@ model memberTraitWork {
   startDate     DateTime?
   endDate       DateTime?
   working       Boolean?
+  description   String?
+  associatedSkills String[]
 
   memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
 
