@@ -199,12 +199,12 @@ async function getProfileCompleteness (currentUser, handle, query) {
   }
 
   _.forEach(memberTraits, (item) => {
-    if (item.traitId === 'education' && item.traits.data.length > 0 && data.education === false) {
+    if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
       completeItems += 1
       data.education = true
     }
 
-    if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory === false) {
+    if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory) {
       completeItems += 1
       data.workHistory = true
     }
