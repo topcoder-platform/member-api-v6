@@ -28,7 +28,7 @@ const profilePDFService = require('./ProfilePDFService')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'phones']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest']
@@ -83,6 +83,10 @@ function omitMemberAttributes (currentUser, mb) {
   }
   if (!canManageMember && !hasAutocompleteRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
+    // Remove phones if user doesn't have permission (phones are communication fields)
+    if (res.phones) {
+      delete res.phones
+    }
   }
 
   return res
@@ -124,6 +128,9 @@ async function getMember (currentUser, handle, query) {
   }
   if (_.includes(selectFields, 'addresses')) {
     prismaFilter.include.addresses = true
+  }
+  if (_.includes(selectFields, 'phones')) {
+    prismaFilter.include.phones = true
   }
 
   // To keep original business logic, let's use findMany
@@ -334,6 +341,26 @@ async function updateMember (currentUser, handle, query, data) {
     data.newEmailVerifyToken = uuid()
     data.newEmailVerifyTokenDate = new Date(new Date().getTime() + Number(config.VERIFY_TOKEN_EXPIRATION) * 60000).toISOString()
   }
+  // validate phone numbers if provided
+  const phoneRegex = /^\+[1-9]\d{1,14}$/
+  if (data.phones !== undefined) {
+    if (!Array.isArray(data.phones)) {
+      throw new errors.BadRequestError('phones must be an array')
+    }
+    // Validate each phone number
+    for (const phone of data.phones) {
+      if (!phone.type || typeof phone.type !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a type (string)')
+      }
+      if (!phone.number || typeof phone.number !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a number (string)')
+      }
+      if (!phoneRegex.test(phone.number)) {
+        throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
+      }
+    }
+  }
+
   // set updated fields in data
   data.updatedAt = new Date()
   data.updatedBy = operatorId
@@ -360,10 +387,39 @@ async function updateMember (currentUser, handle, query, data) {
     // clear addresses so it doesn't affect prisma.udpate
     delete data.addresses
 
+    // Store phones update flag before processing
+    const phonesWereUpdated = data.phones !== undefined
+    // check if phones is present (can be empty array to delete all phones)
+    if (phonesWereUpdated) {
+      // clear current phones
+      await tx.memberPhone.deleteMany({
+        where: { userId: member.userId }
+      })
+      // create new phones if array is not empty
+      if (data.phones.length > 0) {
+        await tx.memberPhone.createMany({
+          data: _.map(data.phones, t => ({
+            type: t.type,
+            number: t.number,
+            userId: member.userId,
+            createdBy: operatorId
+          }))
+        })
+      }
+    }
+    // clear phones so it doesn't affect prisma.update
+    delete data.phones
+
+    const includeFields = { addresses: true }
+    // Include phones if they were requested or if they were updated
+    if (_.includes(selectFields, 'phones') || phonesWereUpdated) {
+      includeFields.phones = true
+    }
+
     return tx.member.update({
       where: { userId: member.userId },
       data,
-      include: { addresses: true }
+      include: includeFields
     })
   })
 
@@ -419,6 +475,13 @@ updateMember.schema = {
       zip: Joi.string().allow('').allow(null),
       stateCode: Joi.string().allow('').allow(null),
       type: Joi.string()
+    })),
+    phones: Joi.array().items(Joi.object().keys({
+      type: Joi.string().required(),
+      number: Joi.string().pattern(/^\+[1-9]\d{1,14}$/).required()
+        .messages({
+          'string.pattern.base': 'Phone number must be in E.164 format (must start with + followed by 1-15 digits)'
+        })
     })),
     verified: Joi.bool(),
     country: Joi.string(),
