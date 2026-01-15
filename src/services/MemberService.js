@@ -83,7 +83,6 @@ function omitMemberAttributes (currentUser, mb) {
   }
   if (!canManageMember && !hasAutocompleteRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
-    // Remove phones if user doesn't have permission (phones are communication fields)
     if (res.phones) {
       delete res.phones
     }
@@ -341,13 +340,11 @@ async function updateMember (currentUser, handle, query, data) {
     data.newEmailVerifyToken = uuid()
     data.newEmailVerifyTokenDate = new Date(new Date().getTime() + Number(config.VERIFY_TOKEN_EXPIRATION) * 60000).toISOString()
   }
-  // validate phone numbers if provided
   const phoneRegex = /^\+[1-9]\d{1,14}$/
   if (data.phones !== undefined) {
     if (!Array.isArray(data.phones)) {
       throw new errors.BadRequestError('phones must be an array')
     }
-    // Validate each phone number
     for (const phone of data.phones) {
       if (!phone.type || typeof phone.type !== 'string') {
         throw new errors.BadRequestError('Each phone must have a type (string)')
@@ -387,15 +384,11 @@ async function updateMember (currentUser, handle, query, data) {
     // clear addresses so it doesn't affect prisma.udpate
     delete data.addresses
 
-    // Store phones update flag before processing
     const phonesWereUpdated = data.phones !== undefined
-    // check if phones is present (can be empty array to delete all phones)
     if (phonesWereUpdated) {
-      // clear current phones
       await tx.memberPhone.deleteMany({
         where: { userId: member.userId }
       })
-      // create new phones if array is not empty
       if (data.phones.length > 0) {
         await tx.memberPhone.createMany({
           data: _.map(data.phones, t => ({
@@ -407,11 +400,9 @@ async function updateMember (currentUser, handle, query, data) {
         })
       }
     }
-    // clear phones so it doesn't affect prisma.update
     delete data.phones
 
     const includeFields = { addresses: true }
-    // Include phones if they were requested or if they were updated
     if (_.includes(selectFields, 'phones') || phonesWereUpdated) {
       includeFields.phones = true
     }
