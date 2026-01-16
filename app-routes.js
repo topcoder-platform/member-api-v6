@@ -78,38 +78,54 @@ module.exports = (app) => {
         })
       } else {
         // public API, but still try to authenticate token if provided, but allow missing/invalid token
-        actions.push((req, res, next) => {
-          const interceptRes = {}
-          interceptRes.status = () => interceptRes
-          interceptRes.json = () => interceptRes
-          interceptRes.send = () => next()
-          authenticator(_.pick(config, ['AUTH_SECRET', 'VALID_ISSUERS']))(req, interceptRes, next)
-        })
-
-        actions.push((req, res, next) => {
-          if (!req.authUser) {
+        // Skip authentication entirely for health check endpoint
+        if (path === '/members/health') {
+          // Health check doesn't need authentication - skip it entirely
+          actions.push((req, res, next) => {
             next()
-          } else if (req.authUser.isMachine) {
-            // M2M
-            if (!req.authUser.scopes || (def.scopes && !helper.checkIfExists(def.scopes, req.authUser.scopes))) {
-              next(new errors.ForbiddenError('You are not allowed to perform this action!'))
-            } else {
+          })
+        } else {
+          actions.push((req, res, next) => {
+            const interceptRes = {}
+            interceptRes.status = () => interceptRes
+            interceptRes.json = () => interceptRes
+            interceptRes.send = () => next()
+            authenticator(_.pick(config, ['AUTH_SECRET', 'VALID_ISSUERS']))(req, interceptRes, next)
+          })
+        }
+
+        // Skip post-auth middleware for health check since we skipped auth
+        if (path !== '/members/health') {
+          actions.push((req, res, next) => {
+            if (!req.authUser) {
               next()
-            }
-          } else {
-            req.authUser.userId = String(req.authUser.userId)
-            // User roles authorization
-            if (req.authUser.roles) {
-              if (def.access && !helper.checkIfExists(def.access, req.authUser.roles)) {
+            } else if (req.authUser.isMachine) {
+              // M2M
+              if (!req.authUser.scopes || (def.scopes && !helper.checkIfExists(def.scopes, req.authUser.scopes))) {
                 next(new errors.ForbiddenError('You are not allowed to perform this action!'))
               } else {
                 next()
               }
             } else {
-              next(new errors.ForbiddenError('You are not authorized to perform this action'))
+              req.authUser.userId = String(req.authUser.userId)
+              // User roles authorization
+              if (req.authUser.roles) {
+                if (def.access && !helper.checkIfExists(def.access, req.authUser.roles)) {
+                  next(new errors.ForbiddenError('You are not allowed to perform this action!'))
+                } else {
+                  next()
+                }
+              } else {
+                next(new errors.ForbiddenError('You are not authorized to perform this action'))
+              }
             }
-          }
-        })
+          })
+        } else {
+          // For health check, just proceed directly to controller
+          actions.push((req, res, next) => {
+            next()
+          })
+        }
       }
 
       actions.push(method)
