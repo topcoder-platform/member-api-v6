@@ -12,6 +12,7 @@ const logger = require('../common/logger')
 const errors = require('../common/errors')
 const constants = require('../../app-constants')
 const mailchimp = require('../common/mailchimp')
+const hubspot = require('../common/hubspot')
 const memberTraitService = require('./MemberTraitService')
 const mime = require('mime-types')
 const fileType = require('file-type')
@@ -578,6 +579,7 @@ async function deleteMember (currentUser, handle, data) {
   }
 
   const member = await helper.getMemberByHandle(handle)
+  const originalEmail = member.email
   const operatorId = currentUser.userId || currentUser.sub || config.TC_WEBSERVICE_USERID
   const nanoId = generateNanoId()
   const deletedHandle = `DELETED_USER_${nanoId}`
@@ -660,11 +662,22 @@ async function deleteMember (currentUser, handle, data) {
   // Kick off MailChimp deletion without blocking the API response.
   ;(async () => {
     try {
-      await mailchimp.deleteSubscriber(member.email)
+      await mailchimp.deleteSubscriber(originalEmail)
     } catch (err) {
-      logger.error(`MailChimp deletion failed for ${member.email}: ${err.message}`)
+      logger.error(`MailChimp deletion failed for ${originalEmail}: ${err.message}`)
     }
   })()
+
+  if (config.HUBSPOT_API_KEY) {
+    // Kick off HubSpot deletion without blocking the API response.
+    ;(async () => {
+      try {
+        await hubspot.deleteContactByEmail(originalEmail)
+      } catch (err) {
+        logger.error(`HubSpot deletion failed for ${originalEmail}: ${err.message}`)
+      }
+    })()
+  }
 
   prismaHelper.convertMember(updatedMember)
   await helper.postBusEvent(constants.TOPICS.MemberUpdated, updatedMember)
