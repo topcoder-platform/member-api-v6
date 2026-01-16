@@ -28,11 +28,11 @@ async function deleteContactByEmail (email) {
   try {
     const response = await axios.get(`${baseUrl}/crm/v3/objects/contacts/${encodedEmail}`, {
       params: {
-        idProperty: 'email',
-        hapikey: apiKey
-      }
+        idProperty: 'email'
+      },
+      headers: {Authorization: `Bearer ${apiKey}`}
     })
-    contactId = response.data && response.data.id
+    contactId = response.id
   } catch (err) {
     if (err.response && err.response.status === 404) {
       logger.info(`HubSpot contact not found for ${email}`)
@@ -49,9 +49,7 @@ async function deleteContactByEmail (email) {
 
   try {
     await axios.delete(`${baseUrl}/crm/v3/objects/contacts/${contactId}`, {
-      params: {
-        hapikey: apiKey
-      }
+      headers: {Authorization: `Bearer ${apiKey}`}
     })
   } catch (err) {
     if (err.response && err.response.status === 404) {
