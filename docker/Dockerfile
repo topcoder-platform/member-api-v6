@@ -10,4 +10,9 @@ WORKDIR /member-api-v6
 # Install the dependencies from package.json
 RUN yarn
 
-CMD node app.js
+# Copy and set permissions for entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Use entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]

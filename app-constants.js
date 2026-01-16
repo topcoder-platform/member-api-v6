@@ -4,7 +4,7 @@
 const ADMIN_ROLES = ['administrator', 'admin']
 const PROFILE_DOWNLOAD_ROLES = ['project manager', 'Talent Manager']
 const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin')
-const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive']
+const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive', 'Talent Manager', 'Project Manager']
 
 const EVENT_ORIGINATOR = 'topcoder-member-api'
 
