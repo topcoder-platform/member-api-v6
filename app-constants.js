@@ -31,6 +31,9 @@ const BOOLEAN_OPERATOR = {
   AND: 'AND',
   OR: 'OR'
 }
+
+const PHONE_REGEX = /^\+[1-9]\d{1,14}$/
+
 module.exports = {
   ADMIN_ROLES,
   PROFILE_DOWNLOAD_ROLES,
@@ -40,5 +43,6 @@ module.exports = {
   EVENT_MIME_TYPE,
   TOPICS,
   MAMBO_GET_REWARDS_ALLOWED_FIELDS,
-  BOOLEAN_OPERATOR
+  BOOLEAN_OPERATOR,
+  PHONE_REGEX
 }

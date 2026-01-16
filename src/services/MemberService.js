@@ -340,7 +340,7 @@ async function updateMember (currentUser, handle, query, data) {
     data.newEmailVerifyToken = uuid()
     data.newEmailVerifyTokenDate = new Date(new Date().getTime() + Number(config.VERIFY_TOKEN_EXPIRATION) * 60000).toISOString()
   }
-  const phoneRegex = /^\+[1-9]\d{1,14}$/
+  const phoneRegex = constants.PHONE_REGEX
   if (data.phones !== undefined) {
     if (!Array.isArray(data.phones)) {
       throw new errors.BadRequestError('phones must be an array')
@@ -469,7 +469,7 @@ updateMember.schema = {
     })),
     phones: Joi.array().items(Joi.object().keys({
       type: Joi.string().required(),
-      number: Joi.string().pattern(/^\+[1-9]\d{1,14}$/).required()
+      number: Joi.string().pattern(constants.PHONE_REGEX).required()
         .messages({
           'string.pattern.base': 'Phone number must be in E.164 format (must start with + followed by 1-15 digits)'
         })
