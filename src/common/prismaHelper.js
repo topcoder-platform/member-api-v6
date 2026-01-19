@@ -78,7 +78,7 @@ function buildMemberSkills (skillList) {
 
   if (!isStandardized) {
     return _.map(skillList, item => {
-      const ret = _.pick(item.skill, ['id', 'name'])
+      const ret = _.pick(item.skill, ['id', 'name', 'updatedAt'])
       ret.category = _.pick(item.skill.category, ['id', 'name'])
       if (item.displayMode) {
         ret.displayMode = _.pick(item.displayMode, ['id', 'name'])
@@ -94,7 +94,7 @@ function buildMemberSkills (skillList) {
   const bySkill = _.groupBy(skillList, (i) => i.skill.id)
   return _.map(bySkill, (items) => {
     const first = items[0]
-    const ret = _.pick(first.skill, ['id', 'name'])
+    const ret = _.pick(first.skill, ['id', 'name', 'updatedAt'])
     ret.category = _.pick(first.skill.category, ['id', 'name'])
     if (first.userSkillDisplayMode) {
       ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])

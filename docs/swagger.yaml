@@ -472,6 +472,47 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/confirmProfile':
+    post:
+      tags:
+        - Basic
+      description: |-
+        Confirm member profile data by setting the lastProfileConfirmationDate to the current timestamp.
+        
+        This endpoint allows a member to confirm they have reviewed and verified their profile information is current and accurate.
+        
+        Authorization:
+          - JWT roles: Only the profile owner or `administrator`/`admin` may confirm the profile.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+          description: The member handle
+      responses:
+        '200':
+          description: OK - Profile confirmation date successfully updated
+          schema:
+            $ref: '#/definitions/MemberProfile'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission - User is not the profile owner or admin
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found - Member with the specified handle does not exist
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}/profileDownload':
     get:
       tags:
@@ -1880,6 +1921,34 @@ definitions:
             type: boolean
           education:
             type: boolean
+          location:
+            type: boolean
+          skillsLastUpdateDate:
+            type: date-time
+            description: 
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          gigAvailabilityLastUpdateDate:
+            type: date-time
+            description: 
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          workHistoryLastUpdateDate:
+            type: date-time
+            description: 
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          educationLastUpdateDate:
+            type: date-time
+            description: 
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          locationLastUpdateDate:
+            type: date-time
+            description: 
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          profileLastUpdateDate:
+            type: date-time
+            description: 
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          lastProfileConfirmationDate:
+            type: date
           percentComplete:
             type: number
             format: double
