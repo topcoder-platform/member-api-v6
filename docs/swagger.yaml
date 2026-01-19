@@ -1925,30 +1925,25 @@ definitions:
             type: boolean
           skillsLastUpdateDate:
             type: date-time
-            description: 
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           gigAvailabilityLastUpdateDate:
             type: date-time
-            description: 
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           workHistoryLastUpdateDate:
             type: date-time
-            description: 
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           educationLastUpdateDate:
             type: date-time
-            description: 
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           locationLastUpdateDate:
             type: date-time
-            description: 
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           profileLastUpdateDate:
             type: date-time
-            description: 
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           lastProfileConfirmationDate:
             type: date
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           percentComplete:
             type: number
             format: double
