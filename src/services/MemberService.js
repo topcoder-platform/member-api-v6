@@ -217,13 +217,13 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
   const totalItems = Object.keys(data).length
 
-  data.skillsLastUpdateDate = undefined;
-  data.gigAvailabilityLastUpdateDate = undefined;
-  data.workHistoryLastUpdateDate = undefined;
-  data.educationLastUpdateDate = undefined;
-  data.locationLastUpdateDate = undefined;
-  data.profileLastUpdateDate = new Date(member.updatedAt).toISOString();
-  data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined;
+  data.skillsLastUpdateDate = undefined
+  data.gigAvailabilityLastUpdateDate = undefined
+  data.workHistoryLastUpdateDate = undefined
+  data.educationLastUpdateDate = undefined
+  data.locationLastUpdateDate = undefined
+  data.profileLastUpdateDate = new Date(member.updatedAt).toISOString()
+  data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined
 
   if (member.availableForGigs != null) {
     completeItems += 1
@@ -235,13 +235,13 @@ async function getProfileCompleteness (currentUser, handle, query) {
     if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
       completeItems += 1
       data.education = true
-      data.educationLastUpdateDate = new Date(item.updatedAt).toISOString();
+      data.educationLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
 
     if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory) {
       completeItems += 1
       data.workHistory = true
-      data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString();
+      data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
   })
   // Push on the incomplete traits for picking a random toast to show
@@ -278,8 +278,8 @@ async function getProfileCompleteness (currentUser, handle, query) {
     data.skills = true
 
     const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
-      Math.max(LastUpdateAt, (skill.updatedAt ?? skill.createdAt).getTime())
-    ), new Date(-1))
+      Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
+    ), new Date(0))
     data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
   } else {
     showToast.push('skills')
@@ -295,12 +295,12 @@ async function getProfileCompleteness (currentUser, handle, query) {
   if (member.addresses && member.addresses.length) {
     completeItems += 1
     data.location = true
-    
+
     const addrDates = member.addresses
       .map(s => s.updatedAt || s.createdAt)
       .filter(Boolean)
       .map(d => new Date(d).getTime())
-  
+
     if (addrDates.length > 0) {
       data.locationLastUpdateDate = new Date(Math.max(...addrDates)).toISOString()
     }

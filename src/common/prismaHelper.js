@@ -96,8 +96,8 @@ function buildMemberSkills (skillList) {
     const first = items[0]
     const ret = _.pick(first.skill, ['id', 'name'])
     // keep userSkill's created & updated fields
-    ret.createdAt = first.createdAt;
-    ret.updatedAt = first.updatedAt;
+    ret.createdAt = first.createdAt
+    ret.updatedAt = first.updatedAt
     ret.category = _.pick(first.skill.category, ['id', 'name'])
     if (first.userSkillDisplayMode) {
       ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])
