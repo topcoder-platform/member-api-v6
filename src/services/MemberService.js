@@ -29,7 +29,7 @@ const profilePDFService = require('./ProfilePDFService')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'phones', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -161,7 +161,32 @@ async function getMemberData (handle, query) {
  * @returns {Object} the member profile data
  */
 async function getMember (currentUser, handle, query) {
-  const member = await getMemberData(handle, query)
+  // Check if user has permission to see phones
+  // Phones are visible to: self, admin, M2M, or users with autocomplete roles (Talent Manager, etc.)
+  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && 
+    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+  
+  const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+
+  // Conditionally add phones to query if user has permission
+  const modifiedQuery = { ...query }
+  if (canSeePhones) {
+    // If fields are specified, check if phones is already included
+    if (modifiedQuery.fields) {
+      const fieldsArray = modifiedQuery.fields.split(',').map(f => f.trim())
+      if (!_.includes(fieldsArray, 'phones')) {
+        modifiedQuery.fields = `${modifiedQuery.fields},phones`
+      }
+    } else {
+      // If no fields specified, add phones to the default fields
+      // getMemberData will use MEMBER_FIELDS, but we need to explicitly add phones
+      modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',phones'
+    }
+  }
+
+  const member = await getMemberData(handle, modifiedQuery)
 
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
@@ -171,6 +196,10 @@ async function getMember (currentUser, handle, query) {
 
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
+  // Add phones to selectFields if user has permission
+  if (canSeePhones && !_.includes(selectFields, 'phones')) {
+    selectFields.push('phones')
+  }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
@@ -529,10 +558,7 @@ updateMember.schema = {
     })),
     phones: Joi.array().items(Joi.object().keys({
       type: Joi.string().required(),
-      number: Joi.string().pattern(constants.PHONE_REGEX).required()
-        .messages({
-          'string.pattern.base': 'Phone number must be in E.164 format (must start with + followed by 1-15 digits)'
-        })
+      number: Joi.string().regex(constants.PHONE_REGEX, 'E.164 format').required()
     })),
     verified: Joi.bool(),
     country: Joi.string(),

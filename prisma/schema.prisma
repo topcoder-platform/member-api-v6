@@ -119,6 +119,7 @@ model memberPhone {
   updatedBy   String?
 
   @@index([userId])
+  @@index([userId, number])
   @@schema("members")
 }
 
