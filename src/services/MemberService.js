@@ -66,6 +66,13 @@ function cleanMember (currentUser, member, selectFields) {
     })
   }
 
+  if (response.skills) {
+    response.skills.forEach((skill) => {
+      skill.createdAt = undefined
+      skill.updatedAt = undefined
+    })
+  }
+
   return response
 }
 
@@ -270,14 +277,10 @@ async function getProfileCompleteness (currentUser, handle, query) {
     completeItems += 1
     data.skills = true
 
-    const skillDates = member.skills
-      .map(s => s.updatedAt || s.createdAt)
-      .filter(Boolean)
-      .map(d => new Date(d).getTime())
-  
-    if (skillDates.length > 0) {
-      data.skillsLastUpdateDate = new Date(Math.max(...skillDates)).toISOString()
-    }
+    const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
+      Math.max(LastUpdateAt, (skill.updatedAt ?? skill.createdAt).getTime())
+    ), new Date(-1))
+    data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
   } else {
     showToast.push('skills')
   }
