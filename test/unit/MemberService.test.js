@@ -263,6 +263,23 @@ describe('member service unit tests', () => {
       }
       throw new Error('should not reach here')
     })
+
+    it('update member - track availableForGigs changes', async () => {
+      const result = await service.updateMember({ isMachine: true, sub: 'sub1' }, member2.handle, {}, {
+        availableForGigs: true
+      })
+      should.equal(result.availableForGigs, true)
+      should.exist(result.availableForGigsLastUpdateDate)
+      should.equal(testHelper.getDatesDiff(result.availableForGigsLastUpdateDate, new Date()), 0)
+    })
+
+    it('update member - availableForGigsLastUpdateDate not set when availableForGigs not changed', async () => {
+      const result = await service.updateMember({ isMachine: true, sub: 'sub1' }, member2.handle, {}, {
+        firstName: 'test'
+      })
+      should.equal(result.firstName, 'test')
+      should.not.exist(result.availableForGigsLastUpdateDate)
+    })
   })
 
   describe('upload photo tests', () => {

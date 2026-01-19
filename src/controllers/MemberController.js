@@ -73,6 +73,16 @@ async function deleteMember (req, res) {
 }
 
 /**
+ * Confirm member profile data
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function confirmProfileData (req, res) {
+  const result = await service.confirmProfileData(req.authUser, req.params.handle)
+  res.send(result)
+}
+
+/**
  * Download member profile as PDF
  * @param {Object} req the request
  * @param {Object} res the response
@@ -92,5 +102,6 @@ module.exports = {
   verifyEmail,
   uploadPhoto,
   deleteMember,
+  confirmProfileData,
   downloadProfile
 }

@@ -51,18 +51,20 @@ model member {
   newEmailVerifyTokenDate DateTime?
   addresses               memberAddress[]
 
-  country                  String?
-  homeCountryCode          String?
-  competitionCountryCode   String?
-  photoURL                 String?
-  tracks                   String[]
-  loginCount               Int?
-  lastLoginDate            DateTime?
-  availableForGigs         Boolean?
-  skillScoreDeduction      Float?
-  namesAndHandleAppearance String?
-  aggregatedSkills         Json?
-  enteredSkills            Json?
+  country                        String?
+  homeCountryCode                String?
+  competitionCountryCode         String?
+  photoURL                       String?
+  tracks                         String[]
+  loginCount                     Int?
+  lastLoginDate                  DateTime?
+  availableForGigs               Boolean?
+  availableForGigsLastUpdateDate DateTime?
+  lastProfileConfirmationDate    DateTime?
+  skillScoreDeduction            Float?
+  namesAndHandleAppearance       String?
+  aggregatedSkills               Json?
+  enteredSkills                  Json?
 
   financial    memberFinancial?
   historyStats memberHistoryStats[]
@@ -724,12 +726,14 @@ model memberTraitWork {
 
   memberTraitId BigInt
 
-  industry    WorkIndustryType?
-  companyName String
-  position    String
-  startDate   DateTime?
-  endDate     DateTime?
-  working     Boolean?
+  industry         WorkIndustryType?
+  companyName      String
+  position         String
+  startDate        DateTime?
+  endDate          DateTime?
+  working          Boolean?
+  description      String?
+  associatedSkills String[]
 
   memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
 

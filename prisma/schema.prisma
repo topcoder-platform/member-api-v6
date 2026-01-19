@@ -57,6 +57,8 @@ model member {
   loginCount  Int?
   lastLoginDate DateTime?
   availableForGigs  Boolean?
+  availableForGigsLastUpdateDate DateTime?
+  lastProfileConfirmationDate DateTime?
   skillScoreDeduction Float?
   namesAndHandleAppearance  String?
   aggregatedSkills  Json?

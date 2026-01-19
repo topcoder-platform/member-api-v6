@@ -257,6 +257,38 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Confirm Member Profile",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlcyI6WyJUb3Bjb2RlciBVc2VyIl0sImlzcyI6Imh0dHBzOi8vYXBpLnRvcGNvZGVyLWRldi5jb20iLCJoYW5kbGUiOiJwaGVhZCIsImV4cCI6MTk4MDk5Mjc4OCwidXNlcklkIjoiMjI3NDI3NjQiLCJpYXQiOjE1NDk3OTk1NjksImVtYWlsIjoiZW1haWxAZG9tYWluLmNvbS56IiwianRpIjoiOWM0NTExYzUtYzE2NS00YTFiLTg5OWUtYjY1YWQwZTAyYjU1In0.kOPm331fsiXj2y_7by2ohjoaGWIGon0TxKL1znbpijU",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:3000/v6/members/phead/confirmProfile",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "3000",
+							"path": [
+								"v6",
+								"members",
+								"phead",
+								"confirmProfile"
+							]
+						}
+					},
+					"response": []
 				}
 			]
 		},
