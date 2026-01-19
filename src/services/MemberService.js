@@ -12,6 +12,7 @@ const logger = require('../common/logger')
 const errors = require('../common/errors')
 const constants = require('../../app-constants')
 const mailchimp = require('../common/mailchimp')
+const hubspot = require('../common/hubspot')
 const memberTraitService = require('./MemberTraitService')
 const mime = require('mime-types')
 const fileType = require('file-type')
@@ -28,10 +29,10 @@ const profilePDFService = require('./ProfilePDFService')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'phones']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'phones', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
-  'newEmailVerifyTokenDate', 'handleSuggest']
+  'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
 
 /**
  * Clean member fields according to current user.
@@ -63,6 +64,13 @@ function cleanMember (currentUser, member, selectFields) {
       if (address.zip === null) {
         address.zip = ''
       }
+    })
+  }
+
+  if (response.skills) {
+    response.skills.forEach((skill) => {
+      skill.createdAt = undefined
+      skill.updatedAt = undefined
     })
   }
 
@@ -107,12 +115,11 @@ async function getMemberSkills (userId) {
 
 /**
  * Get member profile data.
- * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
  * @returns {Object} the member profile data
  */
-async function getMember (currentUser, handle, query) {
+async function getMemberData (handle, query) {
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
 
@@ -137,13 +144,33 @@ async function getMember (currentUser, handle, query) {
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
   }
-  // convert members data structure to response
-  prismaHelper.convertMember(member)
+
   // get member skills
   if (_.includes(selectFields, 'skills')) {
     member.skills = await getMemberSkills(member.userId)
   }
 
+  return member
+}
+
+/**
+ * Get member profile data.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {Object} query the query parameters
+ * @returns {Object} the member profile data
+ */
+async function getMember (currentUser, handle, query) {
+  const member = await getMemberData(handle, query)
+
+  if (!member || !member.userId) {
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
+  }
+  // convert members data structure to response
+  prismaHelper.convertMember(member)
+
+  // validate and parse query parameter
+  const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
@@ -169,18 +196,14 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs' }
-  const member = await getMember(currentUser, handle, memberFields)
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs,availableForGigsLastUpdateDate,lastProfileConfirmationDate,updatedAt,addresses' }
+  const member = await getMemberData(handle, memberFields)
 
   // Used for calculating the percentComplete
   let completeItems = 0
 
-  // Magic number - 6 total items for profile "completeness"
-  // TODO: Bump this back up to 7 once verification is implemented
-  const totalItems = 6
-
   let response = {}
-  response.userId = member.userId
+  response.userId = helper.bigIntToNumber(member.userId)
   response.handle = member.handle
   let data = {}
 
@@ -191,28 +214,41 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
   // TODO: Turn this back on once we have verification flow implemented elsewhere
   // data.verified = false
-
   data.skills = false
   data.gigAvailability = false
   data.bio = false
   data.profilePicture = false
   data.workHistory = false
   data.education = false
+  data.location = false
+
+  const totalItems = Object.keys(data).length
+
+  data.skillsLastUpdateDate = undefined
+  data.gigAvailabilityLastUpdateDate = undefined
+  data.workHistoryLastUpdateDate = undefined
+  data.educationLastUpdateDate = undefined
+  data.locationLastUpdateDate = undefined
+  data.profileLastUpdateDate = new Date(member.updatedAt).toISOString()
+  data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined
 
   if (member.availableForGigs != null) {
     completeItems += 1
     data.gigAvailability = true
+    data.gigAvailabilityLastUpdateDate = member.availableForGigsLastUpdateDate || undefined
   }
 
   _.forEach(memberTraits, (item) => {
     if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
       completeItems += 1
       data.education = true
+      data.educationLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
 
     if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory) {
       completeItems += 1
       data.workHistory = true
+      data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
   })
   // Push on the incomplete traits for picking a random toast to show
@@ -247,6 +283,11 @@ async function getProfileCompleteness (currentUser, handle, query) {
   if (member.skills && member.skills.length >= 3) {
     completeItems += 1
     data.skills = true
+
+    const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
+      Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
+    ), new Date(0))
+    data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
   } else {
     showToast.push('skills')
   }
@@ -256,6 +297,20 @@ async function getProfileCompleteness (currentUser, handle, query) {
     data.profilePicture = true
   } else {
     showToast.push('profilePicture')
+  }
+
+  if (member.addresses && member.addresses.length) {
+    completeItems += 1
+    data.location = true
+
+    const addrDates = member.addresses
+      .map(s => s.updatedAt || s.createdAt)
+      .filter(Boolean)
+      .map(d => new Date(d).getTime())
+
+    if (addrDates.length > 0) {
+      data.locationLastUpdateDate = new Date(Math.max(...addrDates)).toISOString()
+    }
   }
 
   // Calculate the percent complete and round to 2 decimal places
@@ -361,6 +416,11 @@ async function updateMember (currentUser, handle, query, data) {
   // set updated fields in data
   data.updatedAt = new Date()
   data.updatedBy = operatorId
+
+  // Track availableForGigs changes
+  if (data.availableForGigs !== undefined) {
+    data.availableForGigsLastUpdateDate = new Date()
+  }
 
   // open a transaction to handle update
   const result = await prisma.$transaction(async (tx) => {
@@ -633,6 +693,7 @@ async function deleteMember (currentUser, handle, data) {
   }
 
   const member = await helper.getMemberByHandle(handle)
+  const originalEmail = member.email
   const operatorId = currentUser.userId || currentUser.sub || config.TC_WEBSERVICE_USERID
   const nanoId = generateNanoId()
   const deletedHandle = `DELETED_USER_${nanoId}`
@@ -715,11 +776,22 @@ async function deleteMember (currentUser, handle, data) {
   // Kick off MailChimp deletion without blocking the API response.
   ;(async () => {
     try {
-      await mailchimp.deleteSubscriber(member.email)
+      await mailchimp.deleteSubscriber(originalEmail)
     } catch (err) {
-      logger.error(`MailChimp deletion failed for ${member.email}: ${err.message}`)
+      logger.error(`MailChimp deletion failed for ${originalEmail}: ${err.message}`)
     }
   })()
+
+  if (config.HUBSPOT_API_KEY) {
+    // Kick off HubSpot deletion without blocking the API response.
+    ;(async () => {
+      try {
+        await hubspot.deleteContactByEmail(originalEmail)
+      } catch (err) {
+        logger.error(`HubSpot deletion failed for ${originalEmail}: ${err.message}`)
+      }
+    })()
+  }
 
   prismaHelper.convertMember(updatedMember)
   await helper.postBusEvent(constants.TOPICS.MemberUpdated, updatedMember)
@@ -786,6 +858,42 @@ deleteMember.schema = {
 }
 
 /**
+ * Confirm member profile data.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Object} the updated member profile data
+ */
+async function confirmProfileData (currentUser, handle) {
+  const member = await helper.getMemberByHandle(handle)
+  // check authorization - only the profile owner or admin can confirm
+  if (!helper.canManageMember(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to confirm this member profile.')
+  }
+
+  // Update the lastProfileConfirmationDate
+  const result = await prisma.member.update({
+    where: { userId: member.userId },
+    data: {
+      lastProfileConfirmationDate: new Date(),
+      updatedAt: new Date(),
+      updatedBy: currentUser.userId || currentUser.sub
+    },
+    include: { addresses: true }
+  })
+
+  // convert prisma data to response format
+  prismaHelper.convertMember(result)
+
+  // clean member fields according to current user
+  return cleanMember(currentUser, result, MEMBER_FIELDS)
+}
+
+confirmProfileData.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required()
+}
+
+/**
  * Download member profile as PDF
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
@@ -822,6 +930,7 @@ module.exports = {
   verifyEmail,
   uploadPhoto,
   deleteMember,
+  confirmProfileData,
   downloadProfile
 }
 
