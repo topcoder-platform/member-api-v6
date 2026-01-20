@@ -61,6 +61,10 @@ function convertMember (member) {
     member.addresses = _.map(member.addresses, d => _.omit(d,
       ['id', 'userId', ...auditFields]))
   }
+  if (member.phones) {
+    member.phones = _.map(member.phones, d => _.omit(d,
+      ['id', 'userId', ...auditFields]))
+  }
   member.verified = member.verified || false
 }
 

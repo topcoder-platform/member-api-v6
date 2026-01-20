@@ -91,6 +91,9 @@ function omitMemberAttributes (currentUser, mb) {
   }
   if (!canManageMember && !hasAutocompleteRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
+    if (res.phones) {
+      delete res.phones
+    }
   }
 
   return res
@@ -132,6 +135,9 @@ async function getMemberData (handle, query) {
   if (_.includes(selectFields, 'addresses')) {
     prismaFilter.include.addresses = true
   }
+  if (_.includes(selectFields, 'phones')) {
+    prismaFilter.include.phones = true
+  }
 
   // To keep original business logic, let's use findMany
   const member = await prisma.member.findUnique(prismaFilter)
@@ -155,7 +161,32 @@ async function getMemberData (handle, query) {
  * @returns {Object} the member profile data
  */
 async function getMember (currentUser, handle, query) {
-  const member = await getMemberData(handle, query)
+  // Check if user has permission to see phones
+  // Phones are visible to: self, admin, M2M, or users with autocomplete roles (Talent Manager, etc.)
+  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && 
+    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+  
+  const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+
+  // Conditionally add phones to query if user has permission
+  const modifiedQuery = { ...query }
+  if (canSeePhones) {
+    // If fields are specified, check if phones is already included
+    if (modifiedQuery.fields) {
+      const fieldsArray = modifiedQuery.fields.split(',').map(f => f.trim())
+      if (!_.includes(fieldsArray, 'phones')) {
+        modifiedQuery.fields = `${modifiedQuery.fields},phones`
+      }
+    } else {
+      // If no fields specified, add phones to the default fields
+      // getMemberData will use MEMBER_FIELDS, but we need to explicitly add phones
+      modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',phones'
+    }
+  }
+
+  const member = await getMemberData(handle, modifiedQuery)
 
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
@@ -165,6 +196,10 @@ async function getMember (currentUser, handle, query) {
 
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
+  // Add phones to selectFields if user has permission
+  if (canSeePhones && !_.includes(selectFields, 'phones')) {
+    selectFields.push('phones')
+  }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
@@ -389,6 +424,24 @@ async function updateMember (currentUser, handle, query, data) {
     data.newEmailVerifyToken = uuid()
     data.newEmailVerifyTokenDate = new Date(new Date().getTime() + Number(config.VERIFY_TOKEN_EXPIRATION) * 60000).toISOString()
   }
+  const phoneRegex = constants.PHONE_REGEX
+  if (data.phones !== undefined) {
+    if (!Array.isArray(data.phones)) {
+      throw new errors.BadRequestError('phones must be an array')
+    }
+    for (const phone of data.phones) {
+      if (!phone.type || typeof phone.type !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a type (string)')
+      }
+      if (!phone.number || typeof phone.number !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a number (string)')
+      }
+      if (!phoneRegex.test(phone.number)) {
+        throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
+      }
+    }
+  }
+
   // set updated fields in data
   data.updatedAt = new Date()
   data.updatedBy = operatorId
@@ -420,10 +473,33 @@ async function updateMember (currentUser, handle, query, data) {
     // clear addresses so it doesn't affect prisma.udpate
     delete data.addresses
 
+    const phonesWereUpdated = data.phones !== undefined
+    if (phonesWereUpdated) {
+      await tx.memberPhone.deleteMany({
+        where: { userId: member.userId }
+      })
+      if (data.phones.length > 0) {
+        await tx.memberPhone.createMany({
+          data: _.map(data.phones, t => ({
+            type: t.type,
+            number: t.number,
+            userId: member.userId,
+            createdBy: operatorId
+          }))
+        })
+      }
+    }
+    delete data.phones
+
+    const includeFields = { addresses: true }
+    if (_.includes(selectFields, 'phones') || phonesWereUpdated) {
+      includeFields.phones = true
+    }
+
     return tx.member.update({
       where: { userId: member.userId },
       data,
-      include: { addresses: true }
+      include: includeFields
     })
   })
 
@@ -479,6 +555,10 @@ updateMember.schema = {
       zip: Joi.string().allow('').allow(null),
       stateCode: Joi.string().allow('').allow(null),
       type: Joi.string()
+    })),
+    phones: Joi.array().items(Joi.object().keys({
+      type: Joi.string().required(),
+      number: Joi.string().regex(constants.PHONE_REGEX, 'E.164 format').required()
     })),
     verified: Joi.bool(),
     country: Joi.string(),
