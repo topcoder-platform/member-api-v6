@@ -117,11 +117,12 @@ async function getMemberSkills (userId) {
  * Get member profile data.
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
+ * @param {Array} allowedFields optional array of allowed fields (defaults to MEMBER_FIELDS)
  * @returns {Object} the member profile data
  */
-async function getMemberData (handle, query) {
+async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
   // validate and parse query parameter
-  const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
+  const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
 
   const prismaFilter = {
     where: {
@@ -169,6 +170,7 @@ async function getMember (currentUser, handle, query) {
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
   
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
 
   // Conditionally add phones to query if user has permission
   const modifiedQuery = { ...query }
@@ -181,12 +183,11 @@ async function getMember (currentUser, handle, query) {
       }
     } else {
       // If no fields specified, add phones to the default fields
-      // getMemberData will use MEMBER_FIELDS, but we need to explicitly add phones
       modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',phones'
     }
   }
 
-  const member = await getMemberData(handle, modifiedQuery)
+  const member = await getMemberData(handle, modifiedQuery, allowedFields)
 
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
@@ -195,7 +196,7 @@ async function getMember (currentUser, handle, query) {
   prismaHelper.convertMember(member)
 
   // validate and parse query parameter
-  const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
+  const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
   // Add phones to selectFields if user has permission
   if (canSeePhones && !_.includes(selectFields, 'phones')) {
     selectFields.push('phones')
