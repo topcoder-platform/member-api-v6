@@ -35,9 +35,22 @@ const getSkillsClient = () => {
   return skillsClient
 }
 
+/**
+ * Get finance Prisma client for querying finance schema
+ * Uses raw SQL queries since finance schema is in a different namespace
+ * @returns {Object} Prisma client instance
+ */
+const getFinanceClient = () => {
+  // For now it internally use members client to query finance schema
+  // using Raw SQL queries since finance schema is in a different namespace
+  // If we have more usecase to query finance schema, we can create a separate finance client
+  return getMembersClient()
+}
+
 module.exports = {
   Prisma,
   getClient: getMembersClient,
   getMembersClient,
-  getSkillsClient
+  getSkillsClient,
+  getFinanceClient
 }
