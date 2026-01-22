@@ -126,6 +126,9 @@ module.exports = {
   },
   MEMBER_SERVICE_PRISMA_TIMEOUT: process.env.MEMBER_SERVICE_PRISMA_TIMEOUT ? parseInt(process.env.MEMBER_SERVICE_PRISMA_TIMEOUT, 10) : 10000,
 
+  // Finance database connection string
+  FINANCE_DATABASE_URL: process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL,
+
   HUBSPOT_API_KEY: process.env.HUBSPOT_API_KEY,
   HUBSPOT_BASE_URL: process.env.HUBSPOT_BASE_URL,
 

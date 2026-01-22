@@ -29,6 +29,7 @@
     "standard": "^12.0.1"
   },
   "dependencies": {
+    "@topcoder/finance-prisma-client": "git+https://github.com/topcoder-platform/tc-finance-api.git#pm-3454_finance_client:packages/finance-prisma-client",
     "aws-sdk": "^2.466.0",
     "@prisma/client": "^6.10.1",
     "@react-pdf/renderer": "^3.4.4",

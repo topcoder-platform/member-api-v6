@@ -211,14 +211,13 @@ async function getMember (currentUser, handle, query) {
     try {
       const financePrisma = prismaManager.getFinanceClient()
       const userIdString = String(helper.bigIntToNumber(member.userId))
-      const verification = await financePrisma.$queryRaw`
-        SELECT id, user_id, verification_status
-        FROM ${Prisma.raw('finance.user_identity_verification_associations')}
-        WHERE user_id = ${userIdString}
-          AND verification_status = 'ACTIVE'
-        LIMIT 1
-      `
-      member.identityVerified = Array.isArray(verification) && verification.length > 0
+      const verification = await financePrisma.user_identity_verification_associations.findFirst({
+        where: {
+          user_id: userIdString,
+          verification_status: 'ACTIVE'
+        }
+      })
+      member.identityVerified = verification !== null
     } catch (err) {
       // If finance schema query fails, log error but don't fail the request
       logger.error(`Failed to query identity verification for user ${member.userId}: ${err.message}`)
