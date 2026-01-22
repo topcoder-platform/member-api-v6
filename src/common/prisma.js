@@ -4,6 +4,7 @@ const {
   Prisma
 } = require('../../prisma/generated/client')
 const { PrismaClient: SkillsPrismaClient } = require('../../prisma/generated/skills-client')
+const { createFinancePrismaClient } = require('@topcoder/finance-prisma-client')
 const config = require('config')
 
 const clientOptions = {
@@ -20,6 +21,7 @@ const clientOptions = {
 
 let membersClient
 let skillsClient
+let financeClient
 
 const getMembersClient = () => {
   if (!membersClient) {
@@ -37,14 +39,18 @@ const getSkillsClient = () => {
 
 /**
  * Get finance Prisma client for querying finance schema
- * Uses raw SQL queries since finance schema is in a different namespace
+ * Creates a dedicated Prisma client instance for the finance database
  * @returns {Object} Prisma client instance
  */
 const getFinanceClient = () => {
-  // For now it internally use members client to query finance schema
-  // using Raw SQL queries since finance schema is in a different namespace
-  // If we have more usecase to query finance schema, we can create a separate finance client
-  return getMembersClient()
+  if (!financeClient) {
+    const connectionString = config.FINANCE_DATABASE_URL
+    if (!connectionString) {
+      throw new Error('FINANCE_DATABASE_URL is not configured. Please set FINANCE_DATABASE_URL environment variable or add it to config.')
+    }
+    financeClient = createFinancePrismaClient(connectionString, clientOptions)
+  }
+  return financeClient
 }
 
 module.exports = {
