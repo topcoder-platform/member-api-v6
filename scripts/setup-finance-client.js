@@ -1,38 +1,108 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 const sourceDir = path.join(__dirname, '../node_modules/@topcoder/finance-prisma-client/packages/finance-prisma-client');
 const targetDir = path.join(__dirname, '../node_modules/@topcoder/finance-prisma-client');
+const repoRoot = path.join(__dirname, '../node_modules/@topcoder/finance-prisma-client');
+
+console.log('Setting up Finance Prisma Client...');
+console.log('Source directory:', sourceDir);
+console.log('Target directory:', targetDir);
+
+// Check if the repo was installed
+if (!fs.existsSync(repoRoot)) {
+  console.error('Error: @topcoder/finance-prisma-client package not found at', repoRoot);
+  console.error('Make sure the package is installed: yarn install or npm install');
+  process.exit(1);
+}
 
 // Check if source exists
 if (!fs.existsSync(sourceDir)) {
-  console.warn('Warning: Finance Prisma Client package not found at', sourceDir);
-  console.warn('This is expected if the package is not yet installed. Skipping setup.');
-  process.exit(0);
+  console.error('Error: Finance Prisma Client package not found at', sourceDir);
+  console.error('Expected structure: node_modules/@topcoder/finance-prisma-client/packages/finance-prisma-client');
+  console.error('Actual structure in repo root:');
+  try {
+    const repoContents = fs.readdirSync(repoRoot);
+    console.error('  Contents:', repoContents.join(', '));
+  } catch (err) {
+    console.error('  Could not read repo root:', err.message);
+  }
+  process.exit(1);
+}
+
+// Check if package.json exists in source
+const sourcePackageJson = path.join(sourceDir, 'package.json');
+if (!fs.existsSync(sourcePackageJson)) {
+  console.error('Error: package.json not found in', sourceDir);
+  process.exit(1);
+}
+
+// Check if dist directory exists, if not, try to build
+const distDir = path.join(sourceDir, 'dist');
+if (!fs.existsSync(distDir)) {
+  console.warn('Warning: dist directory not found. Attempting to build the package...');
+  try {
+    console.log('Running: npm run build in', sourceDir);
+    execSync('npm run build', { 
+      cwd: sourceDir, 
+      stdio: 'inherit',
+      env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL || 'postgresql://dummy:dummy@localhost:5432/dummy' }
+    });
+    console.log('Build completed successfully');
+  } catch (err) {
+    console.error('Error building package:', err.message);
+    console.error('Please ensure the package is built before installation, or run: npm run build in the package directory');
+    process.exit(1);
+  }
+}
+
+// Ensure target directory exists
+if (!fs.existsSync(targetDir)) {
+  fs.mkdirSync(targetDir, { recursive: true });
 }
 
 // Copy package.json, dist, prisma, and README.md to target
 const filesToCopy = ['package.json', 'dist', 'prisma', 'README.md'];
 
+let copiedCount = 0;
 filesToCopy.forEach(file => {
   const source = path.join(sourceDir, file);
   const target = path.join(targetDir, file);
   
   if (fs.existsSync(source)) {
-    if (fs.statSync(source).isDirectory()) {
-      // Remove existing directory if it exists
-      if (fs.existsSync(target)) {
-        fs.rmSync(target, { recursive: true, force: true });
+    try {
+      if (fs.statSync(source).isDirectory()) {
+        // Remove existing directory if it exists
+        if (fs.existsSync(target)) {
+          fs.rmSync(target, { recursive: true, force: true });
+        }
+        // Copy directory recursively
+        copyRecursiveSync(source, target);
+      } else {
+        // Copy file
+        fs.copyFileSync(source, target);
       }
-      // Copy directory recursively
-      copyRecursiveSync(source, target);
-    } else {
-      // Copy file
-      fs.copyFileSync(source, target);
+      console.log(`✓ Copied ${file} to @topcoder/finance-prisma-client`);
+      copiedCount++;
+    } catch (err) {
+      console.error(`Error copying ${file}:`, err.message);
+      process.exit(1);
     }
-    console.log(`Copied ${file} to @topcoder/finance-prisma-client`);
+  } else {
+    console.warn(`Warning: ${file} not found in source directory`);
   }
 });
+
+// Verify that dist/index.js exists after copying
+const distIndex = path.join(targetDir, 'dist', 'index.js');
+if (!fs.existsSync(distIndex)) {
+  console.error('Error: dist/index.js not found after setup. Expected at:', distIndex);
+  console.error('This file is required for the package to work.');
+  process.exit(1);
+}
+
+console.log(`Finance Prisma Client setup complete! Copied ${copiedCount} items.`);
 
 function copyRecursiveSync(src, dest) {
   const exists = fs.existsSync(src);
@@ -53,5 +123,3 @@ function copyRecursiveSync(src, dest) {
     fs.copyFileSync(src, dest);
   }
 }
-
-console.log('Finance Prisma Client setup complete!');
