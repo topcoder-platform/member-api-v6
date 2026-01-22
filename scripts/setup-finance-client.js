@@ -10,14 +10,12 @@ console.log('Setting up Finance Prisma Client...');
 console.log('Source directory:', sourceDir);
 console.log('Target directory:', targetDir);
 
-// Check if the repo was installed
 if (!fs.existsSync(repoRoot)) {
   console.error('Error: @topcoder/finance-prisma-client package not found at', repoRoot);
   console.error('Make sure the package is installed: yarn install or npm install');
   process.exit(1);
 }
 
-// Check if source exists
 if (!fs.existsSync(sourceDir)) {
   console.error('Error: Finance Prisma Client package not found at', sourceDir);
   console.error('Expected structure: node_modules/@topcoder/finance-prisma-client/packages/finance-prisma-client');
@@ -31,32 +29,30 @@ if (!fs.existsSync(sourceDir)) {
   process.exit(1);
 }
 
-// Check if package.json exists in source
 const sourcePackageJson = path.join(sourceDir, 'package.json');
 if (!fs.existsSync(sourcePackageJson)) {
   console.error('Error: package.json not found in', sourceDir);
   process.exit(1);
 }
 
-// Check if dist directory exists, if not, try to build
 const distDir = path.join(sourceDir, 'dist');
 if (!fs.existsSync(distDir)) {
   console.warn('Warning: dist directory not found. Attempting to build the package...');
   try {
-    // First, install dependencies (including devDependencies) for the package
+    const dbUrl = process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL || 'postgresql://dummy:dummy@localhost:5432/dummy';
+    
     console.log('Installing package dependencies (including devDependencies)...');
     execSync('npm install --include=dev', { 
       cwd: sourceDir, 
       stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL || 'postgresql://dummy:dummy@localhost:5432/dummy' }
+      env: { ...process.env, DATABASE_URL: dbUrl }
     });
     
-    // Then build the package
     console.log('Building package...');
     execSync('npm run build', { 
       cwd: sourceDir, 
       stdio: 'inherit',
-      env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL || 'postgresql://dummy:dummy@localhost:5432/dummy' }
+      env: { ...process.env, DATABASE_URL: dbUrl }
     });
     console.log('Build completed successfully');
   } catch (err) {
@@ -66,12 +62,10 @@ if (!fs.existsSync(distDir)) {
   }
 }
 
-// Ensure target directory exists
 if (!fs.existsSync(targetDir)) {
   fs.mkdirSync(targetDir, { recursive: true });
 }
 
-// Copy package.json, dist, prisma, and README.md to target
 const filesToCopy = ['package.json', 'dist', 'prisma', 'README.md'];
 
 let copiedCount = 0;
@@ -82,17 +76,14 @@ filesToCopy.forEach(file => {
   if (fs.existsSync(source)) {
     try {
       if (fs.statSync(source).isDirectory()) {
-        // Remove existing directory if it exists
         if (fs.existsSync(target)) {
           fs.rmSync(target, { recursive: true, force: true });
         }
-        // Copy directory recursively
         copyRecursiveSync(source, target);
       } else {
-        // Copy file
         fs.copyFileSync(source, target);
       }
-      console.log(`✓ Copied ${file} to @topcoder/finance-prisma-client`);
+      console.log(`Copied ${file} to @topcoder/finance-prisma-client`);
       copiedCount++;
     } catch (err) {
       console.error(`Error copying ${file}:`, err.message);
