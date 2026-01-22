@@ -43,7 +43,16 @@ const distDir = path.join(sourceDir, 'dist');
 if (!fs.existsSync(distDir)) {
   console.warn('Warning: dist directory not found. Attempting to build the package...');
   try {
-    console.log('Running: npm run build in', sourceDir);
+    // First, install dependencies (including devDependencies) for the package
+    console.log('Installing package dependencies (including devDependencies)...');
+    execSync('npm install --include=dev', { 
+      cwd: sourceDir, 
+      stdio: 'inherit',
+      env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL || 'postgresql://dummy:dummy@localhost:5432/dummy' }
+    });
+    
+    // Then build the package
+    console.log('Building package...');
     execSync('npm run build', { 
       cwd: sourceDir, 
       stdio: 'inherit',
