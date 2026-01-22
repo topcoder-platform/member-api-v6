@@ -39,7 +39,7 @@ const distDir = path.join(sourceDir, 'dist');
 if (!fs.existsSync(distDir)) {
   console.warn('Warning: dist directory not found. Attempting to build the package...');
   try {
-    const dbUrl = process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL || 'postgresql://dummy:dummy@localhost:5432/dummy';
+    const dbUrl = process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL;
     
     console.log('Installing package dependencies (including devDependencies)...');
     execSync('npm install --include=dev', { 
