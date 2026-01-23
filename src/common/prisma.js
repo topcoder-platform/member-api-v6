@@ -3,7 +3,7 @@ const {
   PrismaClient: MembersPrismaClient,
   Prisma
 } = require('../../prisma/generated/client')
-const { PrismaClient: FinancePrismaClient } = require('@topcoder/finance-prisma-client/packages/finance-prisma-client')
+const { PrismaClient: FinancePrismaClient } = require('@topcoder/tc-finance-api/packages/finance-prisma-client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
 const config = require('config')
 const skillsDbUrl = process.env.SKILLS_DB_URL
