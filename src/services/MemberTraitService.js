@@ -21,7 +21,7 @@ const TRAIT_FIELDS = ['userId', 'traitId', 'categoryName', 'traits', 'createdAt'
 const DeviceType = ['Console', 'Desktop', 'Laptop', 'Smartphone', 'Tablet', 'Wearable', 'Other']
 const SoftwareType = ['DeveloperTools', 'Browser', 'Productivity', 'GraphAndDesign', 'Utilities']
 const ServiceProviderType = ['InternetServiceProvider', 'MobileCarrier', 'Television', 'FinancialInstitution', 'Other']
-const WorkIndustryType = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
+const WorkIndustryType = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality', 'Other']
 
 /**
  * Used to generate prisma query parameters
@@ -468,6 +468,11 @@ const traitSchemas = {
   })),
   work: Joi.array().items(Joi.object({
     industry: Joi.string().valid(...WorkIndustryType).allow(null),
+    otherIndustry: Joi.string().max(255).allow(null, '').when('industry', {
+      is: 'Other',
+      then: Joi.string().max(255).required(),
+      otherwise: Joi.string().max(255).allow(null, '')
+    }),
     companyName: Joi.string().required(),
     position: Joi.string().required(),
     startDate: Joi.date().iso().allow(null),
