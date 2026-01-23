@@ -269,6 +269,7 @@ async function getMember (currentUser, handle, query) {
   // add recent activity to selectFields if permitted user
   if (_.includes(selectFields, 'recentActivity') && canSeeRecentActivity) {
     selectFields.push('recentActivity')
+  }
   // Add identityVerified to selectFields if user has permission
   if (canSeeIdentityVerified && !_.includes(selectFields, 'identityVerified')) {
     selectFields.push('identityVerified')
@@ -276,6 +277,7 @@ async function getMember (currentUser, handle, query) {
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
+
 
 getMember.schema = {
   currentUser: Joi.any(),
