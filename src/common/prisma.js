@@ -3,7 +3,7 @@ const {
   PrismaClient: MembersPrismaClient,
   Prisma
 } = require('../../prisma/generated/client')
-const { createFinancePrismaClient } = require('@topcoder/finance-prisma-client')
+const { PrismaClient: FinancePrismaClient } = require('@topcoder/finance-prisma-client/packages/finance-prisma-client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
 const config = require('config')
 const skillsDbUrl = process.env.SKILLS_DB_URL
@@ -55,7 +55,10 @@ const getFinanceClient = () => {
     if (!connectionString) {
       throw new Error('FINANCE_DATABASE_URL is not configured. Please set FINANCE_DATABASE_URL environment variable or add it to config.')
     }
-    financeClient = createFinancePrismaClient(connectionString, clientOptions)
+    financeClient = new FinancePrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: connectionString } }
+    })
   }
   return financeClient
 }
