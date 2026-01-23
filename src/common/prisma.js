@@ -3,7 +3,7 @@ const {
   PrismaClient: MembersPrismaClient,
   Prisma
 } = require('../../prisma/generated/client')
-const { PrismaClient: SkillsPrismaClient } = require('../../prisma/generated/skills-client')
+const { PrismaClient: SkillsPrismaClient } = require('topcoder/skills-prisma-client')
 const config = require('config')
 
 const clientOptions = {
