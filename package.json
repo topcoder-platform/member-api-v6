@@ -31,7 +31,7 @@
   "dependencies": {
     "aws-sdk": "^2.466.0",
     "@prisma/client": "^6.10.1",
-    "topcoder/skills-prisma-client": "topcoder-platform/standardized-skills-api/packages/skills-prisma-client#develop",
+    "topcoder/skills-prisma-client": "git+https://github.com/topcoder-platform/standardized-skills-api/packages/skills-prisma-client#develop",
     "@react-pdf/renderer": "^3.4.4",
     "axios": "^0.27.2",
     "bluebird": "^3.5.1",
