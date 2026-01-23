@@ -4,7 +4,7 @@
   "description": "TopCoder Member V6 API",
   "main": "app.js",
   "scripts": {
-    "postinstall": "node scripts/setup-finance-client.js && prisma generate --schema=prisma/schema.prisma && prisma generate --schema=prisma/skills-schema.prisma && prisma generate --schema=prisma/identity-schema.prisma",
+    "postinstall": "node scripts/setup-finance-client.js && prisma generate --schema=prisma/schema.prisma && prisma generate --schema=prisma/identity-schema.prisma",
     "start": "node app.js",
     "start:dev": "nodemon app.js",
     "lint": "standard",
@@ -32,6 +32,7 @@
     "@topcoder/finance-prisma-client": "git+https://github.com/topcoder-platform/tc-finance-api.git#pm-3454_finance_client",
     "aws-sdk": "^2.466.0",
     "@prisma/client": "^6.10.1",
+    "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
     "@react-pdf/renderer": "^3.4.4",
     "axios": "^0.27.2",
     "bluebird": "^3.5.1",
