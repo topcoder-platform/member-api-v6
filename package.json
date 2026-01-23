@@ -29,7 +29,7 @@
     "standard": "^12.0.1"
   },
   "dependencies": {
-    "@topcoder/tc-finance-api": "topcoder-platform/tc-finance-api.git#pm-3454_finance_client",
+    "@topcoder/tc-finance-api": "topcoder-platform/tc-finance-api.git#dev",
     "aws-sdk": "^2.466.0",
     "@prisma/client": "^6.10.1",
     "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
