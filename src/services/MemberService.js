@@ -21,6 +21,7 @@ const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
+const { Prisma } = prismaManager
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
@@ -30,7 +31,7 @@ const profilePDFService = require('./ProfilePDFService')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -84,6 +85,10 @@ function omitMemberAttributes (currentUser, mb) {
   // remove identifiable info fields if user is not admin, not M2M and not member himself
   const canManageMember = helper.canManageMember(currentUser, mb)
   const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && mb.handleLower &&
+    currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
@@ -95,6 +100,10 @@ function omitMemberAttributes (currentUser, mb) {
     if (res.phones) {
       delete res.phones
     }
+  }
+  // Remove identityVerified if user doesn't have permission
+  if (!canSeeIdentityVerified && res.identityVerified !== undefined) {
+    delete res.identityVerified
   }
 
   return res
@@ -117,19 +126,26 @@ async function getMemberSkills (userId) {
 /**
  * Compute member recent activity with user id
  * @param {BigInt} userId prisma BigInt userId
+ * @returns {Boolean} true if member has recent activity in last 3 months
  */
 async function getMemberRecentActivity (userId) {
-const threeMonthsAgo = new Date()
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+  try {
+    const threeMonthsAgo = new Date()
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
 
-  const recent = await resourcesPrisma.resource.findFirst({
-    where: {
-      memberId: userId,
-      roleName: { in: ['Submitter', 'Copilot', 'Reviewer'] },
-      created: { gte: threeMonthsAgo }
-    }
-  })
-  return !!recent
+    const recent = await resourcesPrisma.resource.findFirst({
+      where: {
+        memberId: userId,
+        roleName: { in: ['Submitter', 'Copilot', 'Reviewer'] },
+        created: { gte: threeMonthsAgo }
+      }
+    })
+
+    return !!recent
+  } catch (err) {
+    console.error(`Failed to query recent activity for userId: ${userId}`, err)
+    return false
+  }
 }
 
 /**
@@ -170,11 +186,6 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
     member.skills = await getMemberSkills(member.userId)
   }
 
-  // get member recent activity
-  if (_.includes(selectFields,'recentActivity')) {
-    member.recentActivity = await getMemberRecentActivity(member.userId)
-  }
-
   return member
 }
 
@@ -195,12 +206,10 @@ async function getMember (currentUser, handle, query) {
   
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
   const canSeeRecentActivity = hasAutocompleteRole || isSelf
+  // Identity verified field has same access control as phones
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
 
-  const allowedFields = [
-    ...MEMBER_FIELDS,
-    ...(canSeePhones ? ['phones'] : []),
-    ...(canSeeRecentActivity ? ['recentActivity'] : [])
-  ]
   const threeMonthsAgo = new Date() 
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
 
@@ -219,17 +228,6 @@ async function getMember (currentUser, handle, query) {
     }
   }
 
-  if (canSeeRecentActivity) {
-    if (modifiedQuery.fields) {
-      const fieldsArray = modifiedQuery.fields.split(',').map(f => f.trim())
-      if (!_.includes(fieldsArray, 'recentActivity')) {
-        modifiedQuery.fields = `${modifiedQuery.fields},recentActivity`
-      }
-    } else if (!modifiedQuery.fields?.includes('recentActivity')) {
-      modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',recentActivity'
-    }
-  }
-
   const member = await getMemberData(handle, modifiedQuery, allowedFields)
 
   if (!member || !member.userId) {
@@ -237,6 +235,30 @@ async function getMember (currentUser, handle, query) {
   }
   // convert members data structure to response
   prismaHelper.convertMember(member)
+
+  // Query identity verification status from finance schema if user has permission
+  if (canSeeIdentityVerified) {
+    try {
+      const financePrisma = prismaManager.getFinanceClient()
+      const userIdString = String(helper.bigIntToNumber(member.userId))
+      const verification = await financePrisma.user_identity_verification_associations.findFirst({
+        where: {
+          user_id: userIdString,
+          verification_status: 'ACTIVE'
+        }
+      })
+      member.identityVerified = verification !== null
+    } catch (err) {
+      // If finance schema query fails, log error but don't fail the request
+      logger.error(`Failed to query identity verification for user ${member.userId}: ${err.message}`)
+      member.identityVerified = false
+    }
+  }
+
+  // get member recent activity
+  if(canSeeRecentActivity) {
+    member.recentActivity = await getMemberRecentActivity(member.userId)
+  }
 
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
@@ -247,6 +269,9 @@ async function getMember (currentUser, handle, query) {
   // add recent activity to selectFields if permitted user
   if (_.includes(selectFields, 'recentActivity') && canSeeRecentActivity) {
     selectFields.push('recentActivity')
+  // Add identityVerified to selectFields if user has permission
+  if (canSeeIdentityVerified && !_.includes(selectFields, 'identityVerified')) {
+    selectFields.push('identityVerified')
   }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
