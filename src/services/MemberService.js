@@ -24,6 +24,7 @@ const prismaManager = require('../common/prisma')
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
+const resourcesPrisma = prismaManager.getResourcesClient()
 const profilePDFService = require('./ProfilePDFService')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
@@ -114,6 +115,24 @@ async function getMemberSkills (userId) {
 }
 
 /**
+ * Compute member recent activity with user id
+ * @param {BigInt} userId prisma BigInt userId
+ */
+async function getMemberRecentActivity (userId) {
+const threeMonthsAgo = new Date()
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+  const recent = await resourcesPrisma.resource.findFirst({
+    where: {
+      memberId: userId,
+      roleName: { in: ['Submitter', 'Copilot', 'Reviewer'] },
+      created: { gte: threeMonthsAgo }
+    }
+  })
+  return !!recent
+}
+
+/**
  * Get member profile data.
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
@@ -151,6 +170,11 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
     member.skills = await getMemberSkills(member.userId)
   }
 
+  // get member recent activity
+  if (_.includes(selectFields,'recentActivity')) {
+    member.recentActivity = await getMemberRecentActivity(member.userId)
+  }
+
   return member
 }
 
@@ -170,9 +194,17 @@ async function getMember (currentUser, handle, query) {
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
   
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
-  const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
+  const canSeeRecentActivity = hasAutocompleteRole || isSelf
 
-  // Conditionally add phones to query if user has permission
+  const allowedFields = [
+    ...MEMBER_FIELDS,
+    ...(canSeePhones ? ['phones'] : []),
+    ...(canSeeRecentActivity ? ['recentActivity'] : [])
+  ]
+  const threeMonthsAgo = new Date() 
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+  // Conditionally add phones and recent activity to query if user has permission
   const modifiedQuery = { ...query }
   if (canSeePhones) {
     // If fields are specified, check if phones is already included
@@ -184,6 +216,17 @@ async function getMember (currentUser, handle, query) {
     } else {
       // If no fields specified, add phones to the default fields
       modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',phones'
+    }
+  }
+
+  if (canSeeRecentActivity) {
+    if (modifiedQuery.fields) {
+      const fieldsArray = modifiedQuery.fields.split(',').map(f => f.trim())
+      if (!_.includes(fieldsArray, 'recentActivity')) {
+        modifiedQuery.fields = `${modifiedQuery.fields},recentActivity`
+      }
+    } else if (!modifiedQuery.fields?.includes('recentActivity')) {
+      modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',recentActivity'
     }
   }
 
@@ -200,6 +243,10 @@ async function getMember (currentUser, handle, query) {
   // Add phones to selectFields if user has permission
   if (canSeePhones && !_.includes(selectFields, 'phones')) {
     selectFields.push('phones')
+  }
+  // add recent activity to selectFields if permitted user
+  if (_.includes(selectFields, 'recentActivity') && canSeeRecentActivity) {
+    selectFields.push('recentActivity')
   }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)

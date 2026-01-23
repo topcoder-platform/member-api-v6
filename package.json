@@ -32,6 +32,7 @@
     "aws-sdk": "^2.466.0",
     "@prisma/client": "^6.10.1",
     "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
+    "@topcoder/resource-api-v6": "topcoder-platform/resource-api-v6.git#develop",
     "@react-pdf/renderer": "^3.4.4",
     "axios": "^0.27.2",
     "bluebird": "^3.5.1",

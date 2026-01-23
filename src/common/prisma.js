@@ -4,8 +4,11 @@ const {
   Prisma
 } = require('../../prisma/generated/client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
+const { PrismaClient: ResourcesPrismaClient } = require('@topcoder/resource-api-v6/packages/resources-prisma-client')
 const config = require('config')
 const skillsDbUrl = process.env.SKILLS_DB_URL
+const resourcesDbUrl = process.env.RESOURCES_DB_URL
+
 
 const clientOptions = {
   transactionOptions: {
@@ -21,6 +24,7 @@ const clientOptions = {
 
 let membersClient
 let skillsClient
+let resourcesClient
 
 const getMembersClient = () => {
   if (!membersClient) {
@@ -42,9 +46,23 @@ const getSkillsClient = () => {
   return skillsClient
 }
 
+const getResourcesClient = () => {
+  if (!resourcesClient) {
+    if (!resourcesDbUrl) {
+      throw new Error('RESOURCES_DB_URL must be set for resources Prisma client')
+    }
+    resourcesClient = new ResourcesPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: resourcesDbUrl } }
+    })
+  }
+  return resourcesClient
+}
+
 module.exports = {
   Prisma,
   getClient: getMembersClient,
   getMembersClient,
-  getSkillsClient
+  getSkillsClient,
+  getResourcesClient
 }
