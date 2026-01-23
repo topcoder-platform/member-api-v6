@@ -5,6 +5,7 @@ const {
 } = require('../../prisma/generated/client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
 const config = require('config')
+const skillsDbUrl = process.env.SKILLS_DB_URL
 
 const clientOptions = {
   transactionOptions: {
@@ -30,7 +31,13 @@ const getMembersClient = () => {
 
 const getSkillsClient = () => {
   if (!skillsClient) {
-    skillsClient = new SkillsPrismaClient(clientOptions)
+    if (!skillsDbUrl) {
+      throw new Error('SKILLS_DB_URL must be set for skills Prisma client')
+    }
+    skillsClient = new SkillsPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: skillsDbUrl } }
+    })
   }
   return skillsClient
 }
