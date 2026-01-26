@@ -290,6 +290,33 @@
 					},
 					"response": []
 				}
+			},
+			{
+				"name": "Get Member Skill",
+				"request": {
+					"auth": {
+						"type": "noauth"
+					},
+					"method": "GET",
+					"header": [],
+					"url": {
+						"raw": "http://localhost:3000/v6/members/phead/skills/123",
+						"protocol": "http",
+						"host": [
+							"localhost"
+						],
+						"port": "3000",
+						"path": [
+							"v6",
+							"members",
+							"phead",
+							"skills",
+							"123"
+						]
+					}
+				},
+				"response": []
+				}
 			]
 		},
 		{

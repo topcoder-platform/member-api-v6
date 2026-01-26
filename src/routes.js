@@ -226,7 +226,7 @@ module.exports = {
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
     }
   },
-  '/members/:handle/skill/:skillid': {
+  '/members/:handle/skills/:skillid': {
     get: {
       controller: 'MemberController',
       method: 'getMemberSkill',
