@@ -21,6 +21,7 @@ const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
+const { Prisma } = prismaManager
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
@@ -31,7 +32,7 @@ const profilePDFService = require('./ProfilePDFService')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -85,6 +86,10 @@ function omitMemberAttributes (currentUser, mb) {
   // remove identifiable info fields if user is not admin, not M2M and not member himself
   const canManageMember = helper.canManageMember(currentUser, mb)
   const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && mb.handleLower &&
+    currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
@@ -96,6 +101,10 @@ function omitMemberAttributes (currentUser, mb) {
     if (res.phones) {
       delete res.phones
     }
+  }
+  // Remove identityVerified if user doesn't have permission
+  if (!canSeeIdentityVerified && res.identityVerified !== undefined) {
+    delete res.identityVerified
   }
 
   return res
@@ -172,6 +181,8 @@ async function getMember (currentUser, handle, query) {
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
   
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+  // Identity verified field has same access control as phones
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
   const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
 
   // Conditionally add phones to query if user has permission
@@ -197,11 +208,34 @@ async function getMember (currentUser, handle, query) {
   // convert members data structure to response
   prismaHelper.convertMember(member)
 
+  // Query identity verification status from finance schema if user has permission
+  if (canSeeIdentityVerified) {
+    try {
+      const financePrisma = prismaManager.getFinanceClient()
+      const userIdString = String(helper.bigIntToNumber(member.userId))
+      const verification = await financePrisma.user_identity_verification_associations.findFirst({
+        where: {
+          user_id: userIdString,
+          verification_status: 'ACTIVE'
+        }
+      })
+      member.identityVerified = verification !== null
+    } catch (err) {
+      // If finance schema query fails, log error but don't fail the request
+      logger.error(`Failed to query identity verification for user ${member.userId}: ${err.message}`)
+      member.identityVerified = false
+    }
+  }
+
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
   // Add phones to selectFields if user has permission
   if (canSeePhones && !_.includes(selectFields, 'phones')) {
     selectFields.push('phones')
+  }
+  // Add identityVerified to selectFields if user has permission
+  if (canSeeIdentityVerified && !_.includes(selectFields, 'identityVerified')) {
+    selectFields.push('identityVerified')
   }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
