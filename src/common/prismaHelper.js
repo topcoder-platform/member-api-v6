@@ -96,7 +96,7 @@ function buildMemberSkills (skillList) {
 
   // Standardized: one UserSkill per (userId, skillId, level). Group by skill and aggregate levels
   const bySkill = _.groupBy(skillList, (i) => i.skill.id)
-  return _.map(bySkill, (items) => {
+  const skills = _.map(bySkill, (items) => {
     const first = items[0]
     const ret = _.pick(first.skill, ['id', 'name'])
     // keep userSkill's created & updated fields
@@ -106,6 +106,16 @@ function buildMemberSkills (skillList) {
     if (first.userSkillDisplayMode) {
       ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])
     }
+
+    if (first.skill && first.skill.skillEvents) {
+      const events = _.orderBy(first.skill.skillEvents || [], 'createdAt', 'desc')
+      const grouped = _.groupBy(events, 'sourceType.name')
+      ret.lastUsedDate = events[0].createdAt
+      ret.activity = _.mapValues(grouped, (v, k) => ({
+        sources: _.uniqBy(v, 'sourceId').map(s => s.sourceId)
+      }))
+    }
+
     const levels = _.uniqBy(
       _.map(items, (i) => _.pick(i.userSkillLevel, ['id', 'name', 'description'])),
       'id'
@@ -115,8 +125,9 @@ function buildMemberSkills (skillList) {
     }
     return ret
   })
-}
 
+  return skills
+}
 /**
  * Build prisma filter with member search query
  * @param {Object} query request query parameters

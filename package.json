@@ -29,10 +29,12 @@
     "standard": "^12.0.1"
   },
   "dependencies": {
-    "aws-sdk": "^2.466.0",
     "@prisma/client": "^6.10.1",
-    "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
     "@react-pdf/renderer": "^3.4.4",
+    "@topcoder/challenge-api-v6": "github:topcoder-platform/challenge-api-v6#prisma-client",
+    "@topcoder/learning-paths-api": "github:topcoder-platform/learning-paths-api#prisma-client",
+    "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
+    "aws-sdk": "^2.466.0",
     "axios": "^0.27.2",
     "bluebird": "^3.5.1",
     "body-parser": "^1.15.1",
@@ -64,6 +66,9 @@
   "standard": {
     "env": [
       "mocha"
+    ],
+    "ignore": [
+      "/prisma/"
     ]
   }
 }

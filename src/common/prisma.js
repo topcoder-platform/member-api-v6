@@ -4,8 +4,12 @@ const {
   Prisma
 } = require('../../prisma/generated/client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
+const { PrismaClient: ChallengesPrismaClient } = require('@topcoder/challenge-api-v6/packages/challenge-prisma-client')
+const { PrismaClient: AcademyPrismaClient } = require('@topcoder/learning-paths-api/packages/academy-prisma-client')
 const config = require('config')
 const skillsDbUrl = process.env.SKILLS_DB_URL
+const challengesDbUrl = process.env.CHALLENGES_DB_URL
+const academyDbUrl = process.env.ACADEMY_DB_URL
 
 const clientOptions = {
   transactionOptions: {
@@ -20,8 +24,6 @@ const clientOptions = {
 }
 
 let membersClient
-let skillsClient
-
 const getMembersClient = () => {
   if (!membersClient) {
     membersClient = new MembersPrismaClient(clientOptions)
@@ -29,6 +31,7 @@ const getMembersClient = () => {
   return membersClient
 }
 
+let skillsClient
 const getSkillsClient = () => {
   if (!skillsClient) {
     if (!skillsDbUrl) {
@@ -42,9 +45,39 @@ const getSkillsClient = () => {
   return skillsClient
 }
 
+let challengesClient
+const getChallengesClient = () => {
+  if (!challengesClient) {
+    if (!challengesDbUrl) {
+      throw new Error('CHALLENGES_DB_URL must be set for skills Prisma client')
+    }
+    challengesClient = new ChallengesPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: challengesDbUrl } }
+    })
+  }
+  return challengesClient
+}
+
+let academyClient
+const getAcademyClient = () => {
+  if (!academyClient) {
+    if (!academyDbUrl) {
+      throw new Error('ACADEMY_DB_URL must be set for skills Prisma client')
+    }
+    academyClient = new AcademyPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: academyDbUrl } }
+    })
+  }
+  return academyClient
+}
+
 module.exports = {
   Prisma,
   getClient: getMembersClient,
   getMembersClient,
-  getSkillsClient
+  getSkillsClient,
+  getChallengesClient,
+  getAcademyClient
 }
