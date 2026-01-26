@@ -26,7 +26,6 @@ const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 const profilePDFService = require('./ProfilePDFService')
-const memberTraitService = require('./MemberTraitService')
 const request = require('request')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
