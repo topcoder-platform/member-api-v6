@@ -963,19 +963,15 @@ confirmProfileData.schema = {
  * @returns {Promise<String>} formatted achievements string
  */
 async function fetchGamificationAchievements (userId) {
-  logger.debug(`[fetchGamificationAchievements] ENTER for user ${userId}`)
   try {
     const gamificationApiUrl = config.GAMIFICATION_API_URL || process.env.GAMIFICATION_API_URL || 'https://api.topcoder-dev.com/v5/gamification'
-    logger.debug(`[fetchGamificationAchievements] Base URL: ${gamificationApiUrl}`)
     if (!gamificationApiUrl) {
       logger.warn(`GAMIFICATION_API_URL is not configured for user ${userId}`)
       return ''
     }
-    logger.debug(`Getting M2M token for gamification API for user ${userId}...`)
     let token
     try {
       token = await helper.getM2MToken()
-      logger.debug(`M2M token retrieved for gamification API for user ${userId}, token exists: ${!!token}`)
     } catch (tokenError) {
       logger.warn(`Cannot get M2M token for gamification API for user ${userId}: ${tokenError.message}. Achievements will be empty.`)
       return ''
@@ -986,9 +982,7 @@ async function fetchGamificationAchievements (userId) {
       return ''
     }
     
-    logger.debug(`Constructing gamification URL for user ${userId}...`)
     const gamificationUrl = `${gamificationApiUrl}/users/${userId}/rewards`
-    logger.debug(`Full gamification URL: ${gamificationUrl}`)
     
     if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
       logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
@@ -1002,12 +996,8 @@ async function fetchGamificationAchievements (userId) {
       return ''
     }
     
-    logger.info(`Making request to gamification API: ${finalGamificationUrl}`)
-    logger.debug(`About to call request() for gamification with url="${finalGamificationUrl}", type=${typeof finalGamificationUrl}, length=${finalGamificationUrl ? finalGamificationUrl.length : 'N/A'}`)
-    
     return new Promise((resolve, reject) => {
       try {
-        logger.debug(`Inside Promise for gamification, about to create request options with url="${finalGamificationUrl}"`)
         request({
           url: finalGamificationUrl,
         headers: {
@@ -1046,12 +1036,12 @@ async function fetchGamificationAchievements (userId) {
         }
       })
       } catch (requestError) {
-        logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}, stack=${requestError.stack}, url=${finalGamificationUrl}, urlType=${typeof finalGamificationUrl}`)
+        logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}`)
         resolve('')
       }
     })
   } catch (error) {
-    logger.warn(`Error fetching gamification achievements for user ${userId}: ${error.message}, stack=${error.stack}`)
+    logger.warn(`Error fetching gamification achievements for user ${userId}: ${error.message}`)
     return ''
   }
 }
@@ -1062,19 +1052,15 @@ async function fetchGamificationAchievements (userId) {
  * @returns {Promise<Object>} object with certifications and courses arrays
  */
 async function fetchCertificationsAndCourses (userId) {
-  logger.debug(`[fetchCertificationsAndCourses] ENTER for user ${userId}`)
   try {
     const learningPathsApiUrl = config.LEARNING_PATHS_API_URL || process.env.LEARNING_PATHS_API_URL || 'https://api.topcoder-dev.com/v5/learning-paths'
-    logger.debug(`[fetchCertificationsAndCourses] LEARNING_PATHS_API_URL for user ${userId}: ${learningPathsApiUrl}`)
     if (!learningPathsApiUrl) {
       logger.warn(`LEARNING_PATHS_API_URL is not configured for user ${userId}`)
       return { certifications: [], courses: [] }
     }
-    logger.debug(`Getting M2M token for user ${userId}...`)
     let token
     try {
       token = await helper.getM2MToken()
-      logger.debug(`M2M token retrieved for user ${userId}, token exists: ${!!token}`)
     } catch (tokenError) {
       logger.warn(`Cannot get M2M token for user ${userId}: ${tokenError.message}. Certifications and courses will be empty.`)
       return { certifications: [], courses: [] }
@@ -1085,9 +1071,7 @@ async function fetchCertificationsAndCourses (userId) {
       return { certifications: [], courses: [] }
     }
     
-    logger.debug(`Constructing learning-paths URL for user ${userId}...`)
     const learningPathsUrl = `${learningPathsApiUrl}/completed-certifications/${userId}`
-    logger.debug(`Full learning-paths URL: ${learningPathsUrl}`)
     
     if (!learningPathsUrl || typeof learningPathsUrl !== 'string' || !userId) {
       logger.error(`Invalid learning-paths URL for user ${userId}: learningPathsUrl=${learningPathsUrl}, userId=${userId}`)
@@ -1101,12 +1085,8 @@ async function fetchCertificationsAndCourses (userId) {
       return { certifications: [], courses: [] }
     }
     
-    logger.info(`Making request to learning-paths API: ${finalUrl}`)
-    logger.debug(`About to call request() with url="${finalUrl}", type=${typeof finalUrl}, length=${finalUrl ? finalUrl.length : 'N/A'}`)
-    
     return new Promise((resolve, reject) => {
       try {
-        logger.debug(`Inside Promise, about to create request options with url="${finalUrl}"`)
         request({
           url: finalUrl,
         headers: {
@@ -1119,49 +1099,25 @@ async function fetchCertificationsAndCourses (userId) {
           return
         }
         if (response.statusCode !== 200) {
-          logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}, body: ${body}`)
+          logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}`)
           resolve({ certifications: [], courses: [] })
           return
         }
-        logger.debug(`Learning-paths API raw response for user ${userId}: ${body}`)
         try {
           const data = JSON.parse(body)
-          console.log(`[DEBUG] Learning-paths API response structure for user ${userId}:`, {
-            hasEnrollments: !!data.enrollments,
-            enrollmentsLength: (data.enrollments || []).length,
-            hasCourses: !!data.courses,
-            coursesLength: (data.courses || []).length,
-            dataKeys: Object.keys(data),
-            firstEnrollment: data.enrollments?.[0],
-            firstCourse: data.courses?.[0]
-          })
-          logger.info(`Learning-paths API response for user ${userId}: enrollments=${(data.enrollments || []).length}, courses=${(data.courses || []).length}`)
           
           // Process certifications
-          const rawEnrollments = data.enrollments || []
-          logger.debug(`Raw enrollments count: ${rawEnrollments.length}`)
-          const certifications = rawEnrollments
-            .filter(e => {
-              const hasStatus = e.status === 'completed'
-              const hasCert = !!e.topcoderCertification
-              if (!hasStatus || !hasCert) {
-                logger.debug(`Enrollment filtered out - status: ${e.status}, hasTopcoderCert: ${hasCert}`)
-              }
-              return hasStatus && hasCert
-            })
-            .map(e => `${e.topcoderCertification.name} - Topcoder Academy`)
+          const certifications = (data.enrollments || [])
+            .filter(e => e.status === 'completed' && e.topcoderCertification)
+            .map(e => `${e.topcoderCertification.title} - Topcoder Academy`)
           
-          // Process courses - courses are already filtered by status='completed' in the service
-          const rawCourses = data.courses || []
-          logger.debug(`Raw courses count: ${rawCourses.length}`)
-          const courses = rawCourses
+          // Process courses
+          const courses = (data.courses || [])
             .map(c => {
               const title = c.certificationTitle || c.certification || 'Course'
-              logger.debug(`Course mapping: certificationTitle=${c.certificationTitle}, certification=${c.certification}, result=${title}`)
               return `${title} - Topcoder Academy`
             })
           
-          logger.info(`Processed certifications: ${certifications.length}, courses: ${courses.length}`)
           resolve({ certifications, courses })
         } catch (parseError) {
           logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
@@ -1169,12 +1125,12 @@ async function fetchCertificationsAndCourses (userId) {
         }
       })
       } catch (requestError) {
-        logger.error(`Error creating request for user ${userId}: ${requestError.message}, stack=${requestError.stack}, url=${finalUrl}, urlType=${typeof finalUrl}`)
+        logger.error(`Error creating request for user ${userId}: ${requestError.message}`)
         resolve({ certifications: [], courses: [] })
       }
     })
   } catch (error) {
-    logger.warn(`Error fetching certifications for user ${userId}: ${error.message}, stack=${error.stack}`)
+    logger.warn(`Error fetching certifications for user ${userId}: ${error.message}`)
     return { certifications: [], courses: [] }
   }
 }

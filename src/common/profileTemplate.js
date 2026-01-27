@@ -318,7 +318,7 @@ function buildProfileTemplate (pdfData) {
             }
             return member.country || ''
           })(),
-          `Timezone: ${member.timezone}`,
+          member.timezone ? `Timezone: ${member.timezone}` : null,
           member.email
         ].filter(Boolean).join(' | ')
       ) : null,
@@ -407,6 +407,58 @@ function buildProfileTemplate (pdfData) {
     )
   }
   
+  // Experience Section
+  if (workExperience && workExperience.length > 0) {
+    const experienceContent = [createSectionHeader('EXPERIENCE')]
+    
+    workExperience.forEach((work, index) => {
+      const dateRange = [work.startDate, work.endDate].filter(Boolean).join(' - ')
+      experienceContent.push(
+        React.createElement(
+          View,
+          { key: `work-${index}`, style: { marginBottom: 15 } },
+          React.createElement(
+            View,
+            { style: styles.itemRow },
+            React.createElement(
+              Text,
+              { style: styles.itemTitle },
+              work.position
+            ),
+            dateRange ? React.createElement(
+              Text,
+              { style: styles.itemDate },
+              dateRange
+            ) : null
+          ),
+          React.createElement(
+            Text,
+            { style: styles.itemSubtitle },
+            work.company
+          ),
+          work.description ? React.createElement(
+            Html,
+            { style: styles.itemDescription },
+            work.description
+          ) : null,
+          work.skills && work.skills.length > 0 ? React.createElement(
+            Text,
+            { style: styles.itemSkills },
+            `Skills: ${work.skills.join(', ')}`
+          ) : null
+        )
+      )
+    })
+    
+    children.push(
+      React.createElement(
+        View,
+        { key: 'experience-section', style: styles.section },
+        ...experienceContent
+      )
+    )
+  }
+  
   // Topcoder Activity Section
   if (topcoderActivity.specialRole || topcoderActivity.achievements) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
@@ -486,41 +538,27 @@ function buildProfileTemplate (pdfData) {
     const certContent = [createSectionHeader('CERTIFICATIONS & COURSES')]
     
     if (certifications && certifications.length > 0) {
+      const certificationsText = certifications.join(', ')
       certContent.push(
         React.createElement(
           Text,
-          { key: 'certifications-label', style: styles.certificationItem },
-          React.createElement(Text, { style: styles.certificationLabel }, 'Certifications: ')
+          { key: 'certifications', style: styles.certificationItem },
+          React.createElement(Text, { style: styles.certificationLabel }, 'Certifications: '),
+          certificationsText
         )
       )
-      certifications.forEach((cert, index) => {
-        certContent.push(
-          React.createElement(
-            Text,
-            { key: `cert-${index}`, style: styles.certificationItem },
-            cert
-          )
-        )
-      })
     }
     
     if (courses && courses.length > 0) {
+      const coursesText = courses.join(', ')
       certContent.push(
         React.createElement(
           Text,
-          { key: 'courses-label', style: [styles.certificationItem, { marginTop: 5 }] },
-          React.createElement(Text, { style: styles.certificationLabel }, 'Courses: ')
+          { key: 'courses', style: [styles.certificationItem, { marginTop: 5 }] },
+          React.createElement(Text, { style: styles.certificationLabel }, 'Courses: '),
+          coursesText
         )
       )
-      courses.forEach((course, index) => {
-        certContent.push(
-          React.createElement(
-            Text,
-            { key: `course-${index}`, style: styles.certificationItem },
-            course
-          )
-        )
-      })
     }
     
     children.push(
@@ -528,58 +566,6 @@ function buildProfileTemplate (pdfData) {
         View,
         { key: 'certifications-section', style: styles.section },
         ...certContent
-      )
-    )
-  }
-  
-  // Experience Section
-  if (workExperience && workExperience.length > 0) {
-    const experienceContent = [createSectionHeader('EXPERIENCE')]
-    
-    workExperience.forEach((work, index) => {
-      const dateRange = [work.startDate, work.endDate].filter(Boolean).join(' - ')
-      experienceContent.push(
-        React.createElement(
-          View,
-          { key: `work-${index}`, style: { marginBottom: 15 } },
-          React.createElement(
-            View,
-            { style: styles.itemRow },
-            React.createElement(
-              Text,
-              { style: styles.itemTitle },
-              work.position
-            ),
-            dateRange ? React.createElement(
-              Text,
-              { style: styles.itemDate },
-              dateRange
-            ) : null
-          ),
-          React.createElement(
-            Text,
-            { style: styles.itemSubtitle },
-            work.company
-          ),
-          work.description ? React.createElement(
-            Html,
-            { style: styles.itemDescription },
-            work.description
-          ) : null,
-          work.skills && work.skills.length > 0 ? React.createElement(
-            Text,
-            { style: styles.itemSkills },
-            `Skills: ${work.skills.join(', ')}`
-          ) : null
-        )
-      )
-    })
-    
-    children.push(
-      React.createElement(
-        View,
-        { key: 'experience-section', style: styles.section },
-        ...experienceContent
       )
     )
   }
