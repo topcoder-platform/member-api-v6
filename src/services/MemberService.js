@@ -89,6 +89,7 @@ function omitMemberAttributes (currentUser, mb) {
   const isSelf = currentUser && currentUser.handle && mb.handleLower &&
     currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
   const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
