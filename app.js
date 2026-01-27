@@ -13,12 +13,14 @@ const HttpStatus = require('http-status-codes')
 const logger = require('./src/common/logger')
 const interceptor = require('express-interceptor')
 const fileUpload = require('express-fileupload')
+const qs = require('qs')
 const path = require('path')
 const swaggerUi = require('swagger-ui-express')
 const YAML = require('yamljs')
 
 // setup express app
 const app = express()
+app.set('query parser', (str) => qs.parse(str, { allowPrototypes: true, arrayLimit: 1000 }))
 
 app.use(cors({
   exposedHeaders: [
