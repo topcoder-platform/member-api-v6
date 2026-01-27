@@ -31,7 +31,7 @@ const profilePDFService = require('./ProfilePDFService')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified','recentActivity']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -104,6 +104,10 @@ function omitMemberAttributes (currentUser, mb) {
   // Remove identityVerified if user doesn't have permission
   if (!canSeeIdentityVerified && res.identityVerified !== undefined) {
     delete res.identityVerified
+  }
+
+  if (!canSeeRecentActivity && res.recentActivity !== undefined) {
+    delete res.recentActivity
   }
 
   return res
