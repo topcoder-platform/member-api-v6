@@ -5,8 +5,10 @@ const {
 } = require('../../prisma/generated/client')
 const { PrismaClient: FinancePrismaClient } = require('@topcoder/tc-finance-api/packages/finance-prisma-client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
+const { PrismaClient: ResourcesPrismaClient } = require('@topcoder/resource-api-v6/packages/resources-prisma-client')
 const config = require('config')
 const skillsDbUrl = process.env.SKILLS_DB_URL
+const resourcesDbUrl = config.RESOURCES_DB_URL
 
 const clientOptions = {
   transactionOptions: {
@@ -22,6 +24,7 @@ const clientOptions = {
 
 let membersClient
 let skillsClient
+let resourcesClient
 let financeClient
 
 const getMembersClient = () => {
@@ -43,6 +46,20 @@ const getSkillsClient = () => {
   }
   return skillsClient
 }
+
+const getResourcesClient = () => {
+  if (!resourcesClient) {
+    if (!resourcesDbUrl) {
+      throw new Error('RESOURCES_DB_URL must be set for resources Prisma client')
+    }
+    resourcesClient = new ResourcesPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: resourcesDbUrl } }
+    })
+  }
+  return resourcesClient
+}
+
 
 /**
  * Get finance Prisma client for querying finance schema
@@ -68,5 +85,6 @@ module.exports = {
   getClient: getMembersClient,
   getMembersClient,
   getSkillsClient,
+  getResourcesClient,
   getFinanceClient
 }

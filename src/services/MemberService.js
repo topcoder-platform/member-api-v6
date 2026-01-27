@@ -25,12 +25,13 @@ const { Prisma } = prismaManager
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
+const resourcesPrisma = prismaManager.getResourcesClient()
 const profilePDFService = require('./ProfilePDFService')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified','recentActivity']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -88,6 +89,7 @@ function omitMemberAttributes (currentUser, mb) {
   const isSelf = currentUser && currentUser.handle && mb.handleLower &&
     currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
   const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
@@ -105,6 +107,10 @@ function omitMemberAttributes (currentUser, mb) {
     delete res.identityVerified
   }
 
+  if (!canSeeRecentActivity && res.recentActivity !== undefined) {
+    delete res.recentActivity
+  }
+
   return res
 }
 
@@ -120,6 +126,33 @@ async function getMemberSkills (userId) {
     include: prismaHelper.skillsIncludeParams
   })
   return prismaHelper.buildMemberSkills(skillList)
+}
+
+/**
+ * Compute member recent activity with user id
+ * @param {BigInt} userId prisma BigInt userId
+ * @returns {Boolean} true if member has recent activity in last 3 months
+ */
+async function getMemberRecentActivity (userId) {
+  try {
+    const threeMonthsAgo = new Date()
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+    const recent = await resourcesPrisma.resource.findFirst({
+      where: {
+        memberId: String(userId),
+        resourceRole: {
+          name: { in: ['Submitter', 'Copilot', 'Reviewer'] }
+        },
+        createdAt: { gte: threeMonthsAgo }
+      }
+    })
+
+    return !!recent
+  } catch (err) {
+    console.error(`Failed to query recent activity for userId: ${userId}`, err)
+    return false
+  }
 }
 
 /**
@@ -179,11 +212,15 @@ async function getMember (currentUser, handle, query) {
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
   
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
   // Identity verified field has same access control as phones
   const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
   const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
 
-  // Conditionally add phones to query if user has permission
+  const threeMonthsAgo = new Date() 
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+  // Conditionally add phones and recent activity to query if user has permission
   const modifiedQuery = { ...query }
   if (canSeePhones) {
     // If fields are specified, check if phones is already included
@@ -225,11 +262,20 @@ async function getMember (currentUser, handle, query) {
     }
   }
 
+  // get member recent activity
+  if(canSeeRecentActivity) {
+    member.recentActivity = await getMemberRecentActivity(member.userId)
+  }
+
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
   // Add phones to selectFields if user has permission
   if (canSeePhones && !_.includes(selectFields, 'phones')) {
     selectFields.push('phones')
+  }
+  // add recent activity to selectFields if permitted user
+  if (_.includes(selectFields, 'recentActivity') && canSeeRecentActivity) {
+    selectFields.push('recentActivity')
   }
   // Add identityVerified to selectFields if user has permission
   if (canSeeIdentityVerified && !_.includes(selectFields, 'identityVerified')) {
@@ -238,6 +284,7 @@ async function getMember (currentUser, handle, query) {
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
+
 
 getMember.schema = {
   currentUser: Joi.any(),
