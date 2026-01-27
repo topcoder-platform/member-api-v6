@@ -144,7 +144,7 @@ async function getMemberRecentActivity (userId) {
         resourceRole: {
           name: { in: ['Submitter', 'Copilot', 'Reviewer'] }
         },
-        created: { gte: threeMonthsAgo }
+        createdAt: { gte: threeMonthsAgo }
       }
     })
 
