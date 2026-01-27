@@ -205,7 +205,7 @@ async function getMember (currentUser, handle, query) {
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
   
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
-  const canSeeRecentActivity = hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
   // Identity verified field has same access control as phones
   const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
   const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
