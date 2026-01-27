@@ -1133,7 +1133,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
 getMemberSkill.schema = {
   currentUser: Joi.any(),
   handle: Joi.string().required(),
-  skillId: Joi.string().required()
+  skillId: Joi.string().uuid().required()
 }
 
 module.exports = {
