@@ -5,12 +5,15 @@ const {
 } = require('../../prisma/generated/client')
 const { PrismaClient: FinancePrismaClient } = require('@topcoder/tc-finance-api/packages/finance-prisma-client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
+const { PrismaClient: ResourcesPrismaClient } = require('@topcoder/resource-api-v6/packages/resources-prisma-client')
 const { PrismaClient: ChallengesPrismaClient } = require('@topcoder/challenge-api-v6/packages/challenge-prisma-client')
 const { PrismaClient: AcademyPrismaClient } = require('@topcoder/learning-paths-api/packages/academy-prisma-client')
 const config = require('config')
+
 const skillsDbUrl = process.env.SKILLS_DB_URL
 const challengesDbUrl = process.env.CHALLENGES_DB_URL
 const academyDbUrl = process.env.ACADEMY_DB_URL
+const resourcesDbUrl = config.RESOURCES_DB_URL
 
 const clientOptions = {
   transactionOptions: {
@@ -74,6 +77,21 @@ const getAcademyClient = () => {
   return academyClient
 }
 
+let resourcesClient
+const getResourcesClient = () => {
+  if (!resourcesClient) {
+    if (!resourcesDbUrl) {
+      throw new Error('RESOURCES_DB_URL must be set for resources Prisma client')
+    }
+    resourcesClient = new ResourcesPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: resourcesDbUrl } }
+    })
+  }
+  return resourcesClient
+}
+
+
 let financeClient
 /**
  * Get finance Prisma client for querying finance schema
@@ -101,5 +119,6 @@ module.exports = {
   getSkillsClient,
   getChallengesClient,
   getAcademyClient,
+  getResourcesClient,
   getFinanceClient
 }

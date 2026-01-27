@@ -39,6 +39,9 @@ jspm_packages
 # Optional npm cache directory
 .npm
 
+# Prisma generated data
+prisma/generated/
+
 
 .DS_Store
 .idea
