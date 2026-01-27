@@ -231,7 +231,6 @@ module.exports = {
       controller: 'MemberController',
       method: 'getMemberSkill',
       auth: 'jwt',
-      allowNoToken: true,
       scopes: [MEMBERS.READ, MEMBERS.ALL]
     }
   }

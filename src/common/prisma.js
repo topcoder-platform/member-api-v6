@@ -50,7 +50,7 @@ let challengesClient
 const getChallengesClient = () => {
   if (!challengesClient) {
     if (!challengesDbUrl) {
-      throw new Error('CHALLENGES_DB_URL must be set for skills Prisma client')
+      throw new Error('CHALLENGES_DB_URL must be set for challenges Prisma client')
     }
     challengesClient = new ChallengesPrismaClient({
       ...clientOptions,
@@ -64,7 +64,7 @@ let academyClient
 const getAcademyClient = () => {
   if (!academyClient) {
     if (!academyDbUrl) {
-      throw new Error('ACADEMY_DB_URL must be set for skills Prisma client')
+      throw new Error('ACADEMY_DB_URL must be set for academy Prisma client')
     }
     academyClient = new AcademyPrismaClient({
       ...clientOptions,
