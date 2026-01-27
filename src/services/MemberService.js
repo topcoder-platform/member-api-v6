@@ -982,7 +982,7 @@ async function fetchGamificationAchievements (userId) {
       return ''
     }
     
-    const gamificationUrl = `${gamificationApiUrl}/users/${userId}/rewards`
+    const gamificationUrl = `${gamificationApiUrl}/users/${userId}/badges`
     
     if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
       logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
@@ -1015,17 +1015,20 @@ async function fetchGamificationAchievements (userId) {
           return
         }
         try {
-          const rewards = JSON.parse(body)
+          const data = JSON.parse(body)
           // Format achievements: count multiples and join with " | "
+          // Response structure: { rows: [...], count: ... }
           const achievementMap = {}
-          if (Array.isArray(rewards)) {
-            rewards.forEach(reward => {
-              if (reward.awarded && reward.awarded.name && !reward.isExpired) {
-                const name = reward.awarded.name
-                achievementMap[name] = (achievementMap[name] || 0) + 1
-              }
-            })
-          }
+          const badges = data.rows || []
+          
+          badges.forEach(badge => {
+            if (badge.org_badge && badge.org_badge.badge_name && 
+                badge.org_badge.active && badge.org_badge.badge_status === 'Active') {
+              const name = badge.org_badge.badge_name
+              achievementMap[name] = (achievementMap[name] || 0) + 1
+            }
+          })
+          
           const achievements = Object.entries(achievementMap)
             .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
             .join(' | ')
