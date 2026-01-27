@@ -733,6 +733,7 @@ enum WorkIndustryType {
   TechAndTechnologyService
   Telecoms
   TravelAndHospitality
+  Other
   @@schema("members")
 }
 
@@ -742,6 +743,7 @@ model memberTraitWork {
   memberTraitId BigInt
 
   industry  WorkIndustryType?
+  otherIndustry String?
   companyName   String
   position      String
   startDate     DateTime?
