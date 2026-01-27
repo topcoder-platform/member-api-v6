@@ -2,6 +2,7 @@
  * PDF Template for Member Profile
  */
 const React = require('react')
+const path = require('path')
 const {
   Document,
   Page,
@@ -10,13 +11,14 @@ const {
   StyleSheet,
   Image
 } = require('@react-pdf/renderer')
+const { Html } = require('react-pdf-html')
 
 // Define styles
 const styles = StyleSheet.create({
   page: {
     padding: 40,
     fontSize: 11,
-    fontFamily: 'Helvetica',
+    fontFamily: 'Arial',
     backgroundColor: '#FFFFFF',
     color: '#000000'
   },
@@ -28,11 +30,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 15
+    marginBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#AAAAAA',
+    paddingBottom: 10
   },
   logo: {
     width: 120,
-    height: 30
+    height: 30,
+    objectFit: 'contain'
   },
   generatedOn: {
     fontSize: 9,
@@ -41,10 +47,11 @@ const styles = StyleSheet.create({
   },
   memberName: {
     fontSize: 28,
-    fontWeight: 'bold',
+    fontWeight: 700,
     textAlign: 'center',
     marginBottom: 5,
-    color: '#000000'
+    color: '#000000',
+    textTransform: 'uppercase'
   },
   memberTitle: {
     fontSize: 14,
@@ -72,27 +79,27 @@ const styles = StyleSheet.create({
   statusBarText: {
     color: '#FFFFFF',
     fontSize: 10,
-    fontWeight: 'bold',
-    textAlign: 'left'
+    fontWeight: 700,
+    textAlign: 'center'
   },
   // Section styles
   section: {
-    marginBottom: 20
+    marginBottom: 10
   },
   sectionHeader: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#00BFA5',
+    color: '#227681',
     marginBottom: 5
   },
   sectionUnderline: {
     height: 1,
-    backgroundColor: '#E0E0E0',
+    backgroundColor: '#AAAAAA',
     marginBottom: 10
   },
   // Biography
   biographyText: {
-    fontSize: 10,
+    fontSize: 11,
     lineHeight: 1.5,
     marginBottom: 5,
     color: '#000000'
@@ -189,7 +196,7 @@ const styles = StyleSheet.create({
 function createSectionHeader (title) {
   return React.createElement(
     View,
-    { style: styles.section },
+    { style: { marginBottom: 0 } },
     React.createElement(
       Text,
       { style: styles.sectionHeader },
@@ -253,6 +260,7 @@ function createSkillsSubsection (title, verified, notVerified) {
  */
 function buildProfileTemplate (pdfData) {
   const { member, workExperience, education, languages, basicInfo, skills, topcoderActivity, certifications, courses } = pdfData
+  console.log('pdfData', pdfData)
   
   const children = []
   
@@ -264,16 +272,26 @@ function buildProfileTemplate (pdfData) {
       React.createElement(
         View,
         { style: styles.headerTop },
-        // Logo placeholder - will need actual logo file
         React.createElement(
-          Text,
-          { style: { fontSize: 12, fontWeight: 'bold' } },
-          'topcoder'
+          Image,
+          {
+            src: path.join(__dirname, '../images/topcoder-logo.png'),
+            style: styles.logo
+          }
         ),
         React.createElement(
-          Text,
-          { style: styles.generatedOn },
-          `Generated on ${member.generatedOn}`
+          View,
+          { style: { alignItems: 'flex-end' } },
+          React.createElement(
+            Text,
+            { style: styles.generatedOn },
+            'Generated on'
+          ),
+          React.createElement(
+            Text,
+            { style: styles.generatedOn },
+            member.generatedOn
+          )
         )
       ),
       React.createElement(
@@ -290,7 +308,17 @@ function buildProfileTemplate (pdfData) {
         Text,
         { style: styles.personalInfo },
         [
-          basicInfo?.currentLocation || (member.addresses && member.addresses.length > 0 ? `${member.addresses[0].city || ''}, ${member.addresses[0].stateCode || ''} ${member.addresses[0].country || ''}`.trim() : ''),
+          basicInfo?.currentLocation || (() => {
+            if (member.addresses && member.addresses.length > 0) {
+              const city = member.addresses[0].city || ''
+              const stateCode = member.addresses[0].stateCode || ''
+              const country = member.country || ''
+              const parts = [city, stateCode, country].filter(Boolean)
+              return parts.length > 0 ? parts.join(', ') : ''
+            }
+            return member.country || ''
+          })(),
+          `Timezone: ${member.timezone}`,
           member.email
         ].filter(Boolean).join(' | ')
       ) : null,
@@ -315,11 +343,15 @@ function buildProfileTemplate (pdfData) {
   const biography = member.description || basicInfo?.shortBio
   if (biography) {
     children.push(
-      createSectionHeader('BIOGRAPHY'),
       React.createElement(
-        Text,
-        { key: 'biography-text', style: styles.biographyText },
-        biography
+        View,
+        { key: 'biography-section', style: styles.section },
+        createSectionHeader('BIOGRAPHY'),
+        React.createElement(
+          Text,
+          { key: 'biography-text', style: styles.biographyText },
+          biography
+        )
       )
     )
   }
@@ -328,7 +360,9 @@ function buildProfileTemplate (pdfData) {
   const hasSkills = skills.principal.verified.length > 0 || skills.principal.notVerified.length > 0 ||
                     skills.additional.verified.length > 0 || skills.additional.notVerified.length > 0
   if (hasSkills) {
-    children.push(createSectionHeader('TECHNICAL SKILLS'))
+    const skillsContent = [
+      createSectionHeader('TECHNICAL SKILLS')
+    ]
     
     const principalSubsection = createSkillsSubsection(
       'Principal Skills:',
@@ -336,7 +370,7 @@ function buildProfileTemplate (pdfData) {
       skills.principal.notVerified
     )
     if (principalSubsection) {
-      children.push(principalSubsection)
+      skillsContent.push(principalSubsection)
     }
     
     const additionalSubsection = createSkillsSubsection(
@@ -345,28 +379,40 @@ function buildProfileTemplate (pdfData) {
       skills.additional.notVerified
     )
     if (additionalSubsection) {
-      children.push(additionalSubsection)
+      skillsContent.push(additionalSubsection)
     }
+    
+    children.push(
+      React.createElement(
+        View,
+        { key: 'skills-section', style: styles.section },
+        ...skillsContent
+      )
+    )
   }
   
   // Languages Section
   if (languages && languages.length > 0) {
     children.push(
-      createSectionHeader('LANGUAGES'),
       React.createElement(
-        Text,
-        { key: 'languages-text', style: styles.languagesText },
-        languages.join(', ')
+        View,
+        { key: 'languages-section', style: styles.section },
+        createSectionHeader('LANGUAGES'),
+        React.createElement(
+          Text,
+          { key: 'languages-text', style: styles.languagesText },
+          languages.join(', ')
+        )
       )
     )
   }
   
   // Topcoder Activity Section
   if (topcoderActivity.specialRole || topcoderActivity.achievements) {
-    children.push(createSectionHeader('TOPCODER ACTIVITY'))
+    const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
     
     if (topcoderActivity.specialRole) {
-      children.push(
+      activityContent.push(
         React.createElement(
           Text,
           { key: 'special-role', style: styles.activityItem },
@@ -376,7 +422,7 @@ function buildProfileTemplate (pdfData) {
     }
     
     if (topcoderActivity.achievements) {
-      children.push(
+      activityContent.push(
         React.createElement(
           Text,
           { key: 'achievements', style: styles.activityItem },
@@ -384,14 +430,22 @@ function buildProfileTemplate (pdfData) {
         )
       )
     }
+    
+    children.push(
+      React.createElement(
+        View,
+        { key: 'activity-section', style: styles.section },
+        ...activityContent
+      )
+    )
   }
   
   // Education Section
   if (education && education.length > 0) {
-    children.push(createSectionHeader('EDUCATION'))
+    const educationContent = [createSectionHeader('EDUCATION')]
     
     education.forEach((edu, index) => {
-      children.push(
+      educationContent.push(
         React.createElement(
           View,
           { key: `edu-${index}`, style: { marginBottom: 10 } },
@@ -417,14 +471,22 @@ function buildProfileTemplate (pdfData) {
         )
       )
     })
+    
+    children.push(
+      React.createElement(
+        View,
+        { key: 'education-section', style: styles.section },
+        ...educationContent
+      )
+    )
   }
   
   // Certifications & Courses Section
   if ((certifications && certifications.length > 0) || (courses && courses.length > 0)) {
-    children.push(createSectionHeader('CERTIFICATIONS & COURSES'))
+    const certContent = [createSectionHeader('CERTIFICATIONS & COURSES')]
     
     if (certifications && certifications.length > 0) {
-      children.push(
+      certContent.push(
         React.createElement(
           Text,
           { key: 'certifications-label', style: styles.certificationItem },
@@ -432,7 +494,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
       certifications.forEach((cert, index) => {
-        children.push(
+        certContent.push(
           React.createElement(
             Text,
             { key: `cert-${index}`, style: styles.certificationItem },
@@ -443,7 +505,7 @@ function buildProfileTemplate (pdfData) {
     }
     
     if (courses && courses.length > 0) {
-      children.push(
+      certContent.push(
         React.createElement(
           Text,
           { key: 'courses-label', style: [styles.certificationItem, { marginTop: 5 }] },
@@ -451,7 +513,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
       courses.forEach((course, index) => {
-        children.push(
+        certContent.push(
           React.createElement(
             Text,
             { key: `course-${index}`, style: styles.certificationItem },
@@ -460,15 +522,23 @@ function buildProfileTemplate (pdfData) {
         )
       })
     }
+    
+    children.push(
+      React.createElement(
+        View,
+        { key: 'certifications-section', style: styles.section },
+        ...certContent
+      )
+    )
   }
   
   // Experience Section
   if (workExperience && workExperience.length > 0) {
-    children.push(createSectionHeader('EXPERIENCE'))
+    const experienceContent = [createSectionHeader('EXPERIENCE')]
     
     workExperience.forEach((work, index) => {
       const dateRange = [work.startDate, work.endDate].filter(Boolean).join(' - ')
-      children.push(
+      experienceContent.push(
         React.createElement(
           View,
           { key: `work-${index}`, style: { marginBottom: 15 } },
@@ -492,7 +562,7 @@ function buildProfileTemplate (pdfData) {
             work.company
           ),
           work.description ? React.createElement(
-            Text,
+            Html,
             { style: styles.itemDescription },
             work.description
           ) : null,
@@ -504,6 +574,14 @@ function buildProfileTemplate (pdfData) {
         )
       )
     })
+    
+    children.push(
+      React.createElement(
+        View,
+        { key: 'experience-section', style: styles.section },
+        ...experienceContent
+      )
+    )
   }
   
   return React.createElement(

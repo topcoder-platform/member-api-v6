@@ -568,6 +568,12 @@ async function getMemberGroups (memberId) {
  * @returns {Promise}
  */
 const getM2MToken = () => {
+  if (!config.AUTH0_URL) {
+    throw new Error('AUTH0_URL is not configured. Please set AUTH0_URL environment variable or add it to config.')
+  }
+  if (!config.AUTH0_CLIENT_ID || !config.AUTH0_CLIENT_SECRET) {
+    throw new Error('AUTH0_CLIENT_ID and AUTH0_CLIENT_SECRET must be configured for M2M authentication.')
+  }
   return m2m.getMachineToken(
     config.AUTH0_CLIENT_ID,
     config.AUTH0_CLIENT_SECRET

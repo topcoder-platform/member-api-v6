@@ -70,6 +70,7 @@ workflows:
             - pm-2539
             - PS-511
             - pm-3454
+            - pm-3318
             
     # Production builds are exectuted only on tagged commits to the
     # master branch.

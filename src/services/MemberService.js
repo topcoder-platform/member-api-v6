@@ -27,6 +27,8 @@ const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 const profilePDFService = require('./ProfilePDFService')
 const request = require('request')
+const cityTimezones = require('city-timezones')
+const moment = require('moment-timezone')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
@@ -961,13 +963,53 @@ confirmProfileData.schema = {
  * @returns {Promise<String>} formatted achievements string
  */
 async function fetchGamificationAchievements (userId) {
+  logger.debug(`[fetchGamificationAchievements] ENTER for user ${userId}`)
   try {
-    const token = await helper.getM2MToken()
-    const gamificationUrl = `${config.GAMIFICATION_API_URL}/users/${userId}/rewards`
+    const gamificationApiUrl = config.GAMIFICATION_API_URL || process.env.GAMIFICATION_API_URL || 'https://api.topcoder-dev.com/v5/gamification'
+    logger.debug(`[fetchGamificationAchievements] Base URL: ${gamificationApiUrl}`)
+    if (!gamificationApiUrl) {
+      logger.warn(`GAMIFICATION_API_URL is not configured for user ${userId}`)
+      return ''
+    }
+    logger.debug(`Getting M2M token for gamification API for user ${userId}...`)
+    let token
+    try {
+      token = await helper.getM2MToken()
+      logger.debug(`M2M token retrieved for gamification API for user ${userId}, token exists: ${!!token}`)
+    } catch (tokenError) {
+      logger.warn(`Cannot get M2M token for gamification API for user ${userId}: ${tokenError.message}. Achievements will be empty.`)
+      return ''
+    }
+    
+    if (!token) {
+      logger.warn(`M2M token is null/undefined for gamification API for user ${userId}`)
+      return ''
+    }
+    
+    logger.debug(`Constructing gamification URL for user ${userId}...`)
+    const gamificationUrl = `${gamificationApiUrl}/users/${userId}/rewards`
+    logger.debug(`Full gamification URL: ${gamificationUrl}`)
+    
+    if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
+      logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
+      return ''
+    }
+    
+    // Double-check URL is valid before making request
+    const finalGamificationUrl = String(gamificationUrl || '').trim()
+    if (!finalGamificationUrl || finalGamificationUrl === 'undefined' || finalGamificationUrl.includes('undefined') || finalGamificationUrl.length === 0) {
+      logger.error(`Invalid final gamification URL for user ${userId}: finalUrl="${finalGamificationUrl}", baseUrl="${gamificationApiUrl}", userId=${userId}`)
+      return ''
+    }
+    
+    logger.info(`Making request to gamification API: ${finalGamificationUrl}`)
+    logger.debug(`About to call request() for gamification with url="${finalGamificationUrl}", type=${typeof finalGamificationUrl}, length=${finalGamificationUrl ? finalGamificationUrl.length : 'N/A'}`)
     
     return new Promise((resolve, reject) => {
-      request({
-        url: gamificationUrl,
+      try {
+        logger.debug(`Inside Promise for gamification, about to create request options with url="${finalGamificationUrl}"`)
+        request({
+          url: finalGamificationUrl,
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -1003,9 +1045,13 @@ async function fetchGamificationAchievements (userId) {
           resolve('')
         }
       })
+      } catch (requestError) {
+        logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}, stack=${requestError.stack}, url=${finalGamificationUrl}, urlType=${typeof finalGamificationUrl}`)
+        resolve('')
+      }
     })
   } catch (error) {
-    logger.warn(`Error fetching gamification achievements for user ${userId}: ${error.message}`)
+    logger.warn(`Error fetching gamification achievements for user ${userId}: ${error.message}, stack=${error.stack}`)
     return ''
   }
 }
@@ -1016,13 +1062,53 @@ async function fetchGamificationAchievements (userId) {
  * @returns {Promise<Object>} object with certifications and courses arrays
  */
 async function fetchCertificationsAndCourses (userId) {
+  logger.debug(`[fetchCertificationsAndCourses] ENTER for user ${userId}`)
   try {
-    const token = await helper.getM2MToken()
-    const learningPathsUrl = `${config.LEARNING_PATHS_API_URL}/completed-certifications/${userId}`
+    const learningPathsApiUrl = config.LEARNING_PATHS_API_URL || process.env.LEARNING_PATHS_API_URL || 'https://api.topcoder-dev.com/v5/learning-paths'
+    logger.debug(`[fetchCertificationsAndCourses] LEARNING_PATHS_API_URL for user ${userId}: ${learningPathsApiUrl}`)
+    if (!learningPathsApiUrl) {
+      logger.warn(`LEARNING_PATHS_API_URL is not configured for user ${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    logger.debug(`Getting M2M token for user ${userId}...`)
+    let token
+    try {
+      token = await helper.getM2MToken()
+      logger.debug(`M2M token retrieved for user ${userId}, token exists: ${!!token}`)
+    } catch (tokenError) {
+      logger.warn(`Cannot get M2M token for user ${userId}: ${tokenError.message}. Certifications and courses will be empty.`)
+      return { certifications: [], courses: [] }
+    }
+    
+    if (!token) {
+      logger.warn(`M2M token is null/undefined for user ${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    
+    logger.debug(`Constructing learning-paths URL for user ${userId}...`)
+    const learningPathsUrl = `${learningPathsApiUrl}/completed-certifications/${userId}`
+    logger.debug(`Full learning-paths URL: ${learningPathsUrl}`)
+    
+    if (!learningPathsUrl || typeof learningPathsUrl !== 'string' || !userId) {
+      logger.error(`Invalid learning-paths URL for user ${userId}: learningPathsUrl=${learningPathsUrl}, userId=${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    
+    // Double-check URL is valid before making request
+    const finalUrl = String(learningPathsUrl || '').trim()
+    if (!finalUrl || finalUrl === 'undefined' || finalUrl.includes('undefined') || finalUrl.length === 0) {
+      logger.error(`Invalid final URL constructed for user ${userId}: finalUrl="${finalUrl}", baseUrl="${learningPathsApiUrl}", userId=${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    
+    logger.info(`Making request to learning-paths API: ${finalUrl}`)
+    logger.debug(`About to call request() with url="${finalUrl}", type=${typeof finalUrl}, length=${finalUrl ? finalUrl.length : 'N/A'}`)
     
     return new Promise((resolve, reject) => {
-      request({
-        url: learningPathsUrl,
+      try {
+        logger.debug(`Inside Promise, about to create request options with url="${finalUrl}"`)
+        request({
+          url: finalUrl,
         headers: {
           Authorization: `Bearer ${token}`
         }
@@ -1033,29 +1119,112 @@ async function fetchCertificationsAndCourses (userId) {
           return
         }
         if (response.statusCode !== 200) {
-          logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}`)
+          logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}, body: ${body}`)
           resolve({ certifications: [], courses: [] })
           return
         }
+        logger.debug(`Learning-paths API raw response for user ${userId}: ${body}`)
         try {
           const data = JSON.parse(body)
-          const certifications = (data.enrollments || [])
-            .filter(e => e.status === 'completed' && e.topcoderCertification)
+          console.log(`[DEBUG] Learning-paths API response structure for user ${userId}:`, {
+            hasEnrollments: !!data.enrollments,
+            enrollmentsLength: (data.enrollments || []).length,
+            hasCourses: !!data.courses,
+            coursesLength: (data.courses || []).length,
+            dataKeys: Object.keys(data),
+            firstEnrollment: data.enrollments?.[0],
+            firstCourse: data.courses?.[0]
+          })
+          logger.info(`Learning-paths API response for user ${userId}: enrollments=${(data.enrollments || []).length}, courses=${(data.courses || []).length}`)
+          
+          // Process certifications
+          const rawEnrollments = data.enrollments || []
+          logger.debug(`Raw enrollments count: ${rawEnrollments.length}`)
+          const certifications = rawEnrollments
+            .filter(e => {
+              const hasStatus = e.status === 'completed'
+              const hasCert = !!e.topcoderCertification
+              if (!hasStatus || !hasCert) {
+                logger.debug(`Enrollment filtered out - status: ${e.status}, hasTopcoderCert: ${hasCert}`)
+              }
+              return hasStatus && hasCert
+            })
             .map(e => `${e.topcoderCertification.name} - Topcoder Academy`)
-          const courses = (data.courses || [])
-            .filter(c => c.status === 'completed')
-            .map(c => `${c.certification || 'Course'} - Topcoder Academy`)
+          
+          // Process courses - courses are already filtered by status='completed' in the service
+          const rawCourses = data.courses || []
+          logger.debug(`Raw courses count: ${rawCourses.length}`)
+          const courses = rawCourses
+            .map(c => {
+              const title = c.certificationTitle || c.certification || 'Course'
+              logger.debug(`Course mapping: certificationTitle=${c.certificationTitle}, certification=${c.certification}, result=${title}`)
+              return `${title} - Topcoder Academy`
+            })
+          
+          logger.info(`Processed certifications: ${certifications.length}, courses: ${courses.length}`)
           resolve({ certifications, courses })
         } catch (parseError) {
           logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
           resolve({ certifications: [], courses: [] })
         }
       })
+      } catch (requestError) {
+        logger.error(`Error creating request for user ${userId}: ${requestError.message}, stack=${requestError.stack}, url=${finalUrl}, urlType=${typeof finalUrl}`)
+        resolve({ certifications: [], courses: [] })
+      }
     })
   } catch (error) {
-    logger.warn(`Error fetching certifications for user ${userId}: ${error.message}`)
+    logger.warn(`Error fetching certifications for user ${userId}: ${error.message}, stack=${error.stack}`)
     return { certifications: [], courses: [] }
   }
+}
+
+/**
+ * Get member timezone based on city
+ * @param {Object} memberData the member data
+ * @returns {String|null} timezone abbreviation or null if not found
+ */
+function getMemberTimezone (memberData) {
+  const city = memberData.addresses?.[0]?.city
+  if (!city) return null
+
+  const cityTimezoneData = cityTimezones.lookupViaCity(city)
+  let memberTimezone = null
+
+  if (cityTimezoneData?.length) {
+    memberTimezone = cityTimezoneData[0].timezone
+  }
+
+  // Validate timezone exists
+  if (memberTimezone && moment.tz.zone(memberTimezone)) {
+    // Get abbreviation for display
+    return moment.tz(new Date(), memberTimezone).zoneAbbr()
+  }
+
+  return null
+}
+
+/**
+ * Get skill names by their IDs
+ * @param {Array<String>} skillIds array of skill UUIDs
+ * @returns {Promise<Object>} map of skillId -> skillName
+ */
+async function getSkillNamesByIds (skillIds) {
+  if (!skillIds || skillIds.length === 0) {
+    return {}
+  }
+
+  const skills = await skillsPrisma.skill.findMany({
+    where: { id: { in: skillIds } },
+    select: { id: true, name: true }
+  })
+
+  const skillMap = {}
+  skills.forEach(skill => {
+    skillMap[skill.id] = skill.name
+  })
+
+  return skillMap
 }
 
 /**
@@ -1069,12 +1238,28 @@ async function aggregatePDFData (currentUser, handle) {
   const memberData = await getMember(currentUser, handle, {})
   const userId = helper.bigIntToNumber(memberData.userId)
   
-  // Fetch traits (work, education, languages, basicInfo)
+  // Fetch traits (work, education, languages, basicInfo, personalization)
   const traits = await memberTraitService.getTraits(currentUser, handle, {})
   const workTraits = traits.find(t => t.traitId === 'work')?.traits?.data || []
   const educationTraits = traits.find(t => t.traitId === 'education')?.traits?.data || []
   const languageTraits = traits.find(t => t.traitId === 'languages')?.traits?.data || []
   const basicInfoTraits = traits.find(t => t.traitId === 'basic_info')?.traits?.data || []
+  
+  // Collect all skill GUIDs from work experiences for batch lookup
+  const allSkillIds = []
+  workTraits.forEach(work => {
+    if (work.associatedSkills && work.associatedSkills.length > 0) {
+      allSkillIds.push(...work.associatedSkills)
+    }
+  })
+  
+  // Batch lookup all skill names
+  const skillNameMap = await getSkillNamesByIds([...new Set(allSkillIds)])
+  
+  // Extract personalization trait to get shortBio (profileSelfTitle)
+  const personalizationTrait = traits.find(t => t.traitId === 'personalization')
+  const personalizationData = personalizationTrait?.traits?.data?.[0] || {}
+  const shortBio = personalizationData.profileSelfTitle || null
   
   // Fetch skills from standardized-skills-api
   const skills = await getMemberSkills(memberData.userId)
@@ -1152,12 +1337,16 @@ async function aggregatePDFData (currentUser, handle) {
     return `${month}/${year}`
   }
   
+  // Get member timezone
+  const timezone = getMemberTimezone(memberData)
+  
   return {
     // Member basic info
     member: {
       ...memberData,
       statusBarText,
-      generatedOn: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+      generatedOn: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      timezone: timezone
     },
     // Work experience
     workExperience: workTraits.map(work => ({
@@ -1166,7 +1355,9 @@ async function aggregatePDFData (currentUser, handle) {
       startDate: formatDate(work.startDate),
       endDate: formatDate(work.endDate),
       description: work.description,
-      skills: work.associatedSkills || []
+      skills: (work.associatedSkills || [])
+        .map(skillId => skillNameMap[skillId])
+        .filter(Boolean) // Remove any undefined (GUIDs without names)
     })),
     // Education
     education: educationTraits.map(edu => ({
@@ -1176,8 +1367,11 @@ async function aggregatePDFData (currentUser, handle) {
     })),
     // Languages
     languages: languageTraits.map(lang => lang.language).filter(Boolean),
-    // Basic info
-    basicInfo: basicInfoTraits[0] || {},
+    // Basic info (including shortBio from personalization)
+    basicInfo: {
+      ...(basicInfoTraits[0] || {}),
+      shortBio: shortBio
+    },
     // Skills
     skills: {
       principal: principalSkills,
