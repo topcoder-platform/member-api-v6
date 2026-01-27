@@ -141,7 +141,9 @@ async function getMemberRecentActivity (userId) {
     const recent = await resourcesPrisma.resource.findFirst({
       where: {
         memberId: String(userId),
-        roleName: { in: ['Submitter', 'Copilot', 'Reviewer'] },
+        resourceRole: {
+          name: { in: ['Submitter', 'Copilot', 'Reviewer'] }
+        },
         created: { gte: threeMonthsAgo }
       }
     })
