@@ -8,7 +8,7 @@ COPY . /member-api-v6
 WORKDIR /member-api-v6
 
 # Install the dependencies from package.json
-RUN yarn
+RUN pnpm install
 
 # Copy and set permissions for entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
