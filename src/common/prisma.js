@@ -6,8 +6,13 @@ const {
 const { PrismaClient: FinancePrismaClient } = require('@topcoder/tc-finance-api/packages/finance-prisma-client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
 const { PrismaClient: ResourcesPrismaClient } = require('@topcoder/resource-api-v6/packages/resources-prisma-client')
+const { PrismaClient: ChallengesPrismaClient } = require('@topcoder/challenge-api-v6/packages/challenge-prisma-client')
+const { PrismaClient: AcademyPrismaClient } = require('@topcoder/learning-paths-api/packages/academy-prisma-client')
 const config = require('config')
+
 const skillsDbUrl = process.env.SKILLS_DB_URL
+const challengesDbUrl = process.env.CHALLENGES_DB_URL
+const academyDbUrl = process.env.ACADEMY_DB_URL
 const resourcesDbUrl = config.RESOURCES_DB_URL
 
 const clientOptions = {
@@ -23,10 +28,6 @@ const clientOptions = {
 }
 
 let membersClient
-let skillsClient
-let resourcesClient
-let financeClient
-
 const getMembersClient = () => {
   if (!membersClient) {
     membersClient = new MembersPrismaClient(clientOptions)
@@ -34,6 +35,7 @@ const getMembersClient = () => {
   return membersClient
 }
 
+let skillsClient
 const getSkillsClient = () => {
   if (!skillsClient) {
     if (!skillsDbUrl) {
@@ -47,6 +49,35 @@ const getSkillsClient = () => {
   return skillsClient
 }
 
+let challengesClient
+const getChallengesClient = () => {
+  if (!challengesClient) {
+    if (!challengesDbUrl) {
+      throw new Error('CHALLENGES_DB_URL must be set for challenges Prisma client')
+    }
+    challengesClient = new ChallengesPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: challengesDbUrl } }
+    })
+  }
+  return challengesClient
+}
+
+let academyClient
+const getAcademyClient = () => {
+  if (!academyClient) {
+    if (!academyDbUrl) {
+      throw new Error('ACADEMY_DB_URL must be set for academy Prisma client')
+    }
+    academyClient = new AcademyPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: academyDbUrl } }
+    })
+  }
+  return academyClient
+}
+
+let resourcesClient
 const getResourcesClient = () => {
   if (!resourcesClient) {
     if (!resourcesDbUrl) {
@@ -61,6 +92,7 @@ const getResourcesClient = () => {
 }
 
 
+let financeClient
 /**
  * Get finance Prisma client for querying finance schema
  * Creates a dedicated Prisma client instance for the finance database
@@ -85,6 +117,8 @@ module.exports = {
   getClient: getMembersClient,
   getMembersClient,
   getSkillsClient,
+  getChallengesClient,
+  getAcademyClient,
   getResourcesClient,
   getFinanceClient
 }

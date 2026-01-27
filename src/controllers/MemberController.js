@@ -33,6 +33,16 @@ async function getMemberUserIdSignature (req, res) {
 }
 
 /**
+ * Get a specific member skill by skill ID
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function getMemberSkill (req, res) {
+  const result = await service.getMemberSkill(req.authUser, req.params.handle, req.params.skillid)
+  res.send(result)
+}
+
+/**
  * Update member data, only passed fields are updated
  * @param {Object} req the request
  * @param {Object} res the response
@@ -98,6 +108,7 @@ module.exports = {
   getMember,
   getProfileCompleteness,
   getMemberUserIdSignature,
+  getMemberSkill,
   updateMember,
   verifyEmail,
   uploadPhoto,

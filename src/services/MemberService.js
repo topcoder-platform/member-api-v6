@@ -25,6 +25,8 @@ const { Prisma } = prismaManager
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
+const challengesPrisma = prismaManager.getChallengesClient()
+const academyPrisma = prismaManager.getAcademyClient()
 const resourcesPrisma = prismaManager.getResourcesClient()
 const profilePDFService = require('./ProfilePDFService')
 
@@ -1030,10 +1032,162 @@ downloadProfile.schema = {
   handle: Joi.string().required()
 }
 
+/**
+ * Get a specific member skill by skill ID
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {String} skillId the skill ID
+ * @returns {Object} the member skill data
+ */
+async function getMemberSkill (currentUser, handle, skillId) {
+  // Get member data first to get userId
+  const member = await getMemberData(handle, {})
+  
+  if (!member || !member.userId) {
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
+  }
+  
+  // Check authorization
+  if (!helper.canDownloadProfile(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to view this member profile.')
+  }
+
+  const dbSkill = await skillsPrisma.userSkill.findFirst({
+    where: {
+      userId: helper.bigIntToNumber(member.userId),
+      skillId: skillId
+    },
+    include: {
+      ...prismaHelper.skillsIncludeParams,
+      skill: {
+        include: {
+          category: true, skillEvents: {
+            select: {
+              createdAt: true,
+              sourceId: true,
+              sourceType: {
+                select: { name: true }
+              },
+            }
+          }
+        }
+      },
+    }
+  })
+
+  if (!dbSkill) {
+    throw new errors.NotFoundError(`Skill with ID: "${skillId}" not found for member: "${handle}"`)
+  }
+
+  // Build and return the skill data
+  const [skill] = prismaHelper.buildMemberSkills([dbSkill]);
+  
+  // Replace lastSources IDs with fetched details
+  if (skill.activity) {
+    const fetchPromises = []
+    
+    // Prepare challenge fetch
+    if (skill.activity.challenge?.sources?.length > 0) {
+      const challengeIds = skill.activity.challenge.sources
+      fetchPromises.push(
+        challengesPrisma.Challenge.findMany({
+          where: { id: { in: challengeIds.slice(0, 3) } },
+          select: { id: true, name: true }
+        }).then(dbChallenges => {
+          const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
+          skill.activity.challenge = {
+            count: challengeIds.length,
+            lastSources: challengeIds
+              .map(id => challengeMap.get(id))
+              .filter(Boolean)
+          }
+        })
+      )
+    }
+    
+    // Prepare certification fetch
+    if (skill.activity.certification?.sources?.length > 0) {
+      const certificationIds = skill.activity.certification.sources.filter(Boolean)
+      if (certificationIds.length > 0) {
+        fetchPromises.push(
+          academyPrisma.CertificationEnrollments.findMany({
+            where: { completionEventId: { in: certificationIds.slice(0, 3) } },
+            select: {
+              completionEventId: true,
+              TopcoderCertification: {
+                select: { dashedName: true, title: true }
+              }
+            }
+          }).then(dbCertifications => {
+            const certificationMap = new Map(dbCertifications.map(c => [
+              c.completionEventId,
+              {
+                completionEventId: c.completionEventId,
+                dashedName: c.TopcoderCertification?.dashedName,
+                title: c.TopcoderCertification?.title
+              }
+            ]))
+            skill.activity.certification = {
+              count: certificationIds.length,
+              lastSources: certificationIds
+                .map(id => certificationMap.get(id))
+                .filter(Boolean)
+            }
+          })
+        )
+      }
+    }
+    
+    // Prepare course fetch
+    if (skill.activity.course?.sources?.length > 0) {
+      const courseIds = skill.activity.course.sources.filter(Boolean)
+      if (courseIds.length > 0) {
+        fetchPromises.push(
+          academyPrisma.FccCertificationProgresses.findMany({
+            where: { completionEventId: { in: courseIds.slice(0, 3) } },
+            select: {
+              certification: true,
+              completionEventId: true,
+              FccCourses: { select: { title: true } }
+            }
+          }).then(dbCourses => {
+            const courseMap = new Map(dbCourses.map(c => [
+              c.completionEventId,
+              {
+                completionEventId: c.completionEventId,
+                certification: c.certification,
+                title: c.FccCourses?.title
+              }
+            ]))
+            skill.activity.course = {
+              count: courseIds.length,
+              lastSources: courseIds
+                .map(id => courseMap.get(id))
+                .filter(Boolean)
+            }
+          })
+        )
+      }
+    }
+    
+    // Fetch all sources in parallel
+    await Promise.all(fetchPromises)
+  }
+  
+  return skill
+}
+
+getMemberSkill.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required(),
+  skillId: Joi.string().uuid().required()
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
   getMemberUserIdSignature,
+  getMemberSkill,
   updateMember,
   verifyEmail,
   uploadPhoto,
