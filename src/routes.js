@@ -105,6 +105,22 @@ module.exports = {
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
     }
   },
+  '/members/:handle/confirmProfile': {
+    post: {
+      controller: 'MemberController',
+      method: 'confirmProfileData',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
+  },
+  '/members/:handle/profileDownload': {
+    get: {
+      controller: 'MemberController',
+      method: 'downloadProfile',
+      auth: 'jwt',
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
+    }
+  },
   '/members/:handle/traits': {
     get: {
       controller: 'MemberTraitController',

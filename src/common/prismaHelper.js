@@ -61,6 +61,10 @@ function convertMember (member) {
     member.addresses = _.map(member.addresses, d => _.omit(d,
       ['id', 'userId', ...auditFields]))
   }
+  if (member.phones) {
+    member.phones = _.map(member.phones, d => _.omit(d,
+      ['id', 'userId', ...auditFields]))
+  }
   member.verified = member.verified || false
 }
 
@@ -78,7 +82,7 @@ function buildMemberSkills (skillList) {
 
   if (!isStandardized) {
     return _.map(skillList, item => {
-      const ret = _.pick(item.skill, ['id', 'name'])
+      const ret = _.pick(item.skill, ['id', 'name', 'updatedAt'])
       ret.category = _.pick(item.skill.category, ['id', 'name'])
       if (item.displayMode) {
         ret.displayMode = _.pick(item.displayMode, ['id', 'name'])
@@ -95,6 +99,9 @@ function buildMemberSkills (skillList) {
   return _.map(bySkill, (items) => {
     const first = items[0]
     const ret = _.pick(first.skill, ['id', 'name'])
+    // keep userSkill's created & updated fields
+    ret.createdAt = first.createdAt
+    ret.updatedAt = first.updatedAt
     ret.category = _.pick(first.skill.category, ['id', 'name'])
     if (first.userSkillDisplayMode) {
       ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])

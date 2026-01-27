@@ -2,8 +2,9 @@
  * App constants
  */
 const ADMIN_ROLES = ['administrator', 'admin']
+const PROFILE_DOWNLOAD_ROLES = ['project manager', 'Talent Manager']
 const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin')
-const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive']
+const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive', 'Talent Manager', 'Project Manager']
 
 const EVENT_ORIGINATOR = 'topcoder-member-api'
 
@@ -30,13 +31,18 @@ const BOOLEAN_OPERATOR = {
   AND: 'AND',
   OR: 'OR'
 }
+
+const PHONE_REGEX = /^\+[1-9]\d{1,14}$/
+
 module.exports = {
   ADMIN_ROLES,
+  PROFILE_DOWNLOAD_ROLES,
   SEARCH_BY_EMAIL_ROLES,
   AUTOCOMPLETE_ROLES,
   EVENT_ORIGINATOR,
   EVENT_MIME_TYPE,
   TOPICS,
   MAMBO_GET_REWARDS_ALLOWED_FIELDS,
-  BOOLEAN_OPERATOR
+  BOOLEAN_OPERATOR,
+  PHONE_REGEX
 }

@@ -3,8 +3,10 @@ const {
   PrismaClient: MembersPrismaClient,
   Prisma
 } = require('../../prisma/generated/client')
-const { PrismaClient: SkillsPrismaClient } = require('../../prisma/generated/skills-client')
+const { PrismaClient: FinancePrismaClient } = require('@topcoder/tc-finance-api/packages/finance-prisma-client')
+const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
 const config = require('config')
+const skillsDbUrl = process.env.SKILLS_DB_URL
 
 const clientOptions = {
   transactionOptions: {
@@ -20,6 +22,7 @@ const clientOptions = {
 
 let membersClient
 let skillsClient
+let financeClient
 
 const getMembersClient = () => {
   if (!membersClient) {
@@ -30,14 +33,40 @@ const getMembersClient = () => {
 
 const getSkillsClient = () => {
   if (!skillsClient) {
-    skillsClient = new SkillsPrismaClient(clientOptions)
+    if (!skillsDbUrl) {
+      throw new Error('SKILLS_DB_URL must be set for skills Prisma client')
+    }
+    skillsClient = new SkillsPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: skillsDbUrl } }
+    })
   }
   return skillsClient
+}
+
+/**
+ * Get finance Prisma client for querying finance schema
+ * Creates a dedicated Prisma client instance for the finance database
+ * @returns {Object} Prisma client instance
+ */
+const getFinanceClient = () => {
+  if (!financeClient) {
+    const connectionString = config.FINANCE_DATABASE_URL
+    if (!connectionString) {
+      throw new Error('FINANCE_DATABASE_URL is not configured. Please set FINANCE_DATABASE_URL environment variable or add it to config.')
+    }
+    financeClient = new FinancePrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: connectionString } }
+    })
+  }
+  return financeClient
 }
 
 module.exports = {
   Prisma,
   getClient: getMembersClient,
   getMembersClient,
-  getSkillsClient
+  getSkillsClient,
+  getFinanceClient
 }

@@ -72,6 +72,28 @@ async function deleteMember (req, res) {
   res.send(result)
 }
 
+/**
+ * Confirm member profile data
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function confirmProfileData (req, res) {
+  const result = await service.confirmProfileData(req.authUser, req.params.handle)
+  res.send(result)
+}
+
+/**
+ * Download member profile as PDF
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function downloadProfile (req, res) {
+  const pdfStream = await service.downloadProfile(req.authUser, req.params.handle)
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', `attachment; filename="profile-${req.params.handle}.pdf"`)
+  pdfStream.pipe(res)
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
@@ -79,5 +101,7 @@ module.exports = {
   updateMember,
   verifyEmail,
   uploadPhoto,
-  deleteMember
+  deleteMember,
+  confirmProfileData,
+  downloadProfile
 }

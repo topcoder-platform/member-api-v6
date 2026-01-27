@@ -21,17 +21,19 @@ const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
+const { Prisma } = prismaManager
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
+const profilePDFService = require('./ProfilePDFService')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
-  'newEmailVerifyTokenDate', 'handleSuggest']
+  'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
 
 /**
  * Clean member fields according to current user.
@@ -66,6 +68,13 @@ function cleanMember (currentUser, member, selectFields) {
     })
   }
 
+  if (response.skills) {
+    response.skills.forEach((skill) => {
+      skill.createdAt = undefined
+      skill.updatedAt = undefined
+    })
+  }
+
   return response
 }
 
@@ -75,6 +84,10 @@ function omitMemberAttributes (currentUser, mb) {
   // remove identifiable info fields if user is not admin, not M2M and not member himself
   const canManageMember = helper.canManageMember(currentUser, mb)
   const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && mb.handleLower &&
+    currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
@@ -83,6 +96,13 @@ function omitMemberAttributes (currentUser, mb) {
   }
   if (!canManageMember && !hasAutocompleteRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
+    if (res.phones) {
+      delete res.phones
+    }
+  }
+  // Remove identityVerified if user doesn't have permission
+  if (!canSeeIdentityVerified && res.identityVerified !== undefined) {
+    delete res.identityVerified
   }
 
   return res
@@ -104,14 +124,14 @@ async function getMemberSkills (userId) {
 
 /**
  * Get member profile data.
- * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
+ * @param {Array} allowedFields optional array of allowed fields (defaults to MEMBER_FIELDS)
  * @returns {Object} the member profile data
  */
-async function getMember (currentUser, handle, query) {
+async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
   // validate and parse query parameter
-  const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
+  const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
 
   const prismaFilter = {
     where: {
@@ -125,19 +145,96 @@ async function getMember (currentUser, handle, query) {
   if (_.includes(selectFields, 'addresses')) {
     prismaFilter.include.addresses = true
   }
+  if (_.includes(selectFields, 'phones')) {
+    prismaFilter.include.phones = true
+  }
 
   // To keep original business logic, let's use findMany
   const member = await prisma.member.findUnique(prismaFilter)
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
   }
-  // convert members data structure to response
-  prismaHelper.convertMember(member)
+
   // get member skills
   if (_.includes(selectFields, 'skills')) {
     member.skills = await getMemberSkills(member.userId)
   }
 
+  return member
+}
+
+/**
+ * Get member profile data.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {Object} query the query parameters
+ * @returns {Object} the member profile data
+ */
+async function getMember (currentUser, handle, query) {
+  // Check if user has permission to see phones
+  // Phones are visible to: self, admin, M2M, or users with autocomplete roles (Talent Manager, etc.)
+  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && 
+    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+  
+  const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+  // Identity verified field has same access control as phones
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
+
+  // Conditionally add phones to query if user has permission
+  const modifiedQuery = { ...query }
+  if (canSeePhones) {
+    // If fields are specified, check if phones is already included
+    if (modifiedQuery.fields) {
+      const fieldsArray = modifiedQuery.fields.split(',').map(f => f.trim())
+      if (!_.includes(fieldsArray, 'phones')) {
+        modifiedQuery.fields = `${modifiedQuery.fields},phones`
+      }
+    } else {
+      // If no fields specified, add phones to the default fields
+      modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',phones'
+    }
+  }
+
+  const member = await getMemberData(handle, modifiedQuery, allowedFields)
+
+  if (!member || !member.userId) {
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
+  }
+  // convert members data structure to response
+  prismaHelper.convertMember(member)
+
+  // Query identity verification status from finance schema if user has permission
+  if (canSeeIdentityVerified) {
+    try {
+      const financePrisma = prismaManager.getFinanceClient()
+      const userIdString = String(helper.bigIntToNumber(member.userId))
+      const verification = await financePrisma.user_identity_verification_associations.findFirst({
+        where: {
+          user_id: userIdString,
+          verification_status: 'ACTIVE'
+        }
+      })
+      member.identityVerified = verification !== null
+    } catch (err) {
+      // If finance schema query fails, log error but don't fail the request
+      logger.error(`Failed to query identity verification for user ${member.userId}: ${err.message}`)
+      member.identityVerified = false
+    }
+  }
+
+  // validate and parse query parameter
+  const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
+  // Add phones to selectFields if user has permission
+  if (canSeePhones && !_.includes(selectFields, 'phones')) {
+    selectFields.push('phones')
+  }
+  // Add identityVerified to selectFields if user has permission
+  if (canSeeIdentityVerified && !_.includes(selectFields, 'identityVerified')) {
+    selectFields.push('identityVerified')
+  }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
@@ -163,18 +260,14 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs' }
-  const member = await getMember(currentUser, handle, memberFields)
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs,availableForGigsLastUpdateDate,lastProfileConfirmationDate,updatedAt,addresses' }
+  const member = await getMemberData(handle, memberFields)
 
   // Used for calculating the percentComplete
   let completeItems = 0
 
-  // Magic number - 6 total items for profile "completeness"
-  // TODO: Bump this back up to 7 once verification is implemented
-  const totalItems = 6
-
   let response = {}
-  response.userId = member.userId
+  response.userId = helper.bigIntToNumber(member.userId)
   response.handle = member.handle
   let data = {}
 
@@ -185,28 +278,41 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
   // TODO: Turn this back on once we have verification flow implemented elsewhere
   // data.verified = false
-
   data.skills = false
   data.gigAvailability = false
   data.bio = false
   data.profilePicture = false
   data.workHistory = false
   data.education = false
+  data.location = false
+
+  const totalItems = Object.keys(data).length
+
+  data.skillsLastUpdateDate = undefined
+  data.gigAvailabilityLastUpdateDate = undefined
+  data.workHistoryLastUpdateDate = undefined
+  data.educationLastUpdateDate = undefined
+  data.locationLastUpdateDate = undefined
+  data.profileLastUpdateDate = new Date(member.updatedAt).toISOString()
+  data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined
 
   if (member.availableForGigs != null) {
     completeItems += 1
     data.gigAvailability = true
+    data.gigAvailabilityLastUpdateDate = member.availableForGigsLastUpdateDate || undefined
   }
 
   _.forEach(memberTraits, (item) => {
-    if (item.traitId === 'education' && item.traits.data.length > 0 && data.education === false) {
+    if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
       completeItems += 1
       data.education = true
+      data.educationLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
 
-    if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory === false) {
+    if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory) {
       completeItems += 1
       data.workHistory = true
+      data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
   })
   // Push on the incomplete traits for picking a random toast to show
@@ -241,6 +347,11 @@ async function getProfileCompleteness (currentUser, handle, query) {
   if (member.skills && member.skills.length >= 3) {
     completeItems += 1
     data.skills = true
+
+    const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
+      Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
+    ), new Date(0))
+    data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
   } else {
     showToast.push('skills')
   }
@@ -250,6 +361,20 @@ async function getProfileCompleteness (currentUser, handle, query) {
     data.profilePicture = true
   } else {
     showToast.push('profilePicture')
+  }
+
+  if (member.addresses && member.addresses.length) {
+    completeItems += 1
+    data.location = true
+
+    const addrDates = member.addresses
+      .map(s => s.updatedAt || s.createdAt)
+      .filter(Boolean)
+      .map(d => new Date(d).getTime())
+
+    if (addrDates.length > 0) {
+      data.locationLastUpdateDate = new Date(Math.max(...addrDates)).toISOString()
+    }
   }
 
   // Calculate the percent complete and round to 2 decimal places
@@ -334,9 +459,32 @@ async function updateMember (currentUser, handle, query, data) {
     data.newEmailVerifyToken = uuid()
     data.newEmailVerifyTokenDate = new Date(new Date().getTime() + Number(config.VERIFY_TOKEN_EXPIRATION) * 60000).toISOString()
   }
+  const phoneRegex = constants.PHONE_REGEX
+  if (data.phones !== undefined) {
+    if (!Array.isArray(data.phones)) {
+      throw new errors.BadRequestError('phones must be an array')
+    }
+    for (const phone of data.phones) {
+      if (!phone.type || typeof phone.type !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a type (string)')
+      }
+      if (!phone.number || typeof phone.number !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a number (string)')
+      }
+      if (!phoneRegex.test(phone.number)) {
+        throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
+      }
+    }
+  }
+
   // set updated fields in data
   data.updatedAt = new Date()
   data.updatedBy = operatorId
+
+  // Track availableForGigs changes
+  if (data.availableForGigs !== undefined) {
+    data.availableForGigsLastUpdateDate = new Date()
+  }
 
   // open a transaction to handle update
   const result = await prisma.$transaction(async (tx) => {
@@ -360,10 +508,33 @@ async function updateMember (currentUser, handle, query, data) {
     // clear addresses so it doesn't affect prisma.udpate
     delete data.addresses
 
+    const phonesWereUpdated = data.phones !== undefined
+    if (phonesWereUpdated) {
+      await tx.memberPhone.deleteMany({
+        where: { userId: member.userId }
+      })
+      if (data.phones.length > 0) {
+        await tx.memberPhone.createMany({
+          data: _.map(data.phones, t => ({
+            type: t.type,
+            number: t.number,
+            userId: member.userId,
+            createdBy: operatorId
+          }))
+        })
+      }
+    }
+    delete data.phones
+
+    const includeFields = { addresses: true }
+    if (_.includes(selectFields, 'phones') || phonesWereUpdated) {
+      includeFields.phones = true
+    }
+
     return tx.member.update({
       where: { userId: member.userId },
       data,
-      include: { addresses: true }
+      include: includeFields
     })
   })
 
@@ -419,6 +590,10 @@ updateMember.schema = {
       zip: Joi.string().allow('').allow(null),
       stateCode: Joi.string().allow('').allow(null),
       type: Joi.string()
+    })),
+    phones: Joi.array().items(Joi.object().keys({
+      type: Joi.string().required(),
+      number: Joi.string().regex(constants.PHONE_REGEX, 'E.164 format').required()
     })),
     verified: Joi.bool(),
     country: Joi.string(),
@@ -743,6 +918,71 @@ deleteMember.schema = {
   }).required()
 }
 
+/**
+ * Confirm member profile data.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Object} the updated member profile data
+ */
+async function confirmProfileData (currentUser, handle) {
+  const member = await helper.getMemberByHandle(handle)
+  // check authorization - only the profile owner or admin can confirm
+  if (!helper.canManageMember(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to confirm this member profile.')
+  }
+
+  // Update the lastProfileConfirmationDate
+  const result = await prisma.member.update({
+    where: { userId: member.userId },
+    data: {
+      lastProfileConfirmationDate: new Date(),
+      updatedAt: new Date(),
+      updatedBy: currentUser.userId || currentUser.sub
+    },
+    include: { addresses: true }
+  })
+
+  // convert prisma data to response format
+  prismaHelper.convertMember(result)
+
+  // clean member fields according to current user
+  return cleanMember(currentUser, result, MEMBER_FIELDS)
+}
+
+confirmProfileData.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required()
+}
+
+/**
+ * Download member profile as PDF
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Stream} PDF stream
+ */
+async function downloadProfile (currentUser, handle) {
+  // Validate handle exists
+  const member = await helper.getMemberByHandle(handle)
+
+  // Check authorization
+  if (!helper.canDownloadProfile(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to download this member profile.')
+  }
+
+  // Fetch full member data for PDF
+  const memberData = await getMember(currentUser, handle, {})
+
+  // Generate PDF stream
+  const pdfStream = await profilePDFService.generatePDF(memberData)
+
+  return pdfStream
+}
+
+downloadProfile.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required()
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
@@ -750,7 +990,9 @@ module.exports = {
   updateMember,
   verifyEmail,
   uploadPhoto,
-  deleteMember
+  deleteMember,
+  confirmProfileData,
+  downloadProfile
 }
 
 logger.buildService(module.exports)
