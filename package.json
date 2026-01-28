@@ -4,7 +4,7 @@
   "description": "TopCoder Member V6 API",
   "main": "app.js",
   "scripts": {
-    "postinstall": "prisma generate --schema=prisma/schema.prisma && prisma generate --schema=prisma/identity-schema.prisma",
+    "postinstall": "prisma generate --schema=prisma/schema.prisma",
     "start": "node app.js",
     "start:dev": "nodemon app.js",
     "lint": "standard",
@@ -36,6 +36,7 @@
     "@topcoder/resource-api-v6": "topcoder-platform/resource-api-v6.git#develop",
     "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
     "@topcoder/tc-finance-api": "topcoder-platform/tc-finance-api.git#dev",
+    "@topcoder/tc-identity-service": "topcoder-platform/identity-api-v6.git#identity-external-client",
     "react-pdf-html": "^2.1.5",
     "aws-sdk": "^2.466.0",
     "axios": "^0.27.2",

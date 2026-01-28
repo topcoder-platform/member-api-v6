@@ -1038,7 +1038,6 @@ async function fetchGamificationAchievements (userId) {
       return ''
     }
     
-    // Double-check URL is valid before making request
     const finalGamificationUrl = String(gamificationUrl || '').trim()
     if (!finalGamificationUrl || finalGamificationUrl === 'undefined' || finalGamificationUrl.includes('undefined') || finalGamificationUrl.length === 0) {
       logger.error(`Invalid final gamification URL for user ${userId}: finalUrl="${finalGamificationUrl}", baseUrl="${gamificationApiUrl}", userId=${userId}`)
@@ -1255,6 +1254,31 @@ async function getSkillNamesByIds (skillIds) {
 }
 
 /**
+ * Get member roles from identity database (role_assignment + role tables)
+ * @param {Number} userId the member userId
+ * @returns {Promise<String[]>} array of role names
+ */
+async function getMemberRoles (userId) {
+  try {
+    if (!config.IDENTITY_DB_URL) {
+      logger.warn('IDENTITY_DB_URL is not configured; cannot fetch member roles')
+      return []
+    }
+    const identityPrisma = identityPrismaManager.getIdentityClient()
+    const assignments = await identityPrisma.roleAssignment.findMany({
+      where: { subjectId: Number(userId), subjectType: 1 },
+      include: { role: true }
+    })
+    return (assignments || [])
+      .filter(a => a.role && a.role.name)
+      .map(a => a.role.name)
+  } catch (err) {
+    logger.warn(`Failed to fetch roles for user ${userId}: ${err.message}`)
+    return []
+  }
+}
+
+/**
  * Aggregate all data needed for PDF generation
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
@@ -1315,23 +1339,32 @@ async function aggregatePDFData (currentUser, handle) {
     }
   })
   
-  // Get member roles for special role display
-  // Note: For PDF, we use currentUser roles if they match the member being viewed
-  // Otherwise, we'd need to fetch member roles from an API (not available in member table)
   const specialRoles = []
   const roleMap = {
     'copilot': 'Copilot',
     'administrator': 'Administrator',
-    'admin': 'Administrator'
+    'Talent Manager': 'Talent Manager',
+    'Gamification Admin': 'Gamification Admin',
+    'Self-Service Customer': 'Self-Service Customer',
+    'Topcoder User': 'Topcoder User',
+    'TCA Admin': 'TCA Admin',
+    'Payment Admin': 'Payment Admin',
+    'Payment Viewer': 'Payment Viewer',
+    'PaymentProvider Admin': 'PaymentProvider Admin',
+    'PaymentProvider Viewer': 'PaymentProvider Viewer',
+    'TaxForm Admin': 'TaxForm Admin',
+    'TaxForm Viewer': 'TaxForm Viewer',
+    'Topcoder Staff': 'Topcoder Staff',
+    'Project Manager': 'Project Manager',
+    'Connect Manager': 'Connect Manager',
   }
   
-  // If currentUser is viewing their own profile or is admin, use their roles
-  // Check if currentUser userId matches member userId
   const currentUserId = currentUser && (currentUser.userId || currentUser.sub)
   const isSelf = currentUserId && String(currentUserId) === String(userId)
   
-  if (currentUser && currentUser.roles && (isSelf || helper.hasAdminRole(currentUser))) {
-    currentUser.roles.forEach(role => {
+  if (currentUser && (isSelf || helper.hasAdminRole(currentUser))) {
+    const memberRoles = await getMemberRoles(userId)
+    memberRoles.forEach(role => {
       const roleName = roleMap[role.toLowerCase()]
       if (roleName && !specialRoles.includes(roleName)) {
         specialRoles.push(roleName)
