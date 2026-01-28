@@ -475,9 +475,7 @@ function buildProfileTemplate (pdfData) {
     
     if (topcoderActivity.achievements) {
       const achievements = topcoderActivity.achievements
-      const plainText = typeof achievements === 'string' && achievements.includes('<')
-        ? htmlToText(achievements)
-        : achievements
+      const plainText = typeof achievements === 'string' && htmlToText(achievements)
       activityContent.push(
         React.createElement(
           Text,
