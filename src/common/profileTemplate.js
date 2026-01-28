@@ -215,6 +215,14 @@ function normalizeInlineHtml (html) {
   // strip scripts if ever present
   let out = html.replace(/<script[\s\S]*?<\/script>/gi, '')
 
+  // Remove @font-face blocks (can reference unregistered fonts like Roboto)
+  out = out.replace(/@font-face\s*\{[\s\S]*?\}/gi, '')
+
+  // Strip font-family / font shorthand from inline styles so React-PDF doesn't
+  // try to use unregistered fonts (e.g., "Roboto")
+  out = out.replace(/\sfont-family\s*:\s*[^;"']+;?/gi, '')
+  out = out.replace(/\sfont\s*:\s*[^;"']+;?/gi, '')
+
   out = out.replace(/<p\b[^>]*>/gi, '<span>')
   out = out.replace(/<\/p>/gi, '</span>')
   out = out.replace(/<br\s*\/?>/gi, ' ')
