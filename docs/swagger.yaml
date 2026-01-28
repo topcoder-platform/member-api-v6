@@ -619,6 +619,55 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/skills/{skillid}':
+    get:
+      tags:
+        - Basic
+      description: |-
+        Get a specific member skill by skill ID.
+
+        Authorization:
+          - Public: Without a token responses omit secure and communication fields.
+          - JWT roles: The profile owner or `administrator`/`admin` roles may view secure fields.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: path
+          name: skillid
+          required: true
+          type: string
+          description: The skill id to retrieve
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberSkillsWithActivity'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+
   /members:
     get:
       tags:
@@ -2789,6 +2838,63 @@ definitions:
             description:
               type: string
               example: 'Skill verified by proof of capability'
+
+  MemberSkillsWithActivity:
+    allOf:
+      - $ref: '#/definitions/MemberSkills'
+      - type: object
+        properties:
+          activity:
+            type: object
+            properties:
+              challenge:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    format: int64
+                  lastSources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          format: int64
+                        name:
+                          type: string
+              certification:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  lastSources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        completionEventId:
+                          type: string
+                        dashedName:
+                          type: string
+                        title:
+                          type: string
+              course:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                  lastSources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        completionEventId:
+                          type: string
+                        certification:
+                          type: string
+                        title:
+                          type: string
 
   MemberDistributionStats:
     type: object

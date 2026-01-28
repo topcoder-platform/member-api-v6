@@ -234,5 +234,13 @@ module.exports = {
       auth: 'jwt',
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
     }
+  },
+  '/members/:handle/skills/:skillid': {
+    get: {
+      controller: 'MemberController',
+      method: 'getMemberSkill',
+      auth: 'jwt',
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
+    }
   }
 }
