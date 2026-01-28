@@ -81,6 +81,14 @@ module.exports = {
       access: constants.ADMIN_ROLES
     }
   },
+  '/members/:handle/change_handle': {
+    patch: {
+      controller: 'MemberController',
+      method: 'updateHandle',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
+  },
   '/members/:handle/profileCompleteness': {
     get: {
       controller: 'MemberController',

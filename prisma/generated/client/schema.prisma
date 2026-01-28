@@ -50,6 +50,7 @@ model member {
   newEmailVerifyToken     String?
   newEmailVerifyTokenDate DateTime?
   addresses               memberAddress[]
+  phones                  memberPhone[]
 
   country                        String?
   homeCountryCode                String?
@@ -103,6 +104,24 @@ model memberAddress {
 
   @@index([userId])
   @@index([userId, type])
+  @@schema("members")
+}
+
+model memberPhone {
+  id     String @id @default(uuid())
+  userId BigInt
+  type   String
+  number String
+
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  createdAt DateTime  @default(now())
+  createdBy String
+  updatedAt DateTime? @updatedAt
+  updatedBy String?
+
+  @@unique([userId, number])
+  @@index([userId])
   @@schema("members")
 }
 
@@ -717,6 +736,7 @@ enum WorkIndustryType {
   TechAndTechnologyService
   Telecoms
   TravelAndHospitality
+  Other
 
   @@schema("members")
 }
@@ -727,6 +747,7 @@ model memberTraitWork {
   memberTraitId BigInt
 
   industry         WorkIndustryType?
+  otherIndustry    String?
   companyName      String
   position         String
   startDate        DateTime?
