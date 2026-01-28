@@ -86,6 +86,7 @@ module.exports = {
       controller: 'MemberController',
       method: 'updateHandle',
       auth: 'jwt',
+      access: constants.ADMIN_ROLES,
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
     }
   },
