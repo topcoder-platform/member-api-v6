@@ -1062,6 +1062,9 @@ async function getMemberSkill (currentUser, handle, skillId) {
       skill: {
         include: {
           category: true, skillEvents: {
+            where: {
+              userId: helper.bigIntToNumber(member.userId),
+            },
             select: {
               createdAt: true,
               sourceId: true,
