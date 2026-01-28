@@ -22,6 +22,7 @@ const { bufferContainsScript } = require('../common/image')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const identityPrismaManager = require('../common/identityPrisma')
+const vanillaDb = require('../common/vanillaDb')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 
@@ -314,6 +315,9 @@ async function updateMember (currentUser, handle, query, data) {
   if (!helper.canManageMember(currentUser, member)) {
     throw new errors.ForbiddenError('You are not allowed to update the member.')
   }
+  if (_.has(data, 'handle') || _.has(data, 'handleLower')) {
+    throw new errors.BadRequestError('Handle updates must use the handle update endpoint.')
+  }
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
   // check if email has changed
@@ -406,6 +410,8 @@ updateMember.schema = {
     fields: Joi.string()
   }),
   data: Joi.object().keys({
+    handle: Joi.forbidden(),
+    handleLower: Joi.forbidden(),
     firstName: Joi.string(),
     lastName: Joi.string(),
     description: Joi.string().allow(''),
@@ -428,6 +434,124 @@ updateMember.schema = {
     tracks: Joi.array().items(Joi.string()),
     availableForGigs: Joi.bool().allow(null),
     namesAndHandleAppearance: Joi.string().allow(null)
+  }).required()
+}
+
+/**
+ * Update member handle.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {Object} query the query parameters
+ * @param {Object} data the handle update payload
+ * @returns {Object} the updated member data
+ */
+async function updateHandle (currentUser, handle, query, data) {
+  const operatorId = currentUser.userId || currentUser.sub
+  const member = await helper.getMemberByHandle(handle)
+
+  if (!helper.canManageMember(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to update the member handle.')
+  }
+
+  const newHandle = (data.newHandle || '').trim()
+  if (!newHandle) {
+    throw new errors.BadRequestError('newHandle is required')
+  }
+
+  const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
+
+  if (newHandle === member.handle) {
+    return getMember(currentUser, handle, query)
+  }
+
+  const newHandleLower = newHandle.toLowerCase()
+  const existingMember = await prisma.member.findUnique({
+    where: { handleLower: newHandleLower }
+  })
+  if (existingMember && String(existingMember.userId) !== String(member.userId)) {
+    throw new errors.BadRequestError(`Handle "${newHandle}" is already registered`)
+  }
+
+  const identityPrisma = identityPrismaManager.getIdentityClient()
+  const identityUserId = helper.bigIntToNumber(member.userId)
+  const existingIdentity = await identityPrisma.user.findFirst({
+    where: { handle_lower: newHandleLower }
+  })
+  if (existingIdentity && Number(existingIdentity.user_id) !== identityUserId) {
+    throw new errors.BadRequestError(`Handle "${newHandle}" is already registered`)
+  }
+
+  const vanillaPool = vanillaDb.getVanillaPool()
+  const now = new Date()
+  let updatedMember
+  let identityUpdated = false
+  let memberUpdated = false
+  let vanillaUpdated = false
+
+  try {
+    await updateIdentityHandle(identityUserId, newHandle, now)
+    identityUpdated = true
+
+    updatedMember = await prisma.member.update({
+      where: { userId: member.userId },
+      data: {
+        handle: newHandle,
+        handleLower: newHandleLower,
+        updatedAt: now,
+        updatedBy: operatorId
+      },
+      include: { addresses: true }
+    })
+    memberUpdated = true
+
+    await updateVanillaHandle(member.handle, newHandle, vanillaPool)
+    vanillaUpdated = true
+  } catch (err) {
+    if (vanillaUpdated) {
+      try {
+        await updateVanillaHandle(newHandle, member.handle, vanillaPool)
+      } catch (rollbackErr) {
+        logger.error(`Failed to rollback Vanilla handle update for ${member.userId}: ${rollbackErr.message}`)
+      }
+    }
+    if (memberUpdated) {
+      try {
+        await prisma.member.update({
+          where: { userId: member.userId },
+          data: {
+            handle: member.handle,
+            handleLower: member.handleLower,
+            updatedAt: new Date(),
+            updatedBy: operatorId
+          }
+        })
+      } catch (rollbackErr) {
+        logger.error(`Failed to rollback member handle update for ${member.userId}: ${rollbackErr.message}`)
+      }
+    }
+    if (identityUpdated) {
+      try {
+        await updateIdentityHandle(identityUserId, member.handle, new Date())
+      } catch (rollbackErr) {
+        logger.error(`Failed to rollback identity handle update for ${member.userId}: ${rollbackErr.message}`)
+      }
+    }
+    throw err
+  }
+
+  prismaHelper.convertMember(updatedMember)
+  await helper.postBusEvent(constants.TOPICS.MemberUpdated, updatedMember)
+  return cleanMember(currentUser, updatedMember, selectFields)
+}
+
+updateHandle.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required(),
+  query: Joi.object().keys({
+    fields: Joi.string()
+  }),
+  data: Joi.object().keys({
+    newHandle: Joi.string().required()
   }).required()
 }
 
@@ -698,6 +822,39 @@ function generateNanoId (size = 21) {
   return id
 }
 
+async function updateVanillaHandle (oldHandle, newHandle, pool) {
+  const vanillaPool = pool || vanillaDb.getVanillaPool()
+  const [result] = await vanillaPool.execute(
+    'UPDATE vanilla.GDN_User SET Name = ? WHERE Name = ?',
+    [newHandle, oldHandle]
+  )
+  if (!result || result.affectedRows === 0) {
+    throw new errors.NotFoundError(`Vanilla user with handle: "${oldHandle}" doesn't exist`)
+  }
+}
+
+async function updateIdentityHandle (userId, handle, timestamp) {
+  const identityPrisma = identityPrismaManager.getIdentityClient()
+  const lowerHandle = handle.toLowerCase()
+  const updatedAt = timestamp || new Date()
+
+  let userResult
+  try {
+    userResult = await identityPrisma.$executeRaw`
+      UPDATE identity."user"
+      SET handle=${handle}, handle_lower=${lowerHandle}, modify_date=${updatedAt}
+      WHERE user_id=${userId}
+    `
+  } catch (err) {
+    logger.error(`Failed to update identity handle for user ${userId}: ${err.message}`)
+    throw err
+  }
+
+  if (userResult === 0) {
+    throw new Error(`Identity user not updated for user ${userId}`)
+  }
+}
+
 async function updateIdentityRecords (userId, handle, email, timestamp) {
   const identityPrisma = identityPrismaManager.getIdentityClient()
   const lowerHandle = handle.toLowerCase()
@@ -748,6 +905,7 @@ module.exports = {
   getProfileCompleteness,
   getMemberUserIdSignature,
   updateMember,
+  updateHandle,
   verifyEmail,
   uploadPhoto,
   deleteMember

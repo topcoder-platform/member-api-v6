@@ -286,6 +286,8 @@ paths:
       description: |-
         Update the member profile by handle.
 
+        Handle updates are not supported on this endpoint. Use `PATCH /members/{handle}/change_handle` to change handles.
+
         If the email has been changed, the email change process starts and a verification email is sent to the new and old email address.
 
         Authorization:
@@ -307,6 +309,59 @@ paths:
           required: true
           schema:
             $ref: '#/definitions/MemberProfile'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/MemberProfile'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/change_handle':
+    patch:
+      tags:
+        - Basic
+      description: |-
+        Update the member handle.
+
+        Authorization:
+          - JWT roles: Only the profile owner or users with `administrator`/`admin` roles may update member data.
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: query
+          name: fields
+          required: false
+          type: string
+          description: >
+            Comma separated list of fields to include in the response. Defaults to all member fields.
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/MemberHandleUpdate'
       responses:
         '200':
           description: OK
@@ -1793,6 +1848,14 @@ definitions:
         description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
       updatedBy:
         type: string
+  MemberHandleUpdate:
+    type: object
+    required:
+      - newHandle
+    properties:
+      newHandle:
+        type: string
+        description: New handle for the member.
   EmailVerificationResult:
     type: object
     properties:
