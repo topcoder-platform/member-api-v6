@@ -1014,8 +1014,7 @@ confirmProfileData.schema = {
  */
 async function fetchGamificationAchievements (userId) {
   try {
-    const gamificationApiUrl = config.GAMIFICATION_API_URL || process.env.GAMIFICATION_API_URL || 'https://api.topcoder-dev.com/v5/gamification'
-    if (!gamificationApiUrl) {
+    if (!config.GAMIFICATION_API_URL) {
       logger.warn(`GAMIFICATION_API_URL is not configured for user ${userId}`)
       return ''
     }
@@ -1032,7 +1031,7 @@ async function fetchGamificationAchievements (userId) {
       return ''
     }
     
-    const gamificationUrl = `${gamificationApiUrl}/badges/assigned/${userId}`
+    const gamificationUrl = `${config.GAMIFICATION_API_URL}/badges/assigned/${userId}`
     
     if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
       logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
@@ -1124,8 +1123,7 @@ async function fetchGamificationAchievements (userId) {
  */
 async function fetchCertificationsAndCourses (userId) {
   try {
-    const learningPathsApiUrl = config.LEARNING_PATHS_API_URL || process.env.LEARNING_PATHS_API_URL || 'https://api.topcoder-dev.com/v5/learning-paths'
-    if (!learningPathsApiUrl) {
+    if (!config.LEARNING_PATHS_API_URL) {
       logger.warn(`LEARNING_PATHS_API_URL is not configured for user ${userId}`)
       return { certifications: [], courses: [] }
     }
@@ -1142,7 +1140,7 @@ async function fetchCertificationsAndCourses (userId) {
       return { certifications: [], courses: [] }
     }
     
-    const learningPathsUrl = `${learningPathsApiUrl}/completed-certifications/${userId}`
+    const learningPathsUrl = `${config.LEARNING_PATHS_API_URL}/completed-certifications/${userId}`
     
     if (!learningPathsUrl || typeof learningPathsUrl !== 'string' || !userId) {
       logger.error(`Invalid learning-paths URL for user ${userId}: learningPathsUrl=${learningPathsUrl}, userId=${userId}`)
