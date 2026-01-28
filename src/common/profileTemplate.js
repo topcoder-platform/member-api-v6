@@ -209,6 +209,20 @@ function createSectionHeader (title) {
   )
 }
 
+function normalizeInlineHtml (html) {
+  if (!html || typeof html !== 'string') return ''
+
+  // strip scripts if ever present
+  let out = html.replace(/<script[\s\S]*?<\/script>/gi, '')
+
+  out = out.replace(/<p\b[^>]*>/gi, '<span>')
+  out = out.replace(/<\/p>/gi, '</span>')
+  out = out.replace(/<br\s*\/?>/gi, ' ')
+  out = out.replace(/\s*\n\s*/g, ' ')
+
+  return out.trim()
+}
+
 /**
  * Create skills subsection
  */
@@ -474,12 +488,20 @@ function buildProfileTemplate (pdfData) {
     }
     
     if (topcoderActivity.achievements) {
+      const achievements = topcoderActivity.achievements
+      const hasHtml = typeof achievements === 'string' && achievements.includes('<')
       activityContent.push(
-        React.createElement(
-          Text,
-          { key: 'achievements', style: styles.activityItem },
-          topcoderActivity.achievements
-        )
+        hasHtml
+          ? React.createElement(
+            Html,
+            { key: 'achievements', style: styles.activityItem },
+            normalizeInlineHtml(achievements)
+          )
+          : React.createElement(
+            Text,
+            { key: 'achievements', style: styles.activityItem },
+            achievements
+          )
       )
     }
     
