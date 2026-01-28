@@ -36,6 +36,7 @@
     "@topcoder/resource-api-v6": "topcoder-platform/resource-api-v6.git#develop",
     "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
     "@topcoder/tc-finance-api": "topcoder-platform/tc-finance-api.git#dev",
+    "@topcoder/engagements-api-v6": "topcoder-platform/engagements-api-v6.git#prisma-client",
     "aws-sdk": "^2.466.0",
     "axios": "^0.27.2",
     "bluebird": "^3.5.1",

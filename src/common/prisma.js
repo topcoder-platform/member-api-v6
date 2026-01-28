@@ -3,17 +3,20 @@ const {
   PrismaClient: MembersPrismaClient,
   Prisma
 } = require('../../prisma/generated/client')
+const config = require('config')
 const { PrismaClient: FinancePrismaClient } = require('@topcoder/tc-finance-api/packages/finance-prisma-client')
 const { PrismaClient: SkillsPrismaClient } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
 const { PrismaClient: ResourcesPrismaClient } = require('@topcoder/resource-api-v6/packages/resources-prisma-client')
 const { PrismaClient: ChallengesPrismaClient } = require('@topcoder/challenge-api-v6/packages/challenge-prisma-client')
 const { PrismaClient: AcademyPrismaClient } = require('@topcoder/learning-paths-api/packages/academy-prisma-client')
-const config = require('config')
+const { PrismaClient: EngagementsPrismaClient } = require('@topcoder/engagements-api-v6/packages/engagements-prisma-client')
 
 const skillsDbUrl = process.env.SKILLS_DB_URL
 const challengesDbUrl = process.env.CHALLENGES_DB_URL
 const academyDbUrl = process.env.ACADEMY_DB_URL
-const resourcesDbUrl = config.RESOURCES_DB_URL
+const resourcesDbUrl = process.env.RESOURCES_DB_URL
+const engagementsDbUrl = process.env.ENGAGEMENTS_DB_URL
+const financeDbUrl = process.env.FINANCE_DATABASE_URL
 
 const clientOptions = {
   transactionOptions: {
@@ -77,6 +80,22 @@ const getAcademyClient = () => {
   return academyClient
 }
 
+let engagementsClient
+const getEngagementsClient = () => {
+  if (!engagementsClient) {
+    if (!engagementsDbUrl) {
+      throw new Error('ENGAGEMENTS_DB_URL must be set for engagements Prisma client')
+    }
+    console.log('here', engagementsDbUrl);
+    
+    engagementsClient = new EngagementsPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: engagementsDbUrl } }
+    })
+  }
+  return engagementsClient
+}
+
 let resourcesClient
 const getResourcesClient = () => {
   if (!resourcesClient) {
@@ -100,13 +119,12 @@ let financeClient
  */
 const getFinanceClient = () => {
   if (!financeClient) {
-    const connectionString = config.FINANCE_DATABASE_URL
-    if (!connectionString) {
+    if (!financeDbUrl) {
       throw new Error('FINANCE_DATABASE_URL is not configured. Please set FINANCE_DATABASE_URL environment variable or add it to config.')
     }
     financeClient = new FinancePrismaClient({
       ...clientOptions,
-      datasources: { db: { url: connectionString } }
+      datasources: { db: { url: financeDbUrl } }
     })
   }
   return financeClient
@@ -119,6 +137,7 @@ module.exports = {
   getSkillsClient,
   getChallengesClient,
   getAcademyClient,
+  getEngagementsClient,
   getResourcesClient,
   getFinanceClient
 }
