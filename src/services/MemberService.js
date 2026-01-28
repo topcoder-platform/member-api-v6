@@ -25,6 +25,9 @@ const { Prisma } = prismaManager
 const identityPrismaManager = require('../common/identityPrisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
+const challengesPrisma = prismaManager.getChallengesClient()
+const academyPrisma = prismaManager.getAcademyClient()
+const resourcesPrisma = prismaManager.getResourcesClient()
 const profilePDFService = require('./ProfilePDFService')
 const request = require('request')
 const cityTimezones = require('city-timezones')
@@ -33,7 +36,7 @@ const moment = require('moment-timezone')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified','recentActivity']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -91,6 +94,7 @@ function omitMemberAttributes (currentUser, mb) {
   const isSelf = currentUser && currentUser.handle && mb.handleLower &&
     currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
   const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
@@ -108,6 +112,10 @@ function omitMemberAttributes (currentUser, mb) {
     delete res.identityVerified
   }
 
+  if (!canSeeRecentActivity && res.recentActivity !== undefined) {
+    delete res.recentActivity
+  }
+
   return res
 }
 
@@ -123,6 +131,33 @@ async function getMemberSkills (userId) {
     include: prismaHelper.skillsIncludeParams
   })
   return prismaHelper.buildMemberSkills(skillList)
+}
+
+/**
+ * Compute member recent activity with user id
+ * @param {BigInt} userId prisma BigInt userId
+ * @returns {Boolean} true if member has recent activity in last 3 months
+ */
+async function getMemberRecentActivity (userId) {
+  try {
+    const threeMonthsAgo = new Date()
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+    const recent = await resourcesPrisma.resource.findFirst({
+      where: {
+        memberId: String(userId),
+        resourceRole: {
+          name: { in: ['Submitter', 'Copilot', 'Reviewer'] }
+        },
+        createdAt: { gte: threeMonthsAgo }
+      }
+    })
+
+    return !!recent
+  } catch (err) {
+    console.error(`Failed to query recent activity for userId: ${userId}`, err)
+    return false
+  }
 }
 
 /**
@@ -182,11 +217,15 @@ async function getMember (currentUser, handle, query) {
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
   
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
   // Identity verified field has same access control as phones
   const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
   const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
 
-  // Conditionally add phones to query if user has permission
+  const threeMonthsAgo = new Date() 
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+  // Conditionally add phones and recent activity to query if user has permission
   const modifiedQuery = { ...query }
   if (canSeePhones) {
     // If fields are specified, check if phones is already included
@@ -228,11 +267,20 @@ async function getMember (currentUser, handle, query) {
     }
   }
 
+  // get member recent activity
+  if(canSeeRecentActivity) {
+    member.recentActivity = await getMemberRecentActivity(member.userId)
+  }
+
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
   // Add phones to selectFields if user has permission
   if (canSeePhones && !_.includes(selectFields, 'phones')) {
     selectFields.push('phones')
+  }
+  // add recent activity to selectFields if permitted user
+  if (_.includes(selectFields, 'recentActivity') && canSeeRecentActivity) {
+    selectFields.push('recentActivity')
   }
   // Add identityVerified to selectFields if user has permission
   if (canSeeIdentityVerified && !_.includes(selectFields, 'identityVerified')) {
@@ -241,6 +289,7 @@ async function getMember (currentUser, handle, query) {
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
+
 
 getMember.schema = {
   currentUser: Joi.any(),
@@ -1376,10 +1425,162 @@ downloadProfile.schema = {
   handle: Joi.string().required()
 }
 
+/**
+ * Get a specific member skill by skill ID
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {String} skillId the skill ID
+ * @returns {Object} the member skill data
+ */
+async function getMemberSkill (currentUser, handle, skillId) {
+  // Get member data first to get userId
+  const member = await getMemberData(handle, {})
+  
+  if (!member || !member.userId) {
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
+  }
+  
+  // Check authorization
+  if (!helper.canDownloadProfile(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to view this member profile.')
+  }
+
+  const dbSkill = await skillsPrisma.userSkill.findFirst({
+    where: {
+      userId: helper.bigIntToNumber(member.userId),
+      skillId: skillId
+    },
+    include: {
+      ...prismaHelper.skillsIncludeParams,
+      skill: {
+        include: {
+          category: true, skillEvents: {
+            select: {
+              createdAt: true,
+              sourceId: true,
+              sourceType: {
+                select: { name: true }
+              },
+            }
+          }
+        }
+      },
+    }
+  })
+
+  if (!dbSkill) {
+    throw new errors.NotFoundError(`Skill with ID: "${skillId}" not found for member: "${handle}"`)
+  }
+
+  // Build and return the skill data
+  const [skill] = prismaHelper.buildMemberSkills([dbSkill]);
+  
+  // Replace lastSources IDs with fetched details
+  if (skill.activity) {
+    const fetchPromises = []
+    
+    // Prepare challenge fetch
+    if (skill.activity.challenge?.sources?.length > 0) {
+      const challengeIds = skill.activity.challenge.sources
+      fetchPromises.push(
+        challengesPrisma.Challenge.findMany({
+          where: { id: { in: challengeIds.slice(0, 3) } },
+          select: { id: true, name: true }
+        }).then(dbChallenges => {
+          const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
+          skill.activity.challenge = {
+            count: challengeIds.length,
+            lastSources: challengeIds
+              .map(id => challengeMap.get(id))
+              .filter(Boolean)
+          }
+        })
+      )
+    }
+    
+    // Prepare certification fetch
+    if (skill.activity.certification?.sources?.length > 0) {
+      const certificationIds = skill.activity.certification.sources.filter(Boolean)
+      if (certificationIds.length > 0) {
+        fetchPromises.push(
+          academyPrisma.CertificationEnrollments.findMany({
+            where: { completionEventId: { in: certificationIds.slice(0, 3) } },
+            select: {
+              completionEventId: true,
+              TopcoderCertification: {
+                select: { dashedName: true, title: true }
+              }
+            }
+          }).then(dbCertifications => {
+            const certificationMap = new Map(dbCertifications.map(c => [
+              c.completionEventId,
+              {
+                completionEventId: c.completionEventId,
+                dashedName: c.TopcoderCertification?.dashedName,
+                title: c.TopcoderCertification?.title
+              }
+            ]))
+            skill.activity.certification = {
+              count: certificationIds.length,
+              lastSources: certificationIds
+                .map(id => certificationMap.get(id))
+                .filter(Boolean)
+            }
+          })
+        )
+      }
+    }
+    
+    // Prepare course fetch
+    if (skill.activity.course?.sources?.length > 0) {
+      const courseIds = skill.activity.course.sources.filter(Boolean)
+      if (courseIds.length > 0) {
+        fetchPromises.push(
+          academyPrisma.FccCertificationProgresses.findMany({
+            where: { completionEventId: { in: courseIds.slice(0, 3) } },
+            select: {
+              certification: true,
+              completionEventId: true,
+              FccCourses: { select: { title: true } }
+            }
+          }).then(dbCourses => {
+            const courseMap = new Map(dbCourses.map(c => [
+              c.completionEventId,
+              {
+                completionEventId: c.completionEventId,
+                certification: c.certification,
+                title: c.FccCourses?.title
+              }
+            ]))
+            skill.activity.course = {
+              count: courseIds.length,
+              lastSources: courseIds
+                .map(id => courseMap.get(id))
+                .filter(Boolean)
+            }
+          })
+        )
+      }
+    }
+    
+    // Fetch all sources in parallel
+    await Promise.all(fetchPromises)
+  }
+  
+  return skill
+}
+
+getMemberSkill.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required(),
+  skillId: Joi.string().uuid().required()
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
   getMemberUserIdSignature,
+  getMemberSkill,
   updateMember,
   verifyEmail,
   uploadPhoto,
