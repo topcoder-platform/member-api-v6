@@ -67,6 +67,7 @@ workflows:
           branches:
             only:
             - develop
+            - use-pnpm
             - PM-3458
             
     # Production builds are exectuted only on tagged commits to the
