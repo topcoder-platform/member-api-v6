@@ -127,9 +127,6 @@ module.exports = {
   
   // Gamification API
   GAMIFICATION_API_URL: process.env.GAMIFICATION_API_URL || 'https://api.topcoder-dev.com/v5/gamification',
-  
-  // Topcoder API V5 base URL
-  API_V5: process.env.API_V5 || 'https://api.topcoder-dev.com/v5',
 
   HASHING_KEYS: {
     USERFLOW: process.env.USERFLOW_PRIVATE_KEY
