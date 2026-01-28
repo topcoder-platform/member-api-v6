@@ -210,29 +210,6 @@ function createSectionHeader (title) {
   )
 }
 
-function normalizeInlineHtml (html) {
-  if (!html || typeof html !== 'string') return ''
-
-  // strip scripts if ever present
-  let out = html.replace(/<script[\s\S]*?<\/script>/gi, '')
-
-  // Remove @font-face blocks (can reference unregistered fonts like Roboto)
-  out = out.replace(/@font-face\s*\{[\s\S]*?\}/gi, '')
-
-  // Strip font-family / font shorthand from inline styles so React-PDF doesn't
-  // try to use unregistered fonts (e.g., "Roboto")
-  // Match with \s* so we also catch "font-family: ..." at start of style (no leading space)
-  out = out.replace(/\s*font-family\s*:\s*[^;]+;?/gi, '')
-  out = out.replace(/\s*font\s*:\s*[^;]+;?/gi, '')
-
-  out = out.replace(/<p\b[^>]*>/gi, '<span>')
-  out = out.replace(/<\/p>/gi, '</span>')
-  out = out.replace(/<br\s*\/?>/gi, ' ')
-  out = out.replace(/\s*\n\s*/g, ' ')
-
-  return out.trim()
-}
-
 /**
  * Create skills subsection
  */
