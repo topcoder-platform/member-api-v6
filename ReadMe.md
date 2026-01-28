@@ -79,6 +79,7 @@ The following parameters can be set in config files or in env variables:
 - PORT: the server port, default is 3000
 - AUTH_SECRET: The authorization secret used during token verification.
 - VALID_ISSUERS: The valid issuer of tokens.
+- VANILLA_DB_URL: MySQL connection string for the Vanilla forums database.
 - AUTH0_URL: AUTH0 URL, used to get M2M token
 - AUTH0_PROXY_SERVER_URL: AUTH0 proxy server URL, used to get M2M token
 - AUTH0_AUDIENCE: AUTH0 audience, used to get M2M token

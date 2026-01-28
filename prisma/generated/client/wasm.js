@@ -146,6 +146,8 @@ exports.Prisma.MemberScalarFieldEnum = {
   loginCount: 'loginCount',
   lastLoginDate: 'lastLoginDate',
   availableForGigs: 'availableForGigs',
+  availableForGigsLastUpdateDate: 'availableForGigsLastUpdateDate',
+  lastProfileConfirmationDate: 'lastProfileConfirmationDate',
   skillScoreDeduction: 'skillScoreDeduction',
   namesAndHandleAppearance: 'namesAndHandleAppearance',
   aggregatedSkills: 'aggregatedSkills',
@@ -165,6 +167,17 @@ exports.Prisma.MemberAddressScalarFieldEnum = {
   zip: 'zip',
   stateCode: 'stateCode',
   type: 'type',
+  createdAt: 'createdAt',
+  createdBy: 'createdBy',
+  updatedAt: 'updatedAt',
+  updatedBy: 'updatedBy'
+};
+
+exports.Prisma.MemberPhoneScalarFieldEnum = {
+  id: 'id',
+  userId: 'userId',
+  type: 'type',
+  number: 'number',
   createdAt: 'createdAt',
   createdBy: 'createdBy',
   updatedAt: 'updatedAt',
@@ -552,11 +565,14 @@ exports.Prisma.MemberTraitWorkScalarFieldEnum = {
   id: 'id',
   memberTraitId: 'memberTraitId',
   industry: 'industry',
+  otherIndustry: 'otherIndustry',
   companyName: 'companyName',
   position: 'position',
   startDate: 'startDate',
   endDate: 'endDate',
   working: 'working',
+  description: 'description',
+  associatedSkills: 'associatedSkills',
   createdAt: 'createdAt',
   createdBy: 'createdBy',
   updatedAt: 'updatedAt',
@@ -718,12 +734,14 @@ exports.WorkIndustryType = exports.$Enums.WorkIndustryType = {
   PublicSector: 'PublicSector',
   TechAndTechnologyService: 'TechAndTechnologyService',
   Telecoms: 'Telecoms',
-  TravelAndHospitality: 'TravelAndHospitality'
+  TravelAndHospitality: 'TravelAndHospitality',
+  Other: 'Other'
 };
 
 exports.Prisma.ModelName = {
   member: 'member',
   memberAddress: 'memberAddress',
+  memberPhone: 'memberPhone',
   memberMaxRating: 'memberMaxRating',
   distributionStats: 'distributionStats',
   memberFinancial: 'memberFinancial',

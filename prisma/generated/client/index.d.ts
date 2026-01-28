@@ -24,6 +24,11 @@ export type member = $Result.DefaultSelection<Prisma.$memberPayload>
  */
 export type memberAddress = $Result.DefaultSelection<Prisma.$memberAddressPayload>
 /**
+ * Model memberPhone
+ * 
+ */
+export type memberPhone = $Result.DefaultSelection<Prisma.$memberPhonePayload>
+/**
  * Model memberMaxRating
  * 
  */
@@ -235,7 +240,8 @@ export const WorkIndustryType: {
   PublicSector: 'PublicSector',
   TechAndTechnologyService: 'TechAndTechnologyService',
   Telecoms: 'Telecoms',
-  TravelAndHospitality: 'TravelAndHospitality'
+  TravelAndHospitality: 'TravelAndHospitality',
+  Other: 'Other'
 };
 
 export type WorkIndustryType = (typeof WorkIndustryType)[keyof typeof WorkIndustryType]
@@ -410,6 +416,16 @@ export class PrismaClient<
     * ```
     */
   get memberAddress(): Prisma.memberAddressDelegate<ExtArgs, ClientOptions>;
+
+  /**
+   * `prisma.memberPhone`: Exposes CRUD operations for the **memberPhone** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more MemberPhones
+    * const memberPhones = await prisma.memberPhone.findMany()
+    * ```
+    */
+  get memberPhone(): Prisma.memberPhoneDelegate<ExtArgs, ClientOptions>;
 
   /**
    * `prisma.memberMaxRating`: Exposes CRUD operations for the **memberMaxRating** model.
@@ -1132,6 +1148,7 @@ export namespace Prisma {
   export const ModelName: {
     member: 'member',
     memberAddress: 'memberAddress',
+    memberPhone: 'memberPhone',
     memberMaxRating: 'memberMaxRating',
     distributionStats: 'distributionStats',
     memberFinancial: 'memberFinancial',
@@ -1178,7 +1195,7 @@ export namespace Prisma {
       omit: GlobalOmitOptions
     }
     meta: {
-      modelProps: "member" | "memberAddress" | "memberMaxRating" | "distributionStats" | "memberFinancial" | "memberHistoryStats" | "memberDevelopHistoryStats" | "memberDataScienceHistoryStats" | "memberStats" | "memberCopilotStats" | "memberDevelopStats" | "memberDevelopStatsItem" | "memberDesignStats" | "memberDesignStatsItem" | "memberDataScienceStats" | "memberSrmStats" | "memberSrmChallengeDetail" | "memberSrmDivisionDetail" | "memberMarathonStats" | "memberTraits" | "memberTraitDevice" | "memberTraitSoftware" | "memberTraitServiceProvider" | "memberTraitWork" | "memberTraitEducation" | "memberTraitBasicInfo" | "memberTraitLanguage" | "memberTraitOnboardChecklist" | "memberTraitPersonalization" | "memberTraitCommunity"
+      modelProps: "member" | "memberAddress" | "memberPhone" | "memberMaxRating" | "distributionStats" | "memberFinancial" | "memberHistoryStats" | "memberDevelopHistoryStats" | "memberDataScienceHistoryStats" | "memberStats" | "memberCopilotStats" | "memberDevelopStats" | "memberDevelopStatsItem" | "memberDesignStats" | "memberDesignStatsItem" | "memberDataScienceStats" | "memberSrmStats" | "memberSrmChallengeDetail" | "memberSrmDivisionDetail" | "memberMarathonStats" | "memberTraits" | "memberTraitDevice" | "memberTraitSoftware" | "memberTraitServiceProvider" | "memberTraitWork" | "memberTraitEducation" | "memberTraitBasicInfo" | "memberTraitLanguage" | "memberTraitOnboardChecklist" | "memberTraitPersonalization" | "memberTraitCommunity"
       txIsolationLevel: Prisma.TransactionIsolationLevel
     }
     model: {
@@ -1327,6 +1344,80 @@ export namespace Prisma {
           count: {
             args: Prisma.memberAddressCountArgs<ExtArgs>
             result: $Utils.Optional<MemberAddressCountAggregateOutputType> | number
+          }
+        }
+      }
+      memberPhone: {
+        payload: Prisma.$memberPhonePayload<ExtArgs>
+        fields: Prisma.memberPhoneFieldRefs
+        operations: {
+          findUnique: {
+            args: Prisma.memberPhoneFindUniqueArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload> | null
+          }
+          findUniqueOrThrow: {
+            args: Prisma.memberPhoneFindUniqueOrThrowArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>
+          }
+          findFirst: {
+            args: Prisma.memberPhoneFindFirstArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload> | null
+          }
+          findFirstOrThrow: {
+            args: Prisma.memberPhoneFindFirstOrThrowArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>
+          }
+          findMany: {
+            args: Prisma.memberPhoneFindManyArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>[]
+          }
+          create: {
+            args: Prisma.memberPhoneCreateArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>
+          }
+          createMany: {
+            args: Prisma.memberPhoneCreateManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          createManyAndReturn: {
+            args: Prisma.memberPhoneCreateManyAndReturnArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>[]
+          }
+          delete: {
+            args: Prisma.memberPhoneDeleteArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>
+          }
+          update: {
+            args: Prisma.memberPhoneUpdateArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>
+          }
+          deleteMany: {
+            args: Prisma.memberPhoneDeleteManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          updateMany: {
+            args: Prisma.memberPhoneUpdateManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          updateManyAndReturn: {
+            args: Prisma.memberPhoneUpdateManyAndReturnArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>[]
+          }
+          upsert: {
+            args: Prisma.memberPhoneUpsertArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberPhonePayload>
+          }
+          aggregate: {
+            args: Prisma.MemberPhoneAggregateArgs<ExtArgs>
+            result: $Utils.Optional<AggregateMemberPhone>
+          }
+          groupBy: {
+            args: Prisma.memberPhoneGroupByArgs<ExtArgs>
+            result: $Utils.Optional<MemberPhoneGroupByOutputType>[]
+          }
+          count: {
+            args: Prisma.memberPhoneCountArgs<ExtArgs>
+            result: $Utils.Optional<MemberPhoneCountAggregateOutputType> | number
           }
         }
       }
@@ -3496,6 +3587,7 @@ export namespace Prisma {
   export type GlobalOmitConfig = {
     member?: memberOmit
     memberAddress?: memberAddressOmit
+    memberPhone?: memberPhoneOmit
     memberMaxRating?: memberMaxRatingOmit
     distributionStats?: distributionStatsOmit
     memberFinancial?: memberFinancialOmit
@@ -3624,12 +3716,14 @@ export namespace Prisma {
 
   export type MemberCountOutputType = {
     addresses: number
+    phones: number
     historyStats: number
     memberStats: number
   }
 
   export type MemberCountOutputTypeSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     addresses?: boolean | MemberCountOutputTypeCountAddressesArgs
+    phones?: boolean | MemberCountOutputTypeCountPhonesArgs
     historyStats?: boolean | MemberCountOutputTypeCountHistoryStatsArgs
     memberStats?: boolean | MemberCountOutputTypeCountMemberStatsArgs
   }
@@ -3650,6 +3744,13 @@ export namespace Prisma {
    */
   export type MemberCountOutputTypeCountAddressesArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     where?: memberAddressWhereInput
+  }
+
+  /**
+   * MemberCountOutputType without action
+   */
+  export type MemberCountOutputTypeCountPhonesArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: memberPhoneWhereInput
   }
 
   /**
@@ -4009,6 +4110,8 @@ export namespace Prisma {
     loginCount: number | null
     lastLoginDate: Date | null
     availableForGigs: boolean | null
+    availableForGigsLastUpdateDate: Date | null
+    lastProfileConfirmationDate: Date | null
     skillScoreDeduction: number | null
     namesAndHandleAppearance: string | null
     createdAt: Date | null
@@ -4042,6 +4145,8 @@ export namespace Prisma {
     loginCount: number | null
     lastLoginDate: Date | null
     availableForGigs: boolean | null
+    availableForGigsLastUpdateDate: Date | null
+    lastProfileConfirmationDate: Date | null
     skillScoreDeduction: number | null
     namesAndHandleAppearance: string | null
     createdAt: Date | null
@@ -4076,6 +4181,8 @@ export namespace Prisma {
     loginCount: number
     lastLoginDate: number
     availableForGigs: number
+    availableForGigsLastUpdateDate: number
+    lastProfileConfirmationDate: number
     skillScoreDeduction: number
     namesAndHandleAppearance: number
     aggregatedSkills: number
@@ -4129,6 +4236,8 @@ export namespace Prisma {
     loginCount?: true
     lastLoginDate?: true
     availableForGigs?: true
+    availableForGigsLastUpdateDate?: true
+    lastProfileConfirmationDate?: true
     skillScoreDeduction?: true
     namesAndHandleAppearance?: true
     createdAt?: true
@@ -4162,6 +4271,8 @@ export namespace Prisma {
     loginCount?: true
     lastLoginDate?: true
     availableForGigs?: true
+    availableForGigsLastUpdateDate?: true
+    lastProfileConfirmationDate?: true
     skillScoreDeduction?: true
     namesAndHandleAppearance?: true
     createdAt?: true
@@ -4196,6 +4307,8 @@ export namespace Prisma {
     loginCount?: true
     lastLoginDate?: true
     availableForGigs?: true
+    availableForGigsLastUpdateDate?: true
+    lastProfileConfirmationDate?: true
     skillScoreDeduction?: true
     namesAndHandleAppearance?: true
     aggregatedSkills?: true
@@ -4319,6 +4432,8 @@ export namespace Prisma {
     loginCount: number | null
     lastLoginDate: Date | null
     availableForGigs: boolean | null
+    availableForGigsLastUpdateDate: Date | null
+    lastProfileConfirmationDate: Date | null
     skillScoreDeduction: number | null
     namesAndHandleAppearance: string | null
     aggregatedSkills: JsonValue | null
@@ -4374,6 +4489,8 @@ export namespace Prisma {
     loginCount?: boolean
     lastLoginDate?: boolean
     availableForGigs?: boolean
+    availableForGigsLastUpdateDate?: boolean
+    lastProfileConfirmationDate?: boolean
     skillScoreDeduction?: boolean
     namesAndHandleAppearance?: boolean
     aggregatedSkills?: boolean
@@ -4384,6 +4501,7 @@ export namespace Prisma {
     updatedBy?: boolean
     maxRating?: boolean | member$maxRatingArgs<ExtArgs>
     addresses?: boolean | member$addressesArgs<ExtArgs>
+    phones?: boolean | member$phonesArgs<ExtArgs>
     financial?: boolean | member$financialArgs<ExtArgs>
     historyStats?: boolean | member$historyStatsArgs<ExtArgs>
     memberStats?: boolean | member$memberStatsArgs<ExtArgs>
@@ -4417,6 +4535,8 @@ export namespace Prisma {
     loginCount?: boolean
     lastLoginDate?: boolean
     availableForGigs?: boolean
+    availableForGigsLastUpdateDate?: boolean
+    lastProfileConfirmationDate?: boolean
     skillScoreDeduction?: boolean
     namesAndHandleAppearance?: boolean
     aggregatedSkills?: boolean
@@ -4453,6 +4573,8 @@ export namespace Prisma {
     loginCount?: boolean
     lastLoginDate?: boolean
     availableForGigs?: boolean
+    availableForGigsLastUpdateDate?: boolean
+    lastProfileConfirmationDate?: boolean
     skillScoreDeduction?: boolean
     namesAndHandleAppearance?: boolean
     aggregatedSkills?: boolean
@@ -4489,6 +4611,8 @@ export namespace Prisma {
     loginCount?: boolean
     lastLoginDate?: boolean
     availableForGigs?: boolean
+    availableForGigsLastUpdateDate?: boolean
+    lastProfileConfirmationDate?: boolean
     skillScoreDeduction?: boolean
     namesAndHandleAppearance?: boolean
     aggregatedSkills?: boolean
@@ -4499,10 +4623,11 @@ export namespace Prisma {
     updatedBy?: boolean
   }
 
-  export type memberOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"userId" | "handle" | "handleLower" | "email" | "verified" | "skillScore" | "memberRatingId" | "firstName" | "lastName" | "description" | "otherLangName" | "status" | "newEmail" | "emailVerifyToken" | "emailVerifyTokenDate" | "newEmailVerifyToken" | "newEmailVerifyTokenDate" | "country" | "homeCountryCode" | "competitionCountryCode" | "photoURL" | "tracks" | "loginCount" | "lastLoginDate" | "availableForGigs" | "skillScoreDeduction" | "namesAndHandleAppearance" | "aggregatedSkills" | "enteredSkills" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["member"]>
+  export type memberOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"userId" | "handle" | "handleLower" | "email" | "verified" | "skillScore" | "memberRatingId" | "firstName" | "lastName" | "description" | "otherLangName" | "status" | "newEmail" | "emailVerifyToken" | "emailVerifyTokenDate" | "newEmailVerifyToken" | "newEmailVerifyTokenDate" | "country" | "homeCountryCode" | "competitionCountryCode" | "photoURL" | "tracks" | "loginCount" | "lastLoginDate" | "availableForGigs" | "availableForGigsLastUpdateDate" | "lastProfileConfirmationDate" | "skillScoreDeduction" | "namesAndHandleAppearance" | "aggregatedSkills" | "enteredSkills" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["member"]>
   export type memberInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     maxRating?: boolean | member$maxRatingArgs<ExtArgs>
     addresses?: boolean | member$addressesArgs<ExtArgs>
+    phones?: boolean | member$phonesArgs<ExtArgs>
     financial?: boolean | member$financialArgs<ExtArgs>
     historyStats?: boolean | member$historyStatsArgs<ExtArgs>
     memberStats?: boolean | member$memberStatsArgs<ExtArgs>
@@ -4517,6 +4642,7 @@ export namespace Prisma {
     objects: {
       maxRating: Prisma.$memberMaxRatingPayload<ExtArgs> | null
       addresses: Prisma.$memberAddressPayload<ExtArgs>[]
+      phones: Prisma.$memberPhonePayload<ExtArgs>[]
       financial: Prisma.$memberFinancialPayload<ExtArgs> | null
       historyStats: Prisma.$memberHistoryStatsPayload<ExtArgs>[]
       memberStats: Prisma.$memberStatsPayload<ExtArgs>[]
@@ -4548,6 +4674,8 @@ export namespace Prisma {
       loginCount: number | null
       lastLoginDate: Date | null
       availableForGigs: boolean | null
+      availableForGigsLastUpdateDate: Date | null
+      lastProfileConfirmationDate: Date | null
       skillScoreDeduction: number | null
       namesAndHandleAppearance: string | null
       aggregatedSkills: Prisma.JsonValue | null
@@ -4952,6 +5080,7 @@ export namespace Prisma {
     readonly [Symbol.toStringTag]: "PrismaPromise"
     maxRating<T extends member$maxRatingArgs<ExtArgs> = {}>(args?: Subset<T, member$maxRatingArgs<ExtArgs>>): Prisma__memberMaxRatingClient<$Result.GetResult<Prisma.$memberMaxRatingPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     addresses<T extends member$addressesArgs<ExtArgs> = {}>(args?: Subset<T, member$addressesArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberAddressPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+    phones<T extends member$phonesArgs<ExtArgs> = {}>(args?: Subset<T, member$phonesArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     financial<T extends member$financialArgs<ExtArgs> = {}>(args?: Subset<T, member$financialArgs<ExtArgs>>): Prisma__memberFinancialClient<$Result.GetResult<Prisma.$memberFinancialPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     historyStats<T extends member$historyStatsArgs<ExtArgs> = {}>(args?: Subset<T, member$historyStatsArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberHistoryStatsPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     memberStats<T extends member$memberStatsArgs<ExtArgs> = {}>(args?: Subset<T, member$memberStatsArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberStatsPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
@@ -5010,6 +5139,8 @@ export namespace Prisma {
     readonly loginCount: FieldRef<"member", 'Int'>
     readonly lastLoginDate: FieldRef<"member", 'DateTime'>
     readonly availableForGigs: FieldRef<"member", 'Boolean'>
+    readonly availableForGigsLastUpdateDate: FieldRef<"member", 'DateTime'>
+    readonly lastProfileConfirmationDate: FieldRef<"member", 'DateTime'>
     readonly skillScoreDeduction: FieldRef<"member", 'Float'>
     readonly namesAndHandleAppearance: FieldRef<"member", 'String'>
     readonly aggregatedSkills: FieldRef<"member", 'Json'>
@@ -5446,6 +5577,30 @@ export namespace Prisma {
     take?: number
     skip?: number
     distinct?: MemberAddressScalarFieldEnum | MemberAddressScalarFieldEnum[]
+  }
+
+  /**
+   * member.phones
+   */
+  export type member$phonesArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    where?: memberPhoneWhereInput
+    orderBy?: memberPhoneOrderByWithRelationInput | memberPhoneOrderByWithRelationInput[]
+    cursor?: memberPhoneWhereUniqueInput
+    take?: number
+    skip?: number
+    distinct?: MemberPhoneScalarFieldEnum | MemberPhoneScalarFieldEnum[]
   }
 
   /**
@@ -6737,6 +6892,1137 @@ export namespace Prisma {
      * Choose, which related nodes to fetch as well
      */
     include?: memberAddressInclude<ExtArgs> | null
+  }
+
+
+  /**
+   * Model memberPhone
+   */
+
+  export type AggregateMemberPhone = {
+    _count: MemberPhoneCountAggregateOutputType | null
+    _avg: MemberPhoneAvgAggregateOutputType | null
+    _sum: MemberPhoneSumAggregateOutputType | null
+    _min: MemberPhoneMinAggregateOutputType | null
+    _max: MemberPhoneMaxAggregateOutputType | null
+  }
+
+  export type MemberPhoneAvgAggregateOutputType = {
+    userId: number | null
+  }
+
+  export type MemberPhoneSumAggregateOutputType = {
+    userId: bigint | null
+  }
+
+  export type MemberPhoneMinAggregateOutputType = {
+    id: string | null
+    userId: bigint | null
+    type: string | null
+    number: string | null
+    createdAt: Date | null
+    createdBy: string | null
+    updatedAt: Date | null
+    updatedBy: string | null
+  }
+
+  export type MemberPhoneMaxAggregateOutputType = {
+    id: string | null
+    userId: bigint | null
+    type: string | null
+    number: string | null
+    createdAt: Date | null
+    createdBy: string | null
+    updatedAt: Date | null
+    updatedBy: string | null
+  }
+
+  export type MemberPhoneCountAggregateOutputType = {
+    id: number
+    userId: number
+    type: number
+    number: number
+    createdAt: number
+    createdBy: number
+    updatedAt: number
+    updatedBy: number
+    _all: number
+  }
+
+
+  export type MemberPhoneAvgAggregateInputType = {
+    userId?: true
+  }
+
+  export type MemberPhoneSumAggregateInputType = {
+    userId?: true
+  }
+
+  export type MemberPhoneMinAggregateInputType = {
+    id?: true
+    userId?: true
+    type?: true
+    number?: true
+    createdAt?: true
+    createdBy?: true
+    updatedAt?: true
+    updatedBy?: true
+  }
+
+  export type MemberPhoneMaxAggregateInputType = {
+    id?: true
+    userId?: true
+    type?: true
+    number?: true
+    createdAt?: true
+    createdBy?: true
+    updatedAt?: true
+    updatedBy?: true
+  }
+
+  export type MemberPhoneCountAggregateInputType = {
+    id?: true
+    userId?: true
+    type?: true
+    number?: true
+    createdAt?: true
+    createdBy?: true
+    updatedAt?: true
+    updatedBy?: true
+    _all?: true
+  }
+
+  export type MemberPhoneAggregateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Filter which memberPhone to aggregate.
+     */
+    where?: memberPhoneWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberPhones to fetch.
+     */
+    orderBy?: memberPhoneOrderByWithRelationInput | memberPhoneOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the start position
+     */
+    cursor?: memberPhoneWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberPhones from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberPhones.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Count returned memberPhones
+    **/
+    _count?: true | MemberPhoneCountAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to average
+    **/
+    _avg?: MemberPhoneAvgAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to sum
+    **/
+    _sum?: MemberPhoneSumAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to find the minimum value
+    **/
+    _min?: MemberPhoneMinAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to find the maximum value
+    **/
+    _max?: MemberPhoneMaxAggregateInputType
+  }
+
+  export type GetMemberPhoneAggregateType<T extends MemberPhoneAggregateArgs> = {
+        [P in keyof T & keyof AggregateMemberPhone]: P extends '_count' | 'count'
+      ? T[P] extends true
+        ? number
+        : GetScalarType<T[P], AggregateMemberPhone[P]>
+      : GetScalarType<T[P], AggregateMemberPhone[P]>
+  }
+
+
+
+
+  export type memberPhoneGroupByArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: memberPhoneWhereInput
+    orderBy?: memberPhoneOrderByWithAggregationInput | memberPhoneOrderByWithAggregationInput[]
+    by: MemberPhoneScalarFieldEnum[] | MemberPhoneScalarFieldEnum
+    having?: memberPhoneScalarWhereWithAggregatesInput
+    take?: number
+    skip?: number
+    _count?: MemberPhoneCountAggregateInputType | true
+    _avg?: MemberPhoneAvgAggregateInputType
+    _sum?: MemberPhoneSumAggregateInputType
+    _min?: MemberPhoneMinAggregateInputType
+    _max?: MemberPhoneMaxAggregateInputType
+  }
+
+  export type MemberPhoneGroupByOutputType = {
+    id: string
+    userId: bigint
+    type: string
+    number: string
+    createdAt: Date
+    createdBy: string
+    updatedAt: Date | null
+    updatedBy: string | null
+    _count: MemberPhoneCountAggregateOutputType | null
+    _avg: MemberPhoneAvgAggregateOutputType | null
+    _sum: MemberPhoneSumAggregateOutputType | null
+    _min: MemberPhoneMinAggregateOutputType | null
+    _max: MemberPhoneMaxAggregateOutputType | null
+  }
+
+  type GetMemberPhoneGroupByPayload<T extends memberPhoneGroupByArgs> = Prisma.PrismaPromise<
+    Array<
+      PickEnumerable<MemberPhoneGroupByOutputType, T['by']> &
+        {
+          [P in ((keyof T) & (keyof MemberPhoneGroupByOutputType))]: P extends '_count'
+            ? T[P] extends boolean
+              ? number
+              : GetScalarType<T[P], MemberPhoneGroupByOutputType[P]>
+            : GetScalarType<T[P], MemberPhoneGroupByOutputType[P]>
+        }
+      >
+    >
+
+
+  export type memberPhoneSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    id?: boolean
+    userId?: boolean
+    type?: boolean
+    number?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }, ExtArgs["result"]["memberPhone"]>
+
+  export type memberPhoneSelectCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    id?: boolean
+    userId?: boolean
+    type?: boolean
+    number?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }, ExtArgs["result"]["memberPhone"]>
+
+  export type memberPhoneSelectUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    id?: boolean
+    userId?: boolean
+    type?: boolean
+    number?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }, ExtArgs["result"]["memberPhone"]>
+
+  export type memberPhoneSelectScalar = {
+    id?: boolean
+    userId?: boolean
+    type?: boolean
+    number?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+  }
+
+  export type memberPhoneOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "userId" | "type" | "number" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberPhone"]>
+  export type memberPhoneInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }
+  export type memberPhoneIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }
+  export type memberPhoneIncludeUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }
+
+  export type $memberPhonePayload<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    name: "memberPhone"
+    objects: {
+      member: Prisma.$memberPayload<ExtArgs>
+    }
+    scalars: $Extensions.GetPayloadResult<{
+      id: string
+      userId: bigint
+      type: string
+      number: string
+      createdAt: Date
+      createdBy: string
+      updatedAt: Date | null
+      updatedBy: string | null
+    }, ExtArgs["result"]["memberPhone"]>
+    composites: {}
+  }
+
+  type memberPhoneGetPayload<S extends boolean | null | undefined | memberPhoneDefaultArgs> = $Result.GetResult<Prisma.$memberPhonePayload, S>
+
+  type memberPhoneCountArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> =
+    Omit<memberPhoneFindManyArgs, 'select' | 'include' | 'distinct' | 'omit'> & {
+      select?: MemberPhoneCountAggregateInputType | true
+    }
+
+  export interface memberPhoneDelegate<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> {
+    [K: symbol]: { types: Prisma.TypeMap<ExtArgs>['model']['memberPhone'], meta: { name: 'memberPhone' } }
+    /**
+     * Find zero or one MemberPhone that matches the filter.
+     * @param {memberPhoneFindUniqueArgs} args - Arguments to find a MemberPhone
+     * @example
+     * // Get one MemberPhone
+     * const memberPhone = await prisma.memberPhone.findUnique({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findUnique<T extends memberPhoneFindUniqueArgs>(args: SelectSubset<T, memberPhoneFindUniqueArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "findUnique", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find one MemberPhone that matches the filter or throw an error with `error.code='P2025'`
+     * if no matches were found.
+     * @param {memberPhoneFindUniqueOrThrowArgs} args - Arguments to find a MemberPhone
+     * @example
+     * // Get one MemberPhone
+     * const memberPhone = await prisma.memberPhone.findUniqueOrThrow({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findUniqueOrThrow<T extends memberPhoneFindUniqueOrThrowArgs>(args: SelectSubset<T, memberPhoneFindUniqueOrThrowArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find the first MemberPhone that matches the filter.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberPhoneFindFirstArgs} args - Arguments to find a MemberPhone
+     * @example
+     * // Get one MemberPhone
+     * const memberPhone = await prisma.memberPhone.findFirst({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findFirst<T extends memberPhoneFindFirstArgs>(args?: SelectSubset<T, memberPhoneFindFirstArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "findFirst", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find the first MemberPhone that matches the filter or
+     * throw `PrismaKnownClientError` with `P2025` code if no matches were found.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberPhoneFindFirstOrThrowArgs} args - Arguments to find a MemberPhone
+     * @example
+     * // Get one MemberPhone
+     * const memberPhone = await prisma.memberPhone.findFirstOrThrow({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findFirstOrThrow<T extends memberPhoneFindFirstOrThrowArgs>(args?: SelectSubset<T, memberPhoneFindFirstOrThrowArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "findFirstOrThrow", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find zero or more MemberPhones that matches the filter.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberPhoneFindManyArgs} args - Arguments to filter and select certain fields only.
+     * @example
+     * // Get all MemberPhones
+     * const memberPhones = await prisma.memberPhone.findMany()
+     * 
+     * // Get first 10 MemberPhones
+     * const memberPhones = await prisma.memberPhone.findMany({ take: 10 })
+     * 
+     * // Only select the `id`
+     * const memberPhoneWithIdOnly = await prisma.memberPhone.findMany({ select: { id: true } })
+     * 
+     */
+    findMany<T extends memberPhoneFindManyArgs>(args?: SelectSubset<T, memberPhoneFindManyArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "findMany", GlobalOmitOptions>>
+
+    /**
+     * Create a MemberPhone.
+     * @param {memberPhoneCreateArgs} args - Arguments to create a MemberPhone.
+     * @example
+     * // Create one MemberPhone
+     * const MemberPhone = await prisma.memberPhone.create({
+     *   data: {
+     *     // ... data to create a MemberPhone
+     *   }
+     * })
+     * 
+     */
+    create<T extends memberPhoneCreateArgs>(args: SelectSubset<T, memberPhoneCreateArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "create", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Create many MemberPhones.
+     * @param {memberPhoneCreateManyArgs} args - Arguments to create many MemberPhones.
+     * @example
+     * // Create many MemberPhones
+     * const memberPhone = await prisma.memberPhone.createMany({
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     *     
+     */
+    createMany<T extends memberPhoneCreateManyArgs>(args?: SelectSubset<T, memberPhoneCreateManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Create many MemberPhones and returns the data saved in the database.
+     * @param {memberPhoneCreateManyAndReturnArgs} args - Arguments to create many MemberPhones.
+     * @example
+     * // Create many MemberPhones
+     * const memberPhone = await prisma.memberPhone.createManyAndReturn({
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * 
+     * // Create many MemberPhones and only return the `id`
+     * const memberPhoneWithIdOnly = await prisma.memberPhone.createManyAndReturn({
+     *   select: { id: true },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * 
+     */
+    createManyAndReturn<T extends memberPhoneCreateManyAndReturnArgs>(args?: SelectSubset<T, memberPhoneCreateManyAndReturnArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "createManyAndReturn", GlobalOmitOptions>>
+
+    /**
+     * Delete a MemberPhone.
+     * @param {memberPhoneDeleteArgs} args - Arguments to delete one MemberPhone.
+     * @example
+     * // Delete one MemberPhone
+     * const MemberPhone = await prisma.memberPhone.delete({
+     *   where: {
+     *     // ... filter to delete one MemberPhone
+     *   }
+     * })
+     * 
+     */
+    delete<T extends memberPhoneDeleteArgs>(args: SelectSubset<T, memberPhoneDeleteArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "delete", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Update one MemberPhone.
+     * @param {memberPhoneUpdateArgs} args - Arguments to update one MemberPhone.
+     * @example
+     * // Update one MemberPhone
+     * const memberPhone = await prisma.memberPhone.update({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: {
+     *     // ... provide data here
+     *   }
+     * })
+     * 
+     */
+    update<T extends memberPhoneUpdateArgs>(args: SelectSubset<T, memberPhoneUpdateArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "update", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Delete zero or more MemberPhones.
+     * @param {memberPhoneDeleteManyArgs} args - Arguments to filter MemberPhones to delete.
+     * @example
+     * // Delete a few MemberPhones
+     * const { count } = await prisma.memberPhone.deleteMany({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     * 
+     */
+    deleteMany<T extends memberPhoneDeleteManyArgs>(args?: SelectSubset<T, memberPhoneDeleteManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Update zero or more MemberPhones.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberPhoneUpdateManyArgs} args - Arguments to update one or more rows.
+     * @example
+     * // Update many MemberPhones
+     * const memberPhone = await prisma.memberPhone.updateMany({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: {
+     *     // ... provide data here
+     *   }
+     * })
+     * 
+     */
+    updateMany<T extends memberPhoneUpdateManyArgs>(args: SelectSubset<T, memberPhoneUpdateManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Update zero or more MemberPhones and returns the data updated in the database.
+     * @param {memberPhoneUpdateManyAndReturnArgs} args - Arguments to update many MemberPhones.
+     * @example
+     * // Update many MemberPhones
+     * const memberPhone = await prisma.memberPhone.updateManyAndReturn({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * 
+     * // Update zero or more MemberPhones and only return the `id`
+     * const memberPhoneWithIdOnly = await prisma.memberPhone.updateManyAndReturn({
+     *   select: { id: true },
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * 
+     */
+    updateManyAndReturn<T extends memberPhoneUpdateManyAndReturnArgs>(args: SelectSubset<T, memberPhoneUpdateManyAndReturnArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "updateManyAndReturn", GlobalOmitOptions>>
+
+    /**
+     * Create or update one MemberPhone.
+     * @param {memberPhoneUpsertArgs} args - Arguments to update or create a MemberPhone.
+     * @example
+     * // Update or create a MemberPhone
+     * const memberPhone = await prisma.memberPhone.upsert({
+     *   create: {
+     *     // ... data to create a MemberPhone
+     *   },
+     *   update: {
+     *     // ... in case it already exists, update
+     *   },
+     *   where: {
+     *     // ... the filter for the MemberPhone we want to update
+     *   }
+     * })
+     */
+    upsert<T extends memberPhoneUpsertArgs>(args: SelectSubset<T, memberPhoneUpsertArgs<ExtArgs>>): Prisma__memberPhoneClient<$Result.GetResult<Prisma.$memberPhonePayload<ExtArgs>, T, "upsert", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+
+    /**
+     * Count the number of MemberPhones.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberPhoneCountArgs} args - Arguments to filter MemberPhones to count.
+     * @example
+     * // Count the number of MemberPhones
+     * const count = await prisma.memberPhone.count({
+     *   where: {
+     *     // ... the filter for the MemberPhones we want to count
+     *   }
+     * })
+    **/
+    count<T extends memberPhoneCountArgs>(
+      args?: Subset<T, memberPhoneCountArgs>,
+    ): Prisma.PrismaPromise<
+      T extends $Utils.Record<'select', any>
+        ? T['select'] extends true
+          ? number
+          : GetScalarType<T['select'], MemberPhoneCountAggregateOutputType>
+        : number
+    >
+
+    /**
+     * Allows you to perform aggregations operations on a MemberPhone.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {MemberPhoneAggregateArgs} args - Select which aggregations you would like to apply and on what fields.
+     * @example
+     * // Ordered by age ascending
+     * // Where email contains prisma.io
+     * // Limited to the 10 users
+     * const aggregations = await prisma.user.aggregate({
+     *   _avg: {
+     *     age: true,
+     *   },
+     *   where: {
+     *     email: {
+     *       contains: "prisma.io",
+     *     },
+     *   },
+     *   orderBy: {
+     *     age: "asc",
+     *   },
+     *   take: 10,
+     * })
+    **/
+    aggregate<T extends MemberPhoneAggregateArgs>(args: Subset<T, MemberPhoneAggregateArgs>): Prisma.PrismaPromise<GetMemberPhoneAggregateType<T>>
+
+    /**
+     * Group by MemberPhone.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberPhoneGroupByArgs} args - Group by arguments.
+     * @example
+     * // Group by city, order by createdAt, get count
+     * const result = await prisma.user.groupBy({
+     *   by: ['city', 'createdAt'],
+     *   orderBy: {
+     *     createdAt: true
+     *   },
+     *   _count: {
+     *     _all: true
+     *   },
+     * })
+     * 
+    **/
+    groupBy<
+      T extends memberPhoneGroupByArgs,
+      HasSelectOrTake extends Or<
+        Extends<'skip', Keys<T>>,
+        Extends<'take', Keys<T>>
+      >,
+      OrderByArg extends True extends HasSelectOrTake
+        ? { orderBy: memberPhoneGroupByArgs['orderBy'] }
+        : { orderBy?: memberPhoneGroupByArgs['orderBy'] },
+      OrderFields extends ExcludeUnderscoreKeys<Keys<MaybeTupleToUnion<T['orderBy']>>>,
+      ByFields extends MaybeTupleToUnion<T['by']>,
+      ByValid extends Has<ByFields, OrderFields>,
+      HavingFields extends GetHavingFields<T['having']>,
+      HavingValid extends Has<ByFields, HavingFields>,
+      ByEmpty extends T['by'] extends never[] ? True : False,
+      InputErrors extends ByEmpty extends True
+      ? `Error: "by" must not be empty.`
+      : HavingValid extends False
+      ? {
+          [P in HavingFields]: P extends ByFields
+            ? never
+            : P extends string
+            ? `Error: Field "${P}" used in "having" needs to be provided in "by".`
+            : [
+                Error,
+                'Field ',
+                P,
+                ` in "having" needs to be provided in "by"`,
+              ]
+        }[HavingFields]
+      : 'take' extends Keys<T>
+      ? 'orderBy' extends Keys<T>
+        ? ByValid extends True
+          ? {}
+          : {
+              [P in OrderFields]: P extends ByFields
+                ? never
+                : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+            }[OrderFields]
+        : 'Error: If you provide "take", you also need to provide "orderBy"'
+      : 'skip' extends Keys<T>
+      ? 'orderBy' extends Keys<T>
+        ? ByValid extends True
+          ? {}
+          : {
+              [P in OrderFields]: P extends ByFields
+                ? never
+                : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+            }[OrderFields]
+        : 'Error: If you provide "skip", you also need to provide "orderBy"'
+      : ByValid extends True
+      ? {}
+      : {
+          [P in OrderFields]: P extends ByFields
+            ? never
+            : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+        }[OrderFields]
+    >(args: SubsetIntersection<T, memberPhoneGroupByArgs, OrderByArg> & InputErrors): {} extends InputErrors ? GetMemberPhoneGroupByPayload<T> : Prisma.PrismaPromise<InputErrors>
+  /**
+   * Fields of the memberPhone model
+   */
+  readonly fields: memberPhoneFieldRefs;
+  }
+
+  /**
+   * The delegate class that acts as a "Promise-like" for memberPhone.
+   * Why is this prefixed with `Prisma__`?
+   * Because we want to prevent naming conflicts as mentioned in
+   * https://github.com/prisma/prisma-client-js/issues/707
+   */
+  export interface Prisma__memberPhoneClient<T, Null = never, ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
+    readonly [Symbol.toStringTag]: "PrismaPromise"
+    member<T extends memberDefaultArgs<ExtArgs> = {}>(args?: Subset<T, memberDefaultArgs<ExtArgs>>): Prisma__memberClient<$Result.GetResult<Prisma.$memberPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+    /**
+     * Attaches callbacks for the resolution and/or rejection of the Promise.
+     * @param onfulfilled The callback to execute when the Promise is resolved.
+     * @param onrejected The callback to execute when the Promise is rejected.
+     * @returns A Promise for the completion of which ever callback is executed.
+     */
+    then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): $Utils.JsPromise<TResult1 | TResult2>
+    /**
+     * Attaches a callback for only the rejection of the Promise.
+     * @param onrejected The callback to execute when the Promise is rejected.
+     * @returns A Promise for the completion of the callback.
+     */
+    catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): $Utils.JsPromise<T | TResult>
+    /**
+     * Attaches a callback that is invoked when the Promise is settled (fulfilled or rejected). The
+     * resolved value cannot be modified from the callback.
+     * @param onfinally The callback to execute when the Promise is settled (fulfilled or rejected).
+     * @returns A Promise for the completion of the callback.
+     */
+    finally(onfinally?: (() => void) | undefined | null): $Utils.JsPromise<T>
+  }
+
+
+
+
+  /**
+   * Fields of the memberPhone model
+   */
+  interface memberPhoneFieldRefs {
+    readonly id: FieldRef<"memberPhone", 'String'>
+    readonly userId: FieldRef<"memberPhone", 'BigInt'>
+    readonly type: FieldRef<"memberPhone", 'String'>
+    readonly number: FieldRef<"memberPhone", 'String'>
+    readonly createdAt: FieldRef<"memberPhone", 'DateTime'>
+    readonly createdBy: FieldRef<"memberPhone", 'String'>
+    readonly updatedAt: FieldRef<"memberPhone", 'DateTime'>
+    readonly updatedBy: FieldRef<"memberPhone", 'String'>
+  }
+    
+
+  // Custom InputTypes
+  /**
+   * memberPhone findUnique
+   */
+  export type memberPhoneFindUniqueArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * Filter, which memberPhone to fetch.
+     */
+    where: memberPhoneWhereUniqueInput
+  }
+
+  /**
+   * memberPhone findUniqueOrThrow
+   */
+  export type memberPhoneFindUniqueOrThrowArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * Filter, which memberPhone to fetch.
+     */
+    where: memberPhoneWhereUniqueInput
+  }
+
+  /**
+   * memberPhone findFirst
+   */
+  export type memberPhoneFindFirstArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * Filter, which memberPhone to fetch.
+     */
+    where?: memberPhoneWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberPhones to fetch.
+     */
+    orderBy?: memberPhoneOrderByWithRelationInput | memberPhoneOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for searching for memberPhones.
+     */
+    cursor?: memberPhoneWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberPhones from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberPhones.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/distinct Distinct Docs}
+     * 
+     * Filter by unique combinations of memberPhones.
+     */
+    distinct?: MemberPhoneScalarFieldEnum | MemberPhoneScalarFieldEnum[]
+  }
+
+  /**
+   * memberPhone findFirstOrThrow
+   */
+  export type memberPhoneFindFirstOrThrowArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * Filter, which memberPhone to fetch.
+     */
+    where?: memberPhoneWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberPhones to fetch.
+     */
+    orderBy?: memberPhoneOrderByWithRelationInput | memberPhoneOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for searching for memberPhones.
+     */
+    cursor?: memberPhoneWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberPhones from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberPhones.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/distinct Distinct Docs}
+     * 
+     * Filter by unique combinations of memberPhones.
+     */
+    distinct?: MemberPhoneScalarFieldEnum | MemberPhoneScalarFieldEnum[]
+  }
+
+  /**
+   * memberPhone findMany
+   */
+  export type memberPhoneFindManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * Filter, which memberPhones to fetch.
+     */
+    where?: memberPhoneWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberPhones to fetch.
+     */
+    orderBy?: memberPhoneOrderByWithRelationInput | memberPhoneOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for listing memberPhones.
+     */
+    cursor?: memberPhoneWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberPhones from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberPhones.
+     */
+    skip?: number
+    distinct?: MemberPhoneScalarFieldEnum | MemberPhoneScalarFieldEnum[]
+  }
+
+  /**
+   * memberPhone create
+   */
+  export type memberPhoneCreateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * The data needed to create a memberPhone.
+     */
+    data: XOR<memberPhoneCreateInput, memberPhoneUncheckedCreateInput>
+  }
+
+  /**
+   * memberPhone createMany
+   */
+  export type memberPhoneCreateManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * The data used to create many memberPhones.
+     */
+    data: memberPhoneCreateManyInput | memberPhoneCreateManyInput[]
+    skipDuplicates?: boolean
+  }
+
+  /**
+   * memberPhone createManyAndReturn
+   */
+  export type memberPhoneCreateManyAndReturnArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelectCreateManyAndReturn<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * The data used to create many memberPhones.
+     */
+    data: memberPhoneCreateManyInput | memberPhoneCreateManyInput[]
+    skipDuplicates?: boolean
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneIncludeCreateManyAndReturn<ExtArgs> | null
+  }
+
+  /**
+   * memberPhone update
+   */
+  export type memberPhoneUpdateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * The data needed to update a memberPhone.
+     */
+    data: XOR<memberPhoneUpdateInput, memberPhoneUncheckedUpdateInput>
+    /**
+     * Choose, which memberPhone to update.
+     */
+    where: memberPhoneWhereUniqueInput
+  }
+
+  /**
+   * memberPhone updateMany
+   */
+  export type memberPhoneUpdateManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * The data used to update memberPhones.
+     */
+    data: XOR<memberPhoneUpdateManyMutationInput, memberPhoneUncheckedUpdateManyInput>
+    /**
+     * Filter which memberPhones to update
+     */
+    where?: memberPhoneWhereInput
+    /**
+     * Limit how many memberPhones to update.
+     */
+    limit?: number
+  }
+
+  /**
+   * memberPhone updateManyAndReturn
+   */
+  export type memberPhoneUpdateManyAndReturnArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelectUpdateManyAndReturn<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * The data used to update memberPhones.
+     */
+    data: XOR<memberPhoneUpdateManyMutationInput, memberPhoneUncheckedUpdateManyInput>
+    /**
+     * Filter which memberPhones to update
+     */
+    where?: memberPhoneWhereInput
+    /**
+     * Limit how many memberPhones to update.
+     */
+    limit?: number
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneIncludeUpdateManyAndReturn<ExtArgs> | null
+  }
+
+  /**
+   * memberPhone upsert
+   */
+  export type memberPhoneUpsertArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * The filter to search for the memberPhone to update in case it exists.
+     */
+    where: memberPhoneWhereUniqueInput
+    /**
+     * In case the memberPhone found by the `where` argument doesn't exist, create a new memberPhone with this data.
+     */
+    create: XOR<memberPhoneCreateInput, memberPhoneUncheckedCreateInput>
+    /**
+     * In case the memberPhone was found with the provided `where` argument, update it with this data.
+     */
+    update: XOR<memberPhoneUpdateInput, memberPhoneUncheckedUpdateInput>
+  }
+
+  /**
+   * memberPhone delete
+   */
+  export type memberPhoneDeleteArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
+    /**
+     * Filter which memberPhone to delete.
+     */
+    where: memberPhoneWhereUniqueInput
+  }
+
+  /**
+   * memberPhone deleteMany
+   */
+  export type memberPhoneDeleteManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Filter which memberPhones to delete
+     */
+    where?: memberPhoneWhereInput
+    /**
+     * Limit how many memberPhones to delete.
+     */
+    limit?: number
+  }
+
+  /**
+   * memberPhone without action
+   */
+  export type memberPhoneDefaultArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberPhone
+     */
+    select?: memberPhoneSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberPhone
+     */
+    omit?: memberPhoneOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberPhoneInclude<ExtArgs> | null
   }
 
 
@@ -33633,11 +34919,13 @@ export namespace Prisma {
     id: bigint | null
     memberTraitId: bigint | null
     industry: $Enums.WorkIndustryType | null
+    otherIndustry: string | null
     companyName: string | null
     position: string | null
     startDate: Date | null
     endDate: Date | null
     working: boolean | null
+    description: string | null
     createdAt: Date | null
     createdBy: string | null
     updatedAt: Date | null
@@ -33648,11 +34936,13 @@ export namespace Prisma {
     id: bigint | null
     memberTraitId: bigint | null
     industry: $Enums.WorkIndustryType | null
+    otherIndustry: string | null
     companyName: string | null
     position: string | null
     startDate: Date | null
     endDate: Date | null
     working: boolean | null
+    description: string | null
     createdAt: Date | null
     createdBy: string | null
     updatedAt: Date | null
@@ -33663,11 +34953,14 @@ export namespace Prisma {
     id: number
     memberTraitId: number
     industry: number
+    otherIndustry: number
     companyName: number
     position: number
     startDate: number
     endDate: number
     working: number
+    description: number
+    associatedSkills: number
     createdAt: number
     createdBy: number
     updatedAt: number
@@ -33690,11 +34983,13 @@ export namespace Prisma {
     id?: true
     memberTraitId?: true
     industry?: true
+    otherIndustry?: true
     companyName?: true
     position?: true
     startDate?: true
     endDate?: true
     working?: true
+    description?: true
     createdAt?: true
     createdBy?: true
     updatedAt?: true
@@ -33705,11 +35000,13 @@ export namespace Prisma {
     id?: true
     memberTraitId?: true
     industry?: true
+    otherIndustry?: true
     companyName?: true
     position?: true
     startDate?: true
     endDate?: true
     working?: true
+    description?: true
     createdAt?: true
     createdBy?: true
     updatedAt?: true
@@ -33720,11 +35017,14 @@ export namespace Prisma {
     id?: true
     memberTraitId?: true
     industry?: true
+    otherIndustry?: true
     companyName?: true
     position?: true
     startDate?: true
     endDate?: true
     working?: true
+    description?: true
+    associatedSkills?: true
     createdAt?: true
     createdBy?: true
     updatedAt?: true
@@ -33822,11 +35122,14 @@ export namespace Prisma {
     id: bigint
     memberTraitId: bigint
     industry: $Enums.WorkIndustryType | null
+    otherIndustry: string | null
     companyName: string
     position: string
     startDate: Date | null
     endDate: Date | null
     working: boolean | null
+    description: string | null
+    associatedSkills: string[]
     createdAt: Date
     createdBy: string
     updatedAt: Date | null
@@ -33856,11 +35159,14 @@ export namespace Prisma {
     id?: boolean
     memberTraitId?: boolean
     industry?: boolean
+    otherIndustry?: boolean
     companyName?: boolean
     position?: boolean
     startDate?: boolean
     endDate?: boolean
     working?: boolean
+    description?: boolean
+    associatedSkills?: boolean
     createdAt?: boolean
     createdBy?: boolean
     updatedAt?: boolean
@@ -33872,11 +35178,14 @@ export namespace Prisma {
     id?: boolean
     memberTraitId?: boolean
     industry?: boolean
+    otherIndustry?: boolean
     companyName?: boolean
     position?: boolean
     startDate?: boolean
     endDate?: boolean
     working?: boolean
+    description?: boolean
+    associatedSkills?: boolean
     createdAt?: boolean
     createdBy?: boolean
     updatedAt?: boolean
@@ -33888,11 +35197,14 @@ export namespace Prisma {
     id?: boolean
     memberTraitId?: boolean
     industry?: boolean
+    otherIndustry?: boolean
     companyName?: boolean
     position?: boolean
     startDate?: boolean
     endDate?: boolean
     working?: boolean
+    description?: boolean
+    associatedSkills?: boolean
     createdAt?: boolean
     createdBy?: boolean
     updatedAt?: boolean
@@ -33904,18 +35216,21 @@ export namespace Prisma {
     id?: boolean
     memberTraitId?: boolean
     industry?: boolean
+    otherIndustry?: boolean
     companyName?: boolean
     position?: boolean
     startDate?: boolean
     endDate?: boolean
     working?: boolean
+    description?: boolean
+    associatedSkills?: boolean
     createdAt?: boolean
     createdBy?: boolean
     updatedAt?: boolean
     updatedBy?: boolean
   }
 
-  export type memberTraitWorkOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "memberTraitId" | "industry" | "companyName" | "position" | "startDate" | "endDate" | "working" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberTraitWork"]>
+  export type memberTraitWorkOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "memberTraitId" | "industry" | "otherIndustry" | "companyName" | "position" | "startDate" | "endDate" | "working" | "description" | "associatedSkills" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberTraitWork"]>
   export type memberTraitWorkInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     memberTraits?: boolean | memberTraitsDefaultArgs<ExtArgs>
   }
@@ -33935,11 +35250,14 @@ export namespace Prisma {
       id: bigint
       memberTraitId: bigint
       industry: $Enums.WorkIndustryType | null
+      otherIndustry: string | null
       companyName: string
       position: string
       startDate: Date | null
       endDate: Date | null
       working: boolean | null
+      description: string | null
+      associatedSkills: string[]
       createdAt: Date
       createdBy: string
       updatedAt: Date | null
@@ -34371,11 +35689,14 @@ export namespace Prisma {
     readonly id: FieldRef<"memberTraitWork", 'BigInt'>
     readonly memberTraitId: FieldRef<"memberTraitWork", 'BigInt'>
     readonly industry: FieldRef<"memberTraitWork", 'WorkIndustryType'>
+    readonly otherIndustry: FieldRef<"memberTraitWork", 'String'>
     readonly companyName: FieldRef<"memberTraitWork", 'String'>
     readonly position: FieldRef<"memberTraitWork", 'String'>
     readonly startDate: FieldRef<"memberTraitWork", 'DateTime'>
     readonly endDate: FieldRef<"memberTraitWork", 'DateTime'>
     readonly working: FieldRef<"memberTraitWork", 'Boolean'>
+    readonly description: FieldRef<"memberTraitWork", 'String'>
+    readonly associatedSkills: FieldRef<"memberTraitWork", 'String[]'>
     readonly createdAt: FieldRef<"memberTraitWork", 'DateTime'>
     readonly createdBy: FieldRef<"memberTraitWork", 'String'>
     readonly updatedAt: FieldRef<"memberTraitWork", 'DateTime'>
@@ -41800,6 +43121,8 @@ export namespace Prisma {
     loginCount: 'loginCount',
     lastLoginDate: 'lastLoginDate',
     availableForGigs: 'availableForGigs',
+    availableForGigsLastUpdateDate: 'availableForGigsLastUpdateDate',
+    lastProfileConfirmationDate: 'lastProfileConfirmationDate',
     skillScoreDeduction: 'skillScoreDeduction',
     namesAndHandleAppearance: 'namesAndHandleAppearance',
     aggregatedSkills: 'aggregatedSkills',
@@ -41829,6 +43152,20 @@ export namespace Prisma {
   };
 
   export type MemberAddressScalarFieldEnum = (typeof MemberAddressScalarFieldEnum)[keyof typeof MemberAddressScalarFieldEnum]
+
+
+  export const MemberPhoneScalarFieldEnum: {
+    id: 'id',
+    userId: 'userId',
+    type: 'type',
+    number: 'number',
+    createdAt: 'createdAt',
+    createdBy: 'createdBy',
+    updatedAt: 'updatedAt',
+    updatedBy: 'updatedBy'
+  };
+
+  export type MemberPhoneScalarFieldEnum = (typeof MemberPhoneScalarFieldEnum)[keyof typeof MemberPhoneScalarFieldEnum]
 
 
   export const MemberMaxRatingScalarFieldEnum: {
@@ -42275,11 +43612,14 @@ export namespace Prisma {
     id: 'id',
     memberTraitId: 'memberTraitId',
     industry: 'industry',
+    otherIndustry: 'otherIndustry',
     companyName: 'companyName',
     position: 'position',
     startDate: 'startDate',
     endDate: 'endDate',
     working: 'working',
+    description: 'description',
+    associatedSkills: 'associatedSkills',
     createdAt: 'createdAt',
     createdBy: 'createdBy',
     updatedAt: 'updatedAt',
@@ -42638,6 +43978,8 @@ export namespace Prisma {
     loginCount?: IntNullableFilter<"member"> | number | null
     lastLoginDate?: DateTimeNullableFilter<"member"> | Date | string | null
     availableForGigs?: BoolNullableFilter<"member"> | boolean | null
+    availableForGigsLastUpdateDate?: DateTimeNullableFilter<"member"> | Date | string | null
+    lastProfileConfirmationDate?: DateTimeNullableFilter<"member"> | Date | string | null
     skillScoreDeduction?: FloatNullableFilter<"member"> | number | null
     namesAndHandleAppearance?: StringNullableFilter<"member"> | string | null
     aggregatedSkills?: JsonNullableFilter<"member">
@@ -42648,6 +43990,7 @@ export namespace Prisma {
     updatedBy?: StringNullableFilter<"member"> | string | null
     maxRating?: XOR<MemberMaxRatingNullableScalarRelationFilter, memberMaxRatingWhereInput> | null
     addresses?: MemberAddressListRelationFilter
+    phones?: MemberPhoneListRelationFilter
     financial?: XOR<MemberFinancialNullableScalarRelationFilter, memberFinancialWhereInput> | null
     historyStats?: MemberHistoryStatsListRelationFilter
     memberStats?: MemberStatsListRelationFilter
@@ -42680,6 +44023,8 @@ export namespace Prisma {
     loginCount?: SortOrderInput | SortOrder
     lastLoginDate?: SortOrderInput | SortOrder
     availableForGigs?: SortOrderInput | SortOrder
+    availableForGigsLastUpdateDate?: SortOrderInput | SortOrder
+    lastProfileConfirmationDate?: SortOrderInput | SortOrder
     skillScoreDeduction?: SortOrderInput | SortOrder
     namesAndHandleAppearance?: SortOrderInput | SortOrder
     aggregatedSkills?: SortOrderInput | SortOrder
@@ -42690,6 +44035,7 @@ export namespace Prisma {
     updatedBy?: SortOrderInput | SortOrder
     maxRating?: memberMaxRatingOrderByWithRelationInput
     addresses?: memberAddressOrderByRelationAggregateInput
+    phones?: memberPhoneOrderByRelationAggregateInput
     financial?: memberFinancialOrderByWithRelationInput
     historyStats?: memberHistoryStatsOrderByRelationAggregateInput
     memberStats?: memberStatsOrderByRelationAggregateInput
@@ -42725,6 +44071,8 @@ export namespace Prisma {
     loginCount?: IntNullableFilter<"member"> | number | null
     lastLoginDate?: DateTimeNullableFilter<"member"> | Date | string | null
     availableForGigs?: BoolNullableFilter<"member"> | boolean | null
+    availableForGigsLastUpdateDate?: DateTimeNullableFilter<"member"> | Date | string | null
+    lastProfileConfirmationDate?: DateTimeNullableFilter<"member"> | Date | string | null
     skillScoreDeduction?: FloatNullableFilter<"member"> | number | null
     namesAndHandleAppearance?: StringNullableFilter<"member"> | string | null
     aggregatedSkills?: JsonNullableFilter<"member">
@@ -42735,6 +44083,7 @@ export namespace Prisma {
     updatedBy?: StringNullableFilter<"member"> | string | null
     maxRating?: XOR<MemberMaxRatingNullableScalarRelationFilter, memberMaxRatingWhereInput> | null
     addresses?: MemberAddressListRelationFilter
+    phones?: MemberPhoneListRelationFilter
     financial?: XOR<MemberFinancialNullableScalarRelationFilter, memberFinancialWhereInput> | null
     historyStats?: MemberHistoryStatsListRelationFilter
     memberStats?: MemberStatsListRelationFilter
@@ -42767,6 +44116,8 @@ export namespace Prisma {
     loginCount?: SortOrderInput | SortOrder
     lastLoginDate?: SortOrderInput | SortOrder
     availableForGigs?: SortOrderInput | SortOrder
+    availableForGigsLastUpdateDate?: SortOrderInput | SortOrder
+    lastProfileConfirmationDate?: SortOrderInput | SortOrder
     skillScoreDeduction?: SortOrderInput | SortOrder
     namesAndHandleAppearance?: SortOrderInput | SortOrder
     aggregatedSkills?: SortOrderInput | SortOrder
@@ -42811,6 +44162,8 @@ export namespace Prisma {
     loginCount?: IntNullableWithAggregatesFilter<"member"> | number | null
     lastLoginDate?: DateTimeNullableWithAggregatesFilter<"member"> | Date | string | null
     availableForGigs?: BoolNullableWithAggregatesFilter<"member"> | boolean | null
+    availableForGigsLastUpdateDate?: DateTimeNullableWithAggregatesFilter<"member"> | Date | string | null
+    lastProfileConfirmationDate?: DateTimeNullableWithAggregatesFilter<"member"> | Date | string | null
     skillScoreDeduction?: FloatNullableWithAggregatesFilter<"member"> | number | null
     namesAndHandleAppearance?: StringNullableWithAggregatesFilter<"member"> | string | null
     aggregatedSkills?: JsonNullableWithAggregatesFilter<"member">
@@ -42911,6 +44264,79 @@ export namespace Prisma {
     createdBy?: StringWithAggregatesFilter<"memberAddress"> | string
     updatedAt?: DateTimeNullableWithAggregatesFilter<"memberAddress"> | Date | string | null
     updatedBy?: StringNullableWithAggregatesFilter<"memberAddress"> | string | null
+  }
+
+  export type memberPhoneWhereInput = {
+    AND?: memberPhoneWhereInput | memberPhoneWhereInput[]
+    OR?: memberPhoneWhereInput[]
+    NOT?: memberPhoneWhereInput | memberPhoneWhereInput[]
+    id?: StringFilter<"memberPhone"> | string
+    userId?: BigIntFilter<"memberPhone"> | bigint | number
+    type?: StringFilter<"memberPhone"> | string
+    number?: StringFilter<"memberPhone"> | string
+    createdAt?: DateTimeFilter<"memberPhone"> | Date | string
+    createdBy?: StringFilter<"memberPhone"> | string
+    updatedAt?: DateTimeNullableFilter<"memberPhone"> | Date | string | null
+    updatedBy?: StringNullableFilter<"memberPhone"> | string | null
+    member?: XOR<MemberScalarRelationFilter, memberWhereInput>
+  }
+
+  export type memberPhoneOrderByWithRelationInput = {
+    id?: SortOrder
+    userId?: SortOrder
+    type?: SortOrder
+    number?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrderInput | SortOrder
+    updatedBy?: SortOrderInput | SortOrder
+    member?: memberOrderByWithRelationInput
+  }
+
+  export type memberPhoneWhereUniqueInput = Prisma.AtLeast<{
+    id?: string
+    userId_number?: memberPhoneUserIdNumberCompoundUniqueInput
+    AND?: memberPhoneWhereInput | memberPhoneWhereInput[]
+    OR?: memberPhoneWhereInput[]
+    NOT?: memberPhoneWhereInput | memberPhoneWhereInput[]
+    userId?: BigIntFilter<"memberPhone"> | bigint | number
+    type?: StringFilter<"memberPhone"> | string
+    number?: StringFilter<"memberPhone"> | string
+    createdAt?: DateTimeFilter<"memberPhone"> | Date | string
+    createdBy?: StringFilter<"memberPhone"> | string
+    updatedAt?: DateTimeNullableFilter<"memberPhone"> | Date | string | null
+    updatedBy?: StringNullableFilter<"memberPhone"> | string | null
+    member?: XOR<MemberScalarRelationFilter, memberWhereInput>
+  }, "id" | "userId_number">
+
+  export type memberPhoneOrderByWithAggregationInput = {
+    id?: SortOrder
+    userId?: SortOrder
+    type?: SortOrder
+    number?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrderInput | SortOrder
+    updatedBy?: SortOrderInput | SortOrder
+    _count?: memberPhoneCountOrderByAggregateInput
+    _avg?: memberPhoneAvgOrderByAggregateInput
+    _max?: memberPhoneMaxOrderByAggregateInput
+    _min?: memberPhoneMinOrderByAggregateInput
+    _sum?: memberPhoneSumOrderByAggregateInput
+  }
+
+  export type memberPhoneScalarWhereWithAggregatesInput = {
+    AND?: memberPhoneScalarWhereWithAggregatesInput | memberPhoneScalarWhereWithAggregatesInput[]
+    OR?: memberPhoneScalarWhereWithAggregatesInput[]
+    NOT?: memberPhoneScalarWhereWithAggregatesInput | memberPhoneScalarWhereWithAggregatesInput[]
+    id?: StringWithAggregatesFilter<"memberPhone"> | string
+    userId?: BigIntWithAggregatesFilter<"memberPhone"> | bigint | number
+    type?: StringWithAggregatesFilter<"memberPhone"> | string
+    number?: StringWithAggregatesFilter<"memberPhone"> | string
+    createdAt?: DateTimeWithAggregatesFilter<"memberPhone"> | Date | string
+    createdBy?: StringWithAggregatesFilter<"memberPhone"> | string
+    updatedAt?: DateTimeNullableWithAggregatesFilter<"memberPhone"> | Date | string | null
+    updatedBy?: StringNullableWithAggregatesFilter<"memberPhone"> | string | null
   }
 
   export type memberMaxRatingWhereInput = {
@@ -45234,11 +46660,14 @@ export namespace Prisma {
     id?: BigIntFilter<"memberTraitWork"> | bigint | number
     memberTraitId?: BigIntFilter<"memberTraitWork"> | bigint | number
     industry?: EnumWorkIndustryTypeNullableFilter<"memberTraitWork"> | $Enums.WorkIndustryType | null
+    otherIndustry?: StringNullableFilter<"memberTraitWork"> | string | null
     companyName?: StringFilter<"memberTraitWork"> | string
     position?: StringFilter<"memberTraitWork"> | string
     startDate?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
     endDate?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
     working?: BoolNullableFilter<"memberTraitWork"> | boolean | null
+    description?: StringNullableFilter<"memberTraitWork"> | string | null
+    associatedSkills?: StringNullableListFilter<"memberTraitWork">
     createdAt?: DateTimeFilter<"memberTraitWork"> | Date | string
     createdBy?: StringFilter<"memberTraitWork"> | string
     updatedAt?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
@@ -45250,11 +46679,14 @@ export namespace Prisma {
     id?: SortOrder
     memberTraitId?: SortOrder
     industry?: SortOrderInput | SortOrder
+    otherIndustry?: SortOrderInput | SortOrder
     companyName?: SortOrder
     position?: SortOrder
     startDate?: SortOrderInput | SortOrder
     endDate?: SortOrderInput | SortOrder
     working?: SortOrderInput | SortOrder
+    description?: SortOrderInput | SortOrder
+    associatedSkills?: SortOrder
     createdAt?: SortOrder
     createdBy?: SortOrder
     updatedAt?: SortOrderInput | SortOrder
@@ -45269,11 +46701,14 @@ export namespace Prisma {
     NOT?: memberTraitWorkWhereInput | memberTraitWorkWhereInput[]
     memberTraitId?: BigIntFilter<"memberTraitWork"> | bigint | number
     industry?: EnumWorkIndustryTypeNullableFilter<"memberTraitWork"> | $Enums.WorkIndustryType | null
+    otherIndustry?: StringNullableFilter<"memberTraitWork"> | string | null
     companyName?: StringFilter<"memberTraitWork"> | string
     position?: StringFilter<"memberTraitWork"> | string
     startDate?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
     endDate?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
     working?: BoolNullableFilter<"memberTraitWork"> | boolean | null
+    description?: StringNullableFilter<"memberTraitWork"> | string | null
+    associatedSkills?: StringNullableListFilter<"memberTraitWork">
     createdAt?: DateTimeFilter<"memberTraitWork"> | Date | string
     createdBy?: StringFilter<"memberTraitWork"> | string
     updatedAt?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
@@ -45285,11 +46720,14 @@ export namespace Prisma {
     id?: SortOrder
     memberTraitId?: SortOrder
     industry?: SortOrderInput | SortOrder
+    otherIndustry?: SortOrderInput | SortOrder
     companyName?: SortOrder
     position?: SortOrder
     startDate?: SortOrderInput | SortOrder
     endDate?: SortOrderInput | SortOrder
     working?: SortOrderInput | SortOrder
+    description?: SortOrderInput | SortOrder
+    associatedSkills?: SortOrder
     createdAt?: SortOrder
     createdBy?: SortOrder
     updatedAt?: SortOrderInput | SortOrder
@@ -45308,11 +46746,14 @@ export namespace Prisma {
     id?: BigIntWithAggregatesFilter<"memberTraitWork"> | bigint | number
     memberTraitId?: BigIntWithAggregatesFilter<"memberTraitWork"> | bigint | number
     industry?: EnumWorkIndustryTypeNullableWithAggregatesFilter<"memberTraitWork"> | $Enums.WorkIndustryType | null
+    otherIndustry?: StringNullableWithAggregatesFilter<"memberTraitWork"> | string | null
     companyName?: StringWithAggregatesFilter<"memberTraitWork"> | string
     position?: StringWithAggregatesFilter<"memberTraitWork"> | string
     startDate?: DateTimeNullableWithAggregatesFilter<"memberTraitWork"> | Date | string | null
     endDate?: DateTimeNullableWithAggregatesFilter<"memberTraitWork"> | Date | string | null
     working?: BoolNullableWithAggregatesFilter<"memberTraitWork"> | boolean | null
+    description?: StringNullableWithAggregatesFilter<"memberTraitWork"> | string | null
+    associatedSkills?: StringNullableListFilter<"memberTraitWork">
     createdAt?: DateTimeWithAggregatesFilter<"memberTraitWork"> | Date | string
     createdBy?: StringWithAggregatesFilter<"memberTraitWork"> | string
     updatedAt?: DateTimeNullableWithAggregatesFilter<"memberTraitWork"> | Date | string | null
@@ -45837,6 +47278,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -45847,6 +47290,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
     addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
@@ -45879,6 +47323,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -45889,6 +47335,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
     addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
@@ -45921,6 +47368,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -45931,6 +47380,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
@@ -45963,6 +47413,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -45973,6 +47425,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
@@ -46005,6 +47458,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -46041,6 +47496,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -46077,6 +47534,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -46185,6 +47644,82 @@ export namespace Prisma {
     zip?: NullableStringFieldUpdateOperationsInput | string | null
     stateCode?: NullableStringFieldUpdateOperationsInput | string | null
     type?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberPhoneCreateInput = {
+    id?: string
+    type: string
+    number: string
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+    member: memberCreateNestedOneWithoutPhonesInput
+  }
+
+  export type memberPhoneUncheckedCreateInput = {
+    id?: string
+    userId: bigint | number
+    type: string
+    number: string
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberPhoneUpdateInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+    member?: memberUpdateOneRequiredWithoutPhonesNestedInput
+  }
+
+  export type memberPhoneUncheckedUpdateInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    type?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberPhoneCreateManyInput = {
+    id?: string
+    userId: bigint | number
+    type: string
+    number: string
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberPhoneUpdateManyMutationInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberPhoneUncheckedUpdateManyInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    type?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -48904,11 +50439,14 @@ export namespace Prisma {
   export type memberTraitWorkCreateInput = {
     id?: bigint | number
     industry?: $Enums.WorkIndustryType | null
+    otherIndustry?: string | null
     companyName: string
     position: string
     startDate?: Date | string | null
     endDate?: Date | string | null
     working?: boolean | null
+    description?: string | null
+    associatedSkills?: memberTraitWorkCreateassociatedSkillsInput | string[]
     createdAt?: Date | string
     createdBy: string
     updatedAt?: Date | string | null
@@ -48920,11 +50458,14 @@ export namespace Prisma {
     id?: bigint | number
     memberTraitId: bigint | number
     industry?: $Enums.WorkIndustryType | null
+    otherIndustry?: string | null
     companyName: string
     position: string
     startDate?: Date | string | null
     endDate?: Date | string | null
     working?: boolean | null
+    description?: string | null
+    associatedSkills?: memberTraitWorkCreateassociatedSkillsInput | string[]
     createdAt?: Date | string
     createdBy: string
     updatedAt?: Date | string | null
@@ -48934,11 +50475,14 @@ export namespace Prisma {
   export type memberTraitWorkUpdateInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     industry?: NullableEnumWorkIndustryTypeFieldUpdateOperationsInput | $Enums.WorkIndustryType | null
+    otherIndustry?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: StringFieldUpdateOperationsInput | string
     position?: StringFieldUpdateOperationsInput | string
     startDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     endDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     working?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    associatedSkills?: memberTraitWorkUpdateassociatedSkillsInput | string[]
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -48950,11 +50494,14 @@ export namespace Prisma {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     memberTraitId?: BigIntFieldUpdateOperationsInput | bigint | number
     industry?: NullableEnumWorkIndustryTypeFieldUpdateOperationsInput | $Enums.WorkIndustryType | null
+    otherIndustry?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: StringFieldUpdateOperationsInput | string
     position?: StringFieldUpdateOperationsInput | string
     startDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     endDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     working?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    associatedSkills?: memberTraitWorkUpdateassociatedSkillsInput | string[]
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -48965,11 +50512,14 @@ export namespace Prisma {
     id?: bigint | number
     memberTraitId: bigint | number
     industry?: $Enums.WorkIndustryType | null
+    otherIndustry?: string | null
     companyName: string
     position: string
     startDate?: Date | string | null
     endDate?: Date | string | null
     working?: boolean | null
+    description?: string | null
+    associatedSkills?: memberTraitWorkCreateassociatedSkillsInput | string[]
     createdAt?: Date | string
     createdBy: string
     updatedAt?: Date | string | null
@@ -48979,11 +50529,14 @@ export namespace Prisma {
   export type memberTraitWorkUpdateManyMutationInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     industry?: NullableEnumWorkIndustryTypeFieldUpdateOperationsInput | $Enums.WorkIndustryType | null
+    otherIndustry?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: StringFieldUpdateOperationsInput | string
     position?: StringFieldUpdateOperationsInput | string
     startDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     endDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     working?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    associatedSkills?: memberTraitWorkUpdateassociatedSkillsInput | string[]
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -48994,11 +50547,14 @@ export namespace Prisma {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     memberTraitId?: BigIntFieldUpdateOperationsInput | bigint | number
     industry?: NullableEnumWorkIndustryTypeFieldUpdateOperationsInput | $Enums.WorkIndustryType | null
+    otherIndustry?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: StringFieldUpdateOperationsInput | string
     position?: StringFieldUpdateOperationsInput | string
     startDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     endDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     working?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    associatedSkills?: memberTraitWorkUpdateassociatedSkillsInput | string[]
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -49695,6 +51251,12 @@ export namespace Prisma {
     none?: memberAddressWhereInput
   }
 
+  export type MemberPhoneListRelationFilter = {
+    every?: memberPhoneWhereInput
+    some?: memberPhoneWhereInput
+    none?: memberPhoneWhereInput
+  }
+
   export type MemberFinancialNullableScalarRelationFilter = {
     is?: memberFinancialWhereInput | null
     isNot?: memberFinancialWhereInput | null
@@ -49723,6 +51285,10 @@ export namespace Prisma {
   }
 
   export type memberAddressOrderByRelationAggregateInput = {
+    _count?: SortOrder
+  }
+
+  export type memberPhoneOrderByRelationAggregateInput = {
     _count?: SortOrder
   }
 
@@ -49760,6 +51326,8 @@ export namespace Prisma {
     loginCount?: SortOrder
     lastLoginDate?: SortOrder
     availableForGigs?: SortOrder
+    availableForGigsLastUpdateDate?: SortOrder
+    lastProfileConfirmationDate?: SortOrder
     skillScoreDeduction?: SortOrder
     namesAndHandleAppearance?: SortOrder
     aggregatedSkills?: SortOrder
@@ -49803,6 +51371,8 @@ export namespace Prisma {
     loginCount?: SortOrder
     lastLoginDate?: SortOrder
     availableForGigs?: SortOrder
+    availableForGigsLastUpdateDate?: SortOrder
+    lastProfileConfirmationDate?: SortOrder
     skillScoreDeduction?: SortOrder
     namesAndHandleAppearance?: SortOrder
     createdAt?: SortOrder
@@ -49836,6 +51406,8 @@ export namespace Prisma {
     loginCount?: SortOrder
     lastLoginDate?: SortOrder
     availableForGigs?: SortOrder
+    availableForGigsLastUpdateDate?: SortOrder
+    lastProfileConfirmationDate?: SortOrder
     skillScoreDeduction?: SortOrder
     namesAndHandleAppearance?: SortOrder
     createdAt?: SortOrder
@@ -50081,6 +51653,52 @@ export namespace Prisma {
 
   export type memberAddressSumOrderByAggregateInput = {
     id?: SortOrder
+    userId?: SortOrder
+  }
+
+  export type memberPhoneUserIdNumberCompoundUniqueInput = {
+    userId: bigint | number
+    number: string
+  }
+
+  export type memberPhoneCountOrderByAggregateInput = {
+    id?: SortOrder
+    userId?: SortOrder
+    type?: SortOrder
+    number?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrder
+    updatedBy?: SortOrder
+  }
+
+  export type memberPhoneAvgOrderByAggregateInput = {
+    userId?: SortOrder
+  }
+
+  export type memberPhoneMaxOrderByAggregateInput = {
+    id?: SortOrder
+    userId?: SortOrder
+    type?: SortOrder
+    number?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrder
+    updatedBy?: SortOrder
+  }
+
+  export type memberPhoneMinOrderByAggregateInput = {
+    id?: SortOrder
+    userId?: SortOrder
+    type?: SortOrder
+    number?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrder
+    updatedBy?: SortOrder
+  }
+
+  export type memberPhoneSumOrderByAggregateInput = {
     userId?: SortOrder
   }
 
@@ -52083,11 +53701,14 @@ export namespace Prisma {
     id?: SortOrder
     memberTraitId?: SortOrder
     industry?: SortOrder
+    otherIndustry?: SortOrder
     companyName?: SortOrder
     position?: SortOrder
     startDate?: SortOrder
     endDate?: SortOrder
     working?: SortOrder
+    description?: SortOrder
+    associatedSkills?: SortOrder
     createdAt?: SortOrder
     createdBy?: SortOrder
     updatedAt?: SortOrder
@@ -52103,11 +53724,13 @@ export namespace Prisma {
     id?: SortOrder
     memberTraitId?: SortOrder
     industry?: SortOrder
+    otherIndustry?: SortOrder
     companyName?: SortOrder
     position?: SortOrder
     startDate?: SortOrder
     endDate?: SortOrder
     working?: SortOrder
+    description?: SortOrder
     createdAt?: SortOrder
     createdBy?: SortOrder
     updatedAt?: SortOrder
@@ -52118,11 +53741,13 @@ export namespace Prisma {
     id?: SortOrder
     memberTraitId?: SortOrder
     industry?: SortOrder
+    otherIndustry?: SortOrder
     companyName?: SortOrder
     position?: SortOrder
     startDate?: SortOrder
     endDate?: SortOrder
     working?: SortOrder
+    description?: SortOrder
     createdAt?: SortOrder
     createdBy?: SortOrder
     updatedAt?: SortOrder
@@ -52455,6 +54080,13 @@ export namespace Prisma {
     connect?: memberAddressWhereUniqueInput | memberAddressWhereUniqueInput[]
   }
 
+  export type memberPhoneCreateNestedManyWithoutMemberInput = {
+    create?: XOR<memberPhoneCreateWithoutMemberInput, memberPhoneUncheckedCreateWithoutMemberInput> | memberPhoneCreateWithoutMemberInput[] | memberPhoneUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberPhoneCreateOrConnectWithoutMemberInput | memberPhoneCreateOrConnectWithoutMemberInput[]
+    createMany?: memberPhoneCreateManyMemberInputEnvelope
+    connect?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+  }
+
   export type memberFinancialCreateNestedOneWithoutMemberInput = {
     create?: XOR<memberFinancialCreateWithoutMemberInput, memberFinancialUncheckedCreateWithoutMemberInput>
     connectOrCreate?: memberFinancialCreateOrConnectWithoutMemberInput
@@ -52492,6 +54124,13 @@ export namespace Prisma {
     connectOrCreate?: memberAddressCreateOrConnectWithoutMemberInput | memberAddressCreateOrConnectWithoutMemberInput[]
     createMany?: memberAddressCreateManyMemberInputEnvelope
     connect?: memberAddressWhereUniqueInput | memberAddressWhereUniqueInput[]
+  }
+
+  export type memberPhoneUncheckedCreateNestedManyWithoutMemberInput = {
+    create?: XOR<memberPhoneCreateWithoutMemberInput, memberPhoneUncheckedCreateWithoutMemberInput> | memberPhoneCreateWithoutMemberInput[] | memberPhoneUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberPhoneCreateOrConnectWithoutMemberInput | memberPhoneCreateOrConnectWithoutMemberInput[]
+    createMany?: memberPhoneCreateManyMemberInputEnvelope
+    connect?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
   }
 
   export type memberFinancialUncheckedCreateNestedOneWithoutMemberInput = {
@@ -52605,6 +54244,20 @@ export namespace Prisma {
     deleteMany?: memberAddressScalarWhereInput | memberAddressScalarWhereInput[]
   }
 
+  export type memberPhoneUpdateManyWithoutMemberNestedInput = {
+    create?: XOR<memberPhoneCreateWithoutMemberInput, memberPhoneUncheckedCreateWithoutMemberInput> | memberPhoneCreateWithoutMemberInput[] | memberPhoneUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberPhoneCreateOrConnectWithoutMemberInput | memberPhoneCreateOrConnectWithoutMemberInput[]
+    upsert?: memberPhoneUpsertWithWhereUniqueWithoutMemberInput | memberPhoneUpsertWithWhereUniqueWithoutMemberInput[]
+    createMany?: memberPhoneCreateManyMemberInputEnvelope
+    set?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    disconnect?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    delete?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    connect?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    update?: memberPhoneUpdateWithWhereUniqueWithoutMemberInput | memberPhoneUpdateWithWhereUniqueWithoutMemberInput[]
+    updateMany?: memberPhoneUpdateManyWithWhereWithoutMemberInput | memberPhoneUpdateManyWithWhereWithoutMemberInput[]
+    deleteMany?: memberPhoneScalarWhereInput | memberPhoneScalarWhereInput[]
+  }
+
   export type memberFinancialUpdateOneWithoutMemberNestedInput = {
     create?: XOR<memberFinancialCreateWithoutMemberInput, memberFinancialUncheckedCreateWithoutMemberInput>
     connectOrCreate?: memberFinancialCreateOrConnectWithoutMemberInput
@@ -52677,6 +54330,20 @@ export namespace Prisma {
     deleteMany?: memberAddressScalarWhereInput | memberAddressScalarWhereInput[]
   }
 
+  export type memberPhoneUncheckedUpdateManyWithoutMemberNestedInput = {
+    create?: XOR<memberPhoneCreateWithoutMemberInput, memberPhoneUncheckedCreateWithoutMemberInput> | memberPhoneCreateWithoutMemberInput[] | memberPhoneUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberPhoneCreateOrConnectWithoutMemberInput | memberPhoneCreateOrConnectWithoutMemberInput[]
+    upsert?: memberPhoneUpsertWithWhereUniqueWithoutMemberInput | memberPhoneUpsertWithWhereUniqueWithoutMemberInput[]
+    createMany?: memberPhoneCreateManyMemberInputEnvelope
+    set?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    disconnect?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    delete?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    connect?: memberPhoneWhereUniqueInput | memberPhoneWhereUniqueInput[]
+    update?: memberPhoneUpdateWithWhereUniqueWithoutMemberInput | memberPhoneUpdateWithWhereUniqueWithoutMemberInput[]
+    updateMany?: memberPhoneUpdateManyWithWhereWithoutMemberInput | memberPhoneUpdateManyWithWhereWithoutMemberInput[]
+    deleteMany?: memberPhoneScalarWhereInput | memberPhoneScalarWhereInput[]
+  }
+
   export type memberFinancialUncheckedUpdateOneWithoutMemberNestedInput = {
     create?: XOR<memberFinancialCreateWithoutMemberInput, memberFinancialUncheckedCreateWithoutMemberInput>
     connectOrCreate?: memberFinancialCreateOrConnectWithoutMemberInput
@@ -52737,6 +54404,20 @@ export namespace Prisma {
     upsert?: memberUpsertWithoutAddressesInput
     connect?: memberWhereUniqueInput
     update?: XOR<XOR<memberUpdateToOneWithWhereWithoutAddressesInput, memberUpdateWithoutAddressesInput>, memberUncheckedUpdateWithoutAddressesInput>
+  }
+
+  export type memberCreateNestedOneWithoutPhonesInput = {
+    create?: XOR<memberCreateWithoutPhonesInput, memberUncheckedCreateWithoutPhonesInput>
+    connectOrCreate?: memberCreateOrConnectWithoutPhonesInput
+    connect?: memberWhereUniqueInput
+  }
+
+  export type memberUpdateOneRequiredWithoutPhonesNestedInput = {
+    create?: XOR<memberCreateWithoutPhonesInput, memberUncheckedCreateWithoutPhonesInput>
+    connectOrCreate?: memberCreateOrConnectWithoutPhonesInput
+    upsert?: memberUpsertWithoutPhonesInput
+    connect?: memberWhereUniqueInput
+    update?: XOR<XOR<memberUpdateToOneWithWhereWithoutPhonesInput, memberUpdateWithoutPhonesInput>, memberUncheckedUpdateWithoutPhonesInput>
   }
 
   export type memberCreateNestedOneWithoutMaxRatingInput = {
@@ -53995,6 +55676,10 @@ export namespace Prisma {
     update?: XOR<XOR<memberTraitsUpdateToOneWithWhereWithoutServiceProviderInput, memberTraitsUpdateWithoutServiceProviderInput>, memberTraitsUncheckedUpdateWithoutServiceProviderInput>
   }
 
+  export type memberTraitWorkCreateassociatedSkillsInput = {
+    set: string[]
+  }
+
   export type memberTraitsCreateNestedOneWithoutWorkInput = {
     create?: XOR<memberTraitsCreateWithoutWorkInput, memberTraitsUncheckedCreateWithoutWorkInput>
     connectOrCreate?: memberTraitsCreateOrConnectWithoutWorkInput
@@ -54003,6 +55688,11 @@ export namespace Prisma {
 
   export type NullableEnumWorkIndustryTypeFieldUpdateOperationsInput = {
     set?: $Enums.WorkIndustryType | null
+  }
+
+  export type memberTraitWorkUpdateassociatedSkillsInput = {
+    set?: string[]
+    push?: string | string[]
   }
 
   export type memberTraitsUpdateOneRequiredWithoutWorkNestedInput = {
@@ -54591,6 +56281,36 @@ export namespace Prisma {
     skipDuplicates?: boolean
   }
 
+  export type memberPhoneCreateWithoutMemberInput = {
+    id?: string
+    type: string
+    number: string
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberPhoneUncheckedCreateWithoutMemberInput = {
+    id?: string
+    type: string
+    number: string
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberPhoneCreateOrConnectWithoutMemberInput = {
+    where: memberPhoneWhereUniqueInput
+    create: XOR<memberPhoneCreateWithoutMemberInput, memberPhoneUncheckedCreateWithoutMemberInput>
+  }
+
+  export type memberPhoneCreateManyMemberInputEnvelope = {
+    data: memberPhoneCreateManyMemberInput | memberPhoneCreateManyMemberInput[]
+    skipDuplicates?: boolean
+  }
+
   export type memberFinancialCreateWithoutMemberInput = {
     amount: number
     status: $Enums.FinancialStatus
@@ -54808,6 +56528,36 @@ export namespace Prisma {
     updatedBy?: StringNullableFilter<"memberAddress"> | string | null
   }
 
+  export type memberPhoneUpsertWithWhereUniqueWithoutMemberInput = {
+    where: memberPhoneWhereUniqueInput
+    update: XOR<memberPhoneUpdateWithoutMemberInput, memberPhoneUncheckedUpdateWithoutMemberInput>
+    create: XOR<memberPhoneCreateWithoutMemberInput, memberPhoneUncheckedCreateWithoutMemberInput>
+  }
+
+  export type memberPhoneUpdateWithWhereUniqueWithoutMemberInput = {
+    where: memberPhoneWhereUniqueInput
+    data: XOR<memberPhoneUpdateWithoutMemberInput, memberPhoneUncheckedUpdateWithoutMemberInput>
+  }
+
+  export type memberPhoneUpdateManyWithWhereWithoutMemberInput = {
+    where: memberPhoneScalarWhereInput
+    data: XOR<memberPhoneUpdateManyMutationInput, memberPhoneUncheckedUpdateManyWithoutMemberInput>
+  }
+
+  export type memberPhoneScalarWhereInput = {
+    AND?: memberPhoneScalarWhereInput | memberPhoneScalarWhereInput[]
+    OR?: memberPhoneScalarWhereInput[]
+    NOT?: memberPhoneScalarWhereInput | memberPhoneScalarWhereInput[]
+    id?: StringFilter<"memberPhone"> | string
+    userId?: BigIntFilter<"memberPhone"> | bigint | number
+    type?: StringFilter<"memberPhone"> | string
+    number?: StringFilter<"memberPhone"> | string
+    createdAt?: DateTimeFilter<"memberPhone"> | Date | string
+    createdBy?: StringFilter<"memberPhone"> | string
+    updatedAt?: DateTimeNullableFilter<"memberPhone"> | Date | string | null
+    updatedBy?: StringNullableFilter<"memberPhone"> | string | null
+  }
+
   export type memberFinancialUpsertWithoutMemberInput = {
     update: XOR<memberFinancialUpdateWithoutMemberInput, memberFinancialUncheckedUpdateWithoutMemberInput>
     create: XOR<memberFinancialCreateWithoutMemberInput, memberFinancialUncheckedCreateWithoutMemberInput>
@@ -54977,6 +56727,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -54986,6 +56738,7 @@ export namespace Prisma {
     updatedAt?: Date | string | null
     updatedBy?: string | null
     maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
@@ -55018,6 +56771,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55027,6 +56782,7 @@ export namespace Prisma {
     updatedAt?: Date | string | null
     updatedBy?: string | null
     maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
@@ -55075,6 +56831,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55084,6 +56842,7 @@ export namespace Prisma {
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
@@ -55116,6 +56875,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55125,6 +56886,199 @@ export namespace Prisma {
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
+    financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
+    historyStats?: memberHistoryStatsUncheckedUpdateManyWithoutMemberNestedInput
+    memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
+    memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
+  }
+
+  export type memberCreateWithoutPhonesInput = {
+    userId: bigint | number
+    handle: string
+    handleLower: string
+    email: string
+    verified?: boolean | null
+    skillScore?: number | null
+    memberRatingId?: bigint | number | null
+    firstName?: string | null
+    lastName?: string | null
+    description?: string | null
+    otherLangName?: string | null
+    status?: $Enums.MemberStatus | null
+    newEmail?: string | null
+    emailVerifyToken?: string | null
+    emailVerifyTokenDate?: Date | string | null
+    newEmailVerifyToken?: string | null
+    newEmailVerifyTokenDate?: Date | string | null
+    country?: string | null
+    homeCountryCode?: string | null
+    competitionCountryCode?: string | null
+    photoURL?: string | null
+    tracks?: memberCreatetracksInput | string[]
+    loginCount?: number | null
+    lastLoginDate?: Date | string | null
+    availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
+    skillScoreDeduction?: number | null
+    namesAndHandleAppearance?: string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+    maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
+    addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    financial?: memberFinancialCreateNestedOneWithoutMemberInput
+    historyStats?: memberHistoryStatsCreateNestedManyWithoutMemberInput
+    memberStats?: memberStatsCreateNestedManyWithoutMemberInput
+    memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
+  }
+
+  export type memberUncheckedCreateWithoutPhonesInput = {
+    userId: bigint | number
+    handle: string
+    handleLower: string
+    email: string
+    verified?: boolean | null
+    skillScore?: number | null
+    memberRatingId?: bigint | number | null
+    firstName?: string | null
+    lastName?: string | null
+    description?: string | null
+    otherLangName?: string | null
+    status?: $Enums.MemberStatus | null
+    newEmail?: string | null
+    emailVerifyToken?: string | null
+    emailVerifyTokenDate?: Date | string | null
+    newEmailVerifyToken?: string | null
+    newEmailVerifyTokenDate?: Date | string | null
+    country?: string | null
+    homeCountryCode?: string | null
+    competitionCountryCode?: string | null
+    photoURL?: string | null
+    tracks?: memberCreatetracksInput | string[]
+    loginCount?: number | null
+    lastLoginDate?: Date | string | null
+    availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
+    skillScoreDeduction?: number | null
+    namesAndHandleAppearance?: string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+    maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
+    addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
+    historyStats?: memberHistoryStatsUncheckedCreateNestedManyWithoutMemberInput
+    memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
+    memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
+  }
+
+  export type memberCreateOrConnectWithoutPhonesInput = {
+    where: memberWhereUniqueInput
+    create: XOR<memberCreateWithoutPhonesInput, memberUncheckedCreateWithoutPhonesInput>
+  }
+
+  export type memberUpsertWithoutPhonesInput = {
+    update: XOR<memberUpdateWithoutPhonesInput, memberUncheckedUpdateWithoutPhonesInput>
+    create: XOR<memberCreateWithoutPhonesInput, memberUncheckedCreateWithoutPhonesInput>
+    where?: memberWhereInput
+  }
+
+  export type memberUpdateToOneWithWhereWithoutPhonesInput = {
+    where?: memberWhereInput
+    data: XOR<memberUpdateWithoutPhonesInput, memberUncheckedUpdateWithoutPhonesInput>
+  }
+
+  export type memberUpdateWithoutPhonesInput = {
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    handle?: StringFieldUpdateOperationsInput | string
+    handleLower?: StringFieldUpdateOperationsInput | string
+    email?: StringFieldUpdateOperationsInput | string
+    verified?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    skillScore?: NullableFloatFieldUpdateOperationsInput | number | null
+    memberRatingId?: NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+    firstName?: NullableStringFieldUpdateOperationsInput | string | null
+    lastName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    otherLangName?: NullableStringFieldUpdateOperationsInput | string | null
+    status?: NullableEnumMemberStatusFieldUpdateOperationsInput | $Enums.MemberStatus | null
+    newEmail?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    newEmailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    newEmailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    country?: NullableStringFieldUpdateOperationsInput | string | null
+    homeCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    competitionCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    photoURL?: NullableStringFieldUpdateOperationsInput | string | null
+    tracks?: memberUpdatetracksInput | string[]
+    loginCount?: NullableIntFieldUpdateOperationsInput | number | null
+    lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
+    namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+    maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
+    addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    financial?: memberFinancialUpdateOneWithoutMemberNestedInput
+    historyStats?: memberHistoryStatsUpdateManyWithoutMemberNestedInput
+    memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
+    memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
+  }
+
+  export type memberUncheckedUpdateWithoutPhonesInput = {
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    handle?: StringFieldUpdateOperationsInput | string
+    handleLower?: StringFieldUpdateOperationsInput | string
+    email?: StringFieldUpdateOperationsInput | string
+    verified?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    skillScore?: NullableFloatFieldUpdateOperationsInput | number | null
+    memberRatingId?: NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+    firstName?: NullableStringFieldUpdateOperationsInput | string | null
+    lastName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    otherLangName?: NullableStringFieldUpdateOperationsInput | string | null
+    status?: NullableEnumMemberStatusFieldUpdateOperationsInput | $Enums.MemberStatus | null
+    newEmail?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    newEmailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    newEmailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    country?: NullableStringFieldUpdateOperationsInput | string | null
+    homeCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    competitionCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    photoURL?: NullableStringFieldUpdateOperationsInput | string | null
+    tracks?: memberUpdatetracksInput | string[]
+    loginCount?: NullableIntFieldUpdateOperationsInput | number | null
+    lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
+    namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+    maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
+    addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
@@ -55157,6 +57111,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55166,6 +57122,7 @@ export namespace Prisma {
     updatedAt?: Date | string | null
     updatedBy?: string | null
     addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
@@ -55198,6 +57155,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55207,6 +57166,7 @@ export namespace Prisma {
     updatedAt?: Date | string | null
     updatedBy?: string | null
     addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
@@ -55299,6 +57259,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55308,6 +57270,7 @@ export namespace Prisma {
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
@@ -55340,6 +57303,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55349,6 +57314,7 @@ export namespace Prisma {
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
@@ -55397,6 +57363,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55407,6 +57375,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
     addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
     historyStats?: memberHistoryStatsCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
@@ -55438,6 +57407,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55448,6 +57419,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
     addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     historyStats?: memberHistoryStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
@@ -55495,6 +57467,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55505,6 +57479,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
@@ -55536,6 +57511,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55546,6 +57523,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
@@ -55657,6 +57635,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55667,6 +57647,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
     addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
@@ -55698,6 +57679,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55708,6 +57691,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
     addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
@@ -55825,6 +57809,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55835,6 +57821,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
@@ -55866,6 +57853,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -55876,6 +57865,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
@@ -56198,6 +58188,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -56208,6 +58200,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
     addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
@@ -56239,6 +58232,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -56249,6 +58244,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
     addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
@@ -56489,6 +58485,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -56499,6 +58497,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
@@ -56530,6 +58529,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -56540,6 +58541,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
@@ -58124,11 +60126,14 @@ export namespace Prisma {
   export type memberTraitWorkCreateWithoutMemberTraitsInput = {
     id?: bigint | number
     industry?: $Enums.WorkIndustryType | null
+    otherIndustry?: string | null
     companyName: string
     position: string
     startDate?: Date | string | null
     endDate?: Date | string | null
     working?: boolean | null
+    description?: string | null
+    associatedSkills?: memberTraitWorkCreateassociatedSkillsInput | string[]
     createdAt?: Date | string
     createdBy: string
     updatedAt?: Date | string | null
@@ -58138,11 +60143,14 @@ export namespace Prisma {
   export type memberTraitWorkUncheckedCreateWithoutMemberTraitsInput = {
     id?: bigint | number
     industry?: $Enums.WorkIndustryType | null
+    otherIndustry?: string | null
     companyName: string
     position: string
     startDate?: Date | string | null
     endDate?: Date | string | null
     working?: boolean | null
+    description?: string | null
+    associatedSkills?: memberTraitWorkCreateassociatedSkillsInput | string[]
     createdAt?: Date | string
     createdBy: string
     updatedAt?: Date | string | null
@@ -58389,6 +60397,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -58399,6 +60409,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
     addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
@@ -58430,6 +60441,8 @@ export namespace Prisma {
     loginCount?: number | null
     lastLoginDate?: Date | string | null
     availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
     skillScoreDeduction?: number | null
     namesAndHandleAppearance?: string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -58440,6 +60453,7 @@ export namespace Prisma {
     updatedBy?: string | null
     maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
     addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     historyStats?: memberHistoryStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
@@ -58567,11 +60581,14 @@ export namespace Prisma {
     id?: BigIntFilter<"memberTraitWork"> | bigint | number
     memberTraitId?: BigIntFilter<"memberTraitWork"> | bigint | number
     industry?: EnumWorkIndustryTypeNullableFilter<"memberTraitWork"> | $Enums.WorkIndustryType | null
+    otherIndustry?: StringNullableFilter<"memberTraitWork"> | string | null
     companyName?: StringFilter<"memberTraitWork"> | string
     position?: StringFilter<"memberTraitWork"> | string
     startDate?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
     endDate?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
     working?: BoolNullableFilter<"memberTraitWork"> | boolean | null
+    description?: StringNullableFilter<"memberTraitWork"> | string | null
+    associatedSkills?: StringNullableListFilter<"memberTraitWork">
     createdAt?: DateTimeFilter<"memberTraitWork"> | Date | string
     createdBy?: StringFilter<"memberTraitWork"> | string
     updatedAt?: DateTimeNullableFilter<"memberTraitWork"> | Date | string | null
@@ -58807,6 +60824,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -58817,6 +60836,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
@@ -58848,6 +60868,8 @@ export namespace Prisma {
     loginCount?: NullableIntFieldUpdateOperationsInput | number | null
     lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
     namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
     aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
@@ -58858,6 +60880,7 @@ export namespace Prisma {
     updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
     maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
     addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     historyStats?: memberHistoryStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
@@ -59837,6 +61860,16 @@ export namespace Prisma {
     updatedBy?: string | null
   }
 
+  export type memberPhoneCreateManyMemberInput = {
+    id?: string
+    type: string
+    number: string
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
   export type memberHistoryStatsCreateManyMemberInput = {
     id?: bigint | number
     groupId?: bigint | number | null
@@ -59896,6 +61929,36 @@ export namespace Prisma {
     zip?: NullableStringFieldUpdateOperationsInput | string | null
     stateCode?: NullableStringFieldUpdateOperationsInput | string | null
     type?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberPhoneUpdateWithoutMemberInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberPhoneUncheckedUpdateWithoutMemberInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberPhoneUncheckedUpdateManyWithoutMemberInput = {
+    id?: StringFieldUpdateOperationsInput | string
+    type?: StringFieldUpdateOperationsInput | string
+    number?: StringFieldUpdateOperationsInput | string
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -60544,11 +62607,14 @@ export namespace Prisma {
   export type memberTraitWorkCreateManyMemberTraitsInput = {
     id?: bigint | number
     industry?: $Enums.WorkIndustryType | null
+    otherIndustry?: string | null
     companyName: string
     position: string
     startDate?: Date | string | null
     endDate?: Date | string | null
     working?: boolean | null
+    description?: string | null
+    associatedSkills?: memberTraitWorkCreateassociatedSkillsInput | string[]
     createdAt?: Date | string
     createdBy: string
     updatedAt?: Date | string | null
@@ -60732,11 +62798,14 @@ export namespace Prisma {
   export type memberTraitWorkUpdateWithoutMemberTraitsInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     industry?: NullableEnumWorkIndustryTypeFieldUpdateOperationsInput | $Enums.WorkIndustryType | null
+    otherIndustry?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: StringFieldUpdateOperationsInput | string
     position?: StringFieldUpdateOperationsInput | string
     startDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     endDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     working?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    associatedSkills?: memberTraitWorkUpdateassociatedSkillsInput | string[]
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -60746,11 +62815,14 @@ export namespace Prisma {
   export type memberTraitWorkUncheckedUpdateWithoutMemberTraitsInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     industry?: NullableEnumWorkIndustryTypeFieldUpdateOperationsInput | $Enums.WorkIndustryType | null
+    otherIndustry?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: StringFieldUpdateOperationsInput | string
     position?: StringFieldUpdateOperationsInput | string
     startDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     endDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     working?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    associatedSkills?: memberTraitWorkUpdateassociatedSkillsInput | string[]
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -60760,11 +62832,14 @@ export namespace Prisma {
   export type memberTraitWorkUncheckedUpdateManyWithoutMemberTraitsInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     industry?: NullableEnumWorkIndustryTypeFieldUpdateOperationsInput | $Enums.WorkIndustryType | null
+    otherIndustry?: NullableStringFieldUpdateOperationsInput | string | null
     companyName?: StringFieldUpdateOperationsInput | string
     position?: StringFieldUpdateOperationsInput | string
     startDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     endDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
     working?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    associatedSkills?: memberTraitWorkUpdateassociatedSkillsInput | string[]
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
