@@ -1031,7 +1031,7 @@ async function fetchGamificationAchievements (userId) {
       return ''
     }
     
-    const gamificationUrl = `${gamificationApiUrl}/users/${userId}/badges`
+    const gamificationUrl = `${gamificationApiUrl}/badges/assigned/${userId}`
     
     if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
       logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
