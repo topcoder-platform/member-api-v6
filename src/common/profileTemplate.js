@@ -12,6 +12,7 @@ const {
   Image
 } = require('@react-pdf/renderer')
 const { Html } = require('react-pdf-html')
+const { htmlToText } = require('./htmlUtils')
 
 // Define styles
 const styles = StyleSheet.create({
@@ -220,8 +221,9 @@ function normalizeInlineHtml (html) {
 
   // Strip font-family / font shorthand from inline styles so React-PDF doesn't
   // try to use unregistered fonts (e.g., "Roboto")
-  out = out.replace(/\sfont-family\s*:\s*[^;"']+;?/gi, '')
-  out = out.replace(/\sfont\s*:\s*[^;"']+;?/gi, '')
+  // Match with \s* so we also catch "font-family: ..." at start of style (no leading space)
+  out = out.replace(/\s*font-family\s*:\s*[^;]+;?/gi, '')
+  out = out.replace(/\s*font\s*:\s*[^;]+;?/gi, '')
 
   out = out.replace(/<p\b[^>]*>/gi, '<span>')
   out = out.replace(/<\/p>/gi, '</span>')
@@ -282,7 +284,6 @@ function createSkillsSubsection (title, verified, notVerified) {
  */
 function buildProfileTemplate (pdfData) {
   const { member, workExperience, education, languages, basicInfo, skills, topcoderActivity, certifications, courses } = pdfData
-  console.log('pdfData', pdfData)
   
   const children = []
   
@@ -497,19 +498,15 @@ function buildProfileTemplate (pdfData) {
     
     if (topcoderActivity.achievements) {
       const achievements = topcoderActivity.achievements
-      const hasHtml = typeof achievements === 'string' && achievements.includes('<')
+      const plainText = typeof achievements === 'string' && achievements.includes('<')
+        ? htmlToText(achievements)
+        : achievements
       activityContent.push(
-        hasHtml
-          ? React.createElement(
-            Html,
-            { key: 'achievements', style: styles.activityItem },
-            normalizeInlineHtml(achievements)
-          )
-          : React.createElement(
-            Text,
-            { key: 'achievements', style: styles.activityItem },
-            achievements
-          )
+        React.createElement(
+          Text,
+          { key: 'achievements', style: styles.activityItem },
+          plainText
+        )
       )
     }
     

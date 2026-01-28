@@ -19,6 +19,7 @@ const fileType = require('file-type')
 const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
+const { htmlToText } = require('../common/htmlUtils')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const { Prisma } = prismaManager
@@ -1082,7 +1083,7 @@ async function fetchGamificationAchievements (userId) {
               logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
               
               if (isActive && isActiveStatus) {
-                const name = orgBadge.badge_name
+                const name = htmlToText(orgBadge.badge_name)
                 achievementMap[name] = (achievementMap[name] || 0) + 1
               } else {
                 logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
