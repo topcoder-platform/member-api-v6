@@ -489,7 +489,7 @@ async function updateHandle (currentUser, handle, query, data) {
   let vanillaUpdated = false
 
   try {
-    await updateIdentityHandle(identityUserId, newHandle, now)
+    await updateIdentityHandle(identityUserId, member.handle, newHandle, now)
     identityUpdated = true
 
     updatedMember = await prisma.member.update({
@@ -531,7 +531,7 @@ async function updateHandle (currentUser, handle, query, data) {
     }
     if (identityUpdated) {
       try {
-        await updateIdentityHandle(identityUserId, member.handle, new Date())
+        await updateIdentityHandle(identityUserId, newHandle, member.handle, new Date())
       } catch (rollbackErr) {
         logger.error(`Failed to rollback identity handle update for ${member.userId}: ${rollbackErr.message}`)
       }
@@ -833,25 +833,32 @@ async function updateVanillaHandle (oldHandle, newHandle, pool) {
   }
 }
 
-async function updateIdentityHandle (userId, handle, timestamp) {
+async function updateIdentityHandle (userId, oldHandle, newHandle, timestamp) {
   const identityPrisma = identityPrismaManager.getIdentityClient()
-  const lowerHandle = handle.toLowerCase()
+  const lowerHandle = newHandle.toLowerCase()
   const updatedAt = timestamp || new Date()
 
   let userResult
+  let securityUserResult
   try {
     userResult = await identityPrisma.$executeRaw`
       UPDATE identity."user"
-      SET handle=${handle}, handle_lower=${lowerHandle}, modify_date=${updatedAt}
+      SET handle=${newHandle}, handle_lower=${lowerHandle}, modify_date=${updatedAt}
       WHERE user_id=${userId}
+    `
+
+    securityUserResult = await identityPrisma.$executeRaw`
+      UPDATE identity.security_user
+      SET user_id=${newHandle}
+      WHERE user_id=${oldHandle}
     `
   } catch (err) {
     logger.error(`Failed to update identity handle for user ${userId}: ${err.message}`)
     throw err
   }
 
-  if (userResult === 0) {
-    throw new Error(`Identity user not updated for user ${userId}`)
+  if (userResult === 0 || securityUserResult === 0) {
+    throw new Error(`Identity records not updated for user ${userId}`)
   }
 }
 
