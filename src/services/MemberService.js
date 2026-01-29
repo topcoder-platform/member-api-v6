@@ -1177,7 +1177,6 @@ async function getMemberSkill (currentUser, handle, skillId) {
     // Prepare engagement fetch
     if (skill.activity.engagement?.sources?.length > 0) {
       const engagementIds = skill.activity.engagement.sources.filter(Boolean)
-      console.log('eneg', skill.activity.engagement)
       if (engagementIds.length > 0) {
         fetchPromises.push(
           engagementsPrisma.EngagementAssignment.findMany({
