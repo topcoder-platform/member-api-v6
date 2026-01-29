@@ -29,6 +29,7 @@ const skillsPrisma = prismaManager.getSkillsClient()
 const challengesPrisma = prismaManager.getChallengesClient()
 const academyPrisma = prismaManager.getAcademyClient()
 const resourcesPrisma = prismaManager.getResourcesClient()
+const engagementsPrisma = prismaManager.getEngagementsClient()
 const profilePDFService = require('./ProfilePDFService')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
@@ -1221,6 +1222,9 @@ async function getMemberSkill (currentUser, handle, skillId) {
       skill: {
         include: {
           category: true, skillEvents: {
+            where: {
+              userId: helper.bigIntToNumber(member.userId),
+            },
             select: {
               createdAt: true,
               sourceId: true,
@@ -1323,6 +1327,31 @@ async function getMemberSkill (currentUser, handle, skillId) {
               lastSources: courseIds
                 .map(id => courseMap.get(id))
                 .filter(Boolean)
+            }
+          })
+        )
+      }
+    }
+    
+    // Prepare engagement fetch
+    if (skill.activity.engagement?.sources?.length > 0) {
+      const engagementIds = skill.activity.engagement.sources.filter(Boolean)
+      if (engagementIds.length > 0) {
+        fetchPromises.push(
+          engagementsPrisma.EngagementAssignment.findMany({
+            where: { id: { in: engagementIds.slice(0, 3) } },
+            select: {
+              engagement: {
+                select: { title: true, id: true }
+              }
+            }
+          }).then(engagements => {
+            skill.activity.engagement = {
+              count: engagementIds.length,
+              lastSources: engagements.map(assignment => ({
+                id: assignment.engagement.id,
+                title: assignment.engagement.title,
+              })),
             }
           })
         )
