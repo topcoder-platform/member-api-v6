@@ -53,6 +53,16 @@ async function updateMember (req, res) {
 }
 
 /**
+ * Update member handle
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function updateHandle (req, res) {
+  const result = await service.updateHandle(req.authUser, req.params.handle, req.query, req.body)
+  res.send(result)
+}
+
+/**
  * Verify email
  * @param {Object} req the request
  * @param {Object} res the response
@@ -110,6 +120,7 @@ module.exports = {
   getMemberUserIdSignature,
   getMemberSkill,
   updateMember,
+  updateHandle,
   verifyEmail,
   uploadPhoto,
   deleteMember,
