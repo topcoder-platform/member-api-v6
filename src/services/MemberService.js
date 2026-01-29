@@ -34,6 +34,11 @@ const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest']
 
+const HANDLE_MIN_LENGTH = 3
+const HANDLE_MAX_LENGTH = 64
+const HANDLE_REGEX = /^[-A-Za-z0-9_.`{}[\]]{3,64}$/
+const HANDLE_PUNCTUATION_ONLY_REGEX = /^[-_.{}[\]]+$/
+
 /**
  * Clean member fields according to current user.
  * @param {Object} currentUser the user who performs operation
@@ -87,6 +92,25 @@ function omitMemberAttributes (currentUser, mb) {
   }
 
   return res
+}
+
+function validateHandleRules (handle, rawHandle) {
+  if (handle.length < HANDLE_MIN_LENGTH || handle.length > HANDLE_MAX_LENGTH) {
+    throw new errors.BadRequestError(
+      `Length of Handle in character should be between ${HANDLE_MIN_LENGTH} and ${HANDLE_MAX_LENGTH}.`
+    )
+  }
+  if ((rawHandle || handle).indexOf(' ') !== -1) {
+    throw new errors.BadRequestError('Handle may not contain a space')
+  }
+  if (!HANDLE_REGEX.test(handle)) {
+    throw new errors.BadRequestError(
+      'Handle must be 3-64 characters long and can only contain alphanumeric characters and _.-`[]{} symbols.'
+    )
+  }
+  if (HANDLE_PUNCTUATION_ONLY_REGEX.test(handle)) {
+    throw new errors.BadRequestError('Handle may not contain only punctuation.')
+  }
 }
 
 /**
@@ -453,7 +477,8 @@ async function updateHandle (currentUser, handle, query, data) {
     throw new errors.ForbiddenError('You are not allowed to update the member handle.')
   }
 
-  const newHandle = (data.newHandle || '').trim()
+  const rawHandle = data.newHandle || ''
+  const newHandle = rawHandle.trim()
   if (!newHandle) {
     throw new errors.BadRequestError('newHandle is required')
   }
@@ -463,6 +488,8 @@ async function updateHandle (currentUser, handle, query, data) {
   if (newHandle === member.handle) {
     return getMember(currentUser, handle, query)
   }
+
+  validateHandleRules(newHandle, rawHandle)
 
   const newHandleLower = newHandle.toLowerCase()
   const existingMember = await prisma.member.findUnique({
@@ -478,6 +505,12 @@ async function updateHandle (currentUser, handle, query, data) {
     where: { handle_lower: newHandleLower }
   })
   if (existingIdentity && Number(existingIdentity.user_id) !== identityUserId) {
+    throw new errors.BadRequestError(`Handle "${newHandle}" is already registered`)
+  }
+  const existingSecurityUser = await identityPrisma.security_user.findUnique({
+    where: { user_id: newHandle }
+  })
+  if (existingSecurityUser && Number(existingSecurityUser.login_id) !== identityUserId) {
     throw new errors.BadRequestError(`Handle "${newHandle}" is already registered`)
   }
 
@@ -504,8 +537,12 @@ async function updateHandle (currentUser, handle, query, data) {
     })
     memberUpdated = true
 
-    await updateVanillaHandle(member.handle, newHandle, vanillaPool)
-    vanillaUpdated = true
+    try {
+      await updateVanillaHandle(member.handle, newHandle, vanillaPool)
+      vanillaUpdated = true
+    } catch (err) {
+      logger.warn(`Vanilla handle update skipped for ${member.userId}: ${err.message}`)
+    }
   } catch (err) {
     if (vanillaUpdated) {
       try {
