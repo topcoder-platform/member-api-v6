@@ -110,7 +110,7 @@ async function confirmProfileData (req, res) {
 async function downloadProfile (req, res) {
   const pdfStream = await service.downloadProfile(req.authUser, req.params.handle)
   res.setHeader('Content-Type', 'application/pdf')
-  res.setHeader('Content-Disposition', `attachment; filename="profile-${req.params.handle}.pdf"`)
+  res.setHeader('Content-Disposition', `attachment; filename="topcoder-profile-${req.params.handle}.pdf"`)
   pdfStream.pipe(res)
 }
 

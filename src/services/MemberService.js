@@ -19,6 +19,7 @@ const fileType = require('file-type')
 const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
+const { htmlToText } = require('../common/htmlUtils')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const { Prisma } = prismaManager
@@ -31,6 +32,9 @@ const academyPrisma = prismaManager.getAcademyClient()
 const resourcesPrisma = prismaManager.getResourcesClient()
 const engagementsPrisma = prismaManager.getEngagementsClient()
 const profilePDFService = require('./ProfilePDFService')
+const request = require('request')
+const cityTimezones = require('city-timezones')
+const moment = require('moment-timezone')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
@@ -1164,6 +1168,446 @@ confirmProfileData.schema = {
 }
 
 /**
+ * Fetch gamification achievements for a member
+ * @param {Number} userId the member userId
+ * @returns {Promise<String>} formatted achievements string
+ */
+async function fetchGamificationAchievements (userId) {
+  try {
+    if (!config.GAMIFICATION_API_URL) {
+      logger.warn(`GAMIFICATION_API_URL is not configured for user ${userId}`)
+      return ''
+    }
+    let token
+    try {
+      token = await helper.getM2MToken()
+    } catch (tokenError) {
+      logger.warn(`Cannot get M2M token for gamification API for user ${userId}: ${tokenError.message}. Achievements will be empty.`)
+      return ''
+    }
+    
+    if (!token) {
+      logger.warn(`M2M token is null/undefined for gamification API for user ${userId}`)
+      return ''
+    }
+    
+    const gamificationUrl = `${config.GAMIFICATION_API_URL}/badges/assigned/${userId}`
+    
+    if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
+      logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
+      return ''
+    }
+    
+    const finalGamificationUrl = String(gamificationUrl || '').trim()
+    if (!finalGamificationUrl || finalGamificationUrl === 'undefined' || finalGamificationUrl.includes('undefined') || finalGamificationUrl.length === 0) {
+      logger.error(`Invalid final gamification URL for user ${userId}: finalUrl="${finalGamificationUrl}", baseUrl="${gamificationApiUrl}", userId=${userId}`)
+      return ''
+    }
+    
+    return new Promise((resolve, reject) => {
+      try {
+        request({
+          url: finalGamificationUrl,
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }, (error, response, body) => {
+        if (error) {
+          logger.warn(`Failed to fetch gamification achievements for user ${userId}: ${error.message}`)
+          resolve('')
+          return
+        }
+        if (response.statusCode !== 200) {
+          logger.warn(`Gamification API returned status ${response.statusCode} for user ${userId}`)
+          resolve('')
+          return
+        }
+        try {
+          const data = JSON.parse(body)
+          // Format achievements: count multiples and join with " | "
+          // Response structure: { rows: [...], count: ... }
+          const achievementMap = {}
+          const badges = data.rows || []
+          
+          logger.debug(`Gamification API response for user ${userId}: rows count=${badges.length}, hasRows=${!!data.rows}`)
+          
+          badges.forEach(badge => {
+            const orgBadge = badge.org_badge
+            if (orgBadge && orgBadge.badge_name) {
+              // Check if badge is active - handle both boolean and string values
+              const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
+              // Check status - case insensitive
+              const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
+              
+              logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+              
+              if (isActive && isActiveStatus) {
+                const name = htmlToText(orgBadge.badge_name)
+                achievementMap[name] = (achievementMap[name] || 0) + 1
+              } else {
+                logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+              }
+            } else {
+              logger.debug(`Badge missing org_badge or badge_name:`, { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
+            }
+          })
+          
+          logger.debug(`Achievement map for user ${userId}:`, achievementMap)
+          
+          const achievements = Object.entries(achievementMap)
+            .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
+            .join(' | ')
+          
+          logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
+          resolve(achievements)
+        } catch (parseError) {
+          logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body?.substring(0, 200)}`)
+          resolve('')
+        }
+      })
+      } catch (requestError) {
+        logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}`)
+        resolve('')
+      }
+    })
+  } catch (error) {
+    logger.warn(`Error fetching gamification achievements for user ${userId}: ${error.message}`)
+    return ''
+  }
+}
+
+/**
+ * Fetch completed certifications and courses from learning-paths-api
+ * @param {Number} userId the member userId
+ * @returns {Promise<Object>} object with certifications and courses arrays
+ */
+async function fetchCertificationsAndCourses (userId) {
+  try {
+    if (!config.LEARNING_PATHS_API_URL) {
+      logger.warn(`LEARNING_PATHS_API_URL is not configured for user ${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    let token
+    try {
+      token = await helper.getM2MToken()
+    } catch (tokenError) {
+      logger.warn(`Cannot get M2M token for user ${userId}: ${tokenError.message}. Certifications and courses will be empty.`)
+      return { certifications: [], courses: [] }
+    }
+    
+    if (!token) {
+      logger.warn(`M2M token is null/undefined for user ${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    
+    const learningPathsUrl = `${config.LEARNING_PATHS_API_URL}/completed-certifications/${userId}`
+    
+    if (!learningPathsUrl || typeof learningPathsUrl !== 'string' || !userId) {
+      logger.error(`Invalid learning-paths URL for user ${userId}: learningPathsUrl=${learningPathsUrl}, userId=${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    
+    // Double-check URL is valid before making request
+    const finalUrl = String(learningPathsUrl || '').trim()
+    if (!finalUrl || finalUrl === 'undefined' || finalUrl.includes('undefined') || finalUrl.length === 0) {
+      logger.error(`Invalid final URL constructed for user ${userId}: finalUrl="${finalUrl}", baseUrl="${learningPathsApiUrl}", userId=${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    
+    return new Promise((resolve, reject) => {
+      try {
+        request({
+          url: finalUrl,
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }, (error, response, body) => {
+        if (error) {
+          logger.warn(`Failed to fetch certifications for user ${userId}: ${error.message}`)
+          resolve({ certifications: [], courses: [] })
+          return
+        }
+        if (response.statusCode !== 200) {
+          logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}`)
+          resolve({ certifications: [], courses: [] })
+          return
+        }
+        try {
+          const data = JSON.parse(body)
+          
+          // Process certifications
+          const certifications = (data.enrollments || [])
+            .filter(e => e.status === 'completed' && e.topcoderCertification)
+            .map(e => `${e.topcoderCertification.title} - Topcoder Academy`)
+          
+          // Process courses
+          const courses = (data.courses || [])
+            .map(c => {
+              const title = c.certificationTitle || c.certification || 'Course'
+              return `${title} - Topcoder Academy`
+            })
+          
+          resolve({ certifications, courses })
+        } catch (parseError) {
+          logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
+          resolve({ certifications: [], courses: [] })
+        }
+      })
+      } catch (requestError) {
+        logger.error(`Error creating request for user ${userId}: ${requestError.message}`)
+        resolve({ certifications: [], courses: [] })
+      }
+    })
+  } catch (error) {
+    logger.warn(`Error fetching certifications for user ${userId}: ${error.message}`)
+    return { certifications: [], courses: [] }
+  }
+}
+
+/**
+ * Get member timezone based on city
+ * @param {Object} memberData the member data
+ * @returns {String|null} timezone abbreviation or null if not found
+ */
+function getMemberTimezone (memberData) {
+  const city = memberData.addresses?.[0]?.city
+  if (!city) return null
+
+  const cityTimezoneData = cityTimezones.lookupViaCity(city)
+  let memberTimezone = null
+
+  if (cityTimezoneData?.length) {
+    memberTimezone = cityTimezoneData[0].timezone
+  }
+
+  // Validate timezone exists
+  if (memberTimezone && moment.tz.zone(memberTimezone)) {
+    // Get abbreviation for display
+    return moment.tz(new Date(), memberTimezone).zoneAbbr()
+  }
+
+  return null
+}
+
+/**
+ * Get skill names by their IDs
+ * @param {Array<String>} skillIds array of skill UUIDs
+ * @returns {Promise<Object>} map of skillId -> skillName
+ */
+async function getSkillNamesByIds (skillIds) {
+  if (!skillIds || skillIds.length === 0) {
+    return {}
+  }
+
+  const skills = await skillsPrisma.skill.findMany({
+    where: { id: { in: skillIds } },
+    select: { id: true, name: true }
+  })
+
+  const skillMap = {}
+  skills.forEach(skill => {
+    skillMap[skill.id] = skill.name
+  })
+
+  return skillMap
+}
+
+/**
+ * Get member roles from identity database (role_assignment + role tables)
+ * @param {Number} userId the member userId
+ * @returns {Promise<String[]>} array of role names
+ */
+async function getMemberRoles (userId) {
+  try {
+    if (!config.IDENTITY_DB_URL) {
+      logger.warn('IDENTITY_DB_URL is not configured; cannot fetch member roles')
+      return []
+    }
+    const identityPrisma = identityPrismaManager.getIdentityClient()
+    const assignments = await identityPrisma.roleAssignment.findMany({
+      where: { subjectId: Number(userId), subjectType: 1 },
+      include: { role: true }
+    })
+    return (assignments || [])
+      .filter(a => a.role && a.role.name)
+      .map(a => a.role.name)
+  } catch (err) {
+    logger.warn(`Failed to fetch roles for user ${userId}: ${err.message}`)
+    return []
+  }
+}
+
+/**
+ * Aggregate all data needed for PDF generation
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Promise<Object>} aggregated PDF data
+ */
+async function aggregatePDFData (currentUser, handle) {
+  // Get base member data
+  const memberData = await getMember(currentUser, handle, {})
+  const userId = helper.bigIntToNumber(memberData.userId)
+  
+  // Fetch traits (work, education, languages, basicInfo, personalization)
+  const traits = await memberTraitService.getTraits(currentUser, handle, {})
+  const workTraits = traits.find(t => t.traitId === 'work')?.traits?.data || []
+  const educationTraits = traits.find(t => t.traitId === 'education')?.traits?.data || []
+  const languageTraits = traits.find(t => t.traitId === 'languages')?.traits?.data || []
+  const basicInfoTraits = traits.find(t => t.traitId === 'basic_info')?.traits?.data || []
+  
+  // Collect all skill GUIDs from work experiences for batch lookup
+  const allSkillIds = []
+  workTraits.forEach(work => {
+    if (work.associatedSkills && work.associatedSkills.length > 0) {
+      allSkillIds.push(...work.associatedSkills)
+    }
+  })
+  
+  // Batch lookup all skill names
+  const skillNameMap = await getSkillNamesByIds([...new Set(allSkillIds)])
+  
+  // Extract personalization trait to get shortBio (profileSelfTitle)
+  const personalizationTrait = traits.find(t => t.traitId === 'personalization')
+  const personalizationData = personalizationTrait?.traits?.data?.[0] || {}
+  const shortBio = personalizationData.profileSelfTitle || null
+  
+  // Fetch skills from standardized-skills-api
+  const skills = await getMemberSkills(memberData.userId)
+  
+  // Separate skills by display mode and verification status
+  const principalSkills = { verified: [], notVerified: [] }
+  const additionalSkills = { verified: [], notVerified: [] }
+  
+  skills.forEach(skill => {
+    const isPrincipal = skill.displayMode?.name === 'principal'
+    const isVerified = skill.levels?.some(level => level.name === 'verified')
+    const skillName = skill.name
+    
+    if (isPrincipal) {
+      if (isVerified) {
+        principalSkills.verified.push(skillName)
+      } else {
+        principalSkills.notVerified.push(skillName)
+      }
+    } else {
+      if (isVerified) {
+        additionalSkills.verified.push(skillName)
+      } else {
+        additionalSkills.notVerified.push(skillName)
+      }
+    }
+  })
+  
+  const specialRoles = []
+  const roleMap = {
+    'copilot': 'Copilot',
+    'administrator': 'Administrator',
+    'Talent Manager': 'Talent Manager',
+    'Gamification Admin': 'Gamification Admin',
+    'Self-Service Customer': 'Self-Service Customer',
+    'Topcoder User': 'Topcoder User',
+    'TCA Admin': 'TCA Admin',
+    'Payment Admin': 'Payment Admin',
+    'Payment Viewer': 'Payment Viewer',
+    'PaymentProvider Admin': 'PaymentProvider Admin',
+    'PaymentProvider Viewer': 'PaymentProvider Viewer',
+    'TaxForm Admin': 'TaxForm Admin',
+    'TaxForm Viewer': 'TaxForm Viewer',
+    'Topcoder Staff': 'Topcoder Staff',
+    'Project Manager': 'Project Manager',
+    'Connect Manager': 'Connect Manager',
+  }
+  
+  const currentUserId = currentUser && (currentUser.userId || currentUser.sub)
+  const isSelf = currentUserId && String(currentUserId) === String(userId)
+  
+  if (currentUser && (isSelf || helper.hasAdminRole(currentUser))) {
+    const memberRoles = await getMemberRoles(userId)
+    memberRoles.forEach(role => {
+      const roleName = roleMap[role.toLowerCase()]
+      if (roleName && !specialRoles.includes(roleName)) {
+        specialRoles.push(roleName)
+      }
+    })
+  }
+  
+  // Fetch gamification achievements
+  const achievements = await fetchGamificationAchievements(userId)
+  
+  // Fetch certifications and courses
+  const { certifications, courses } = await fetchCertificationsAndCourses(userId)
+  
+  // Build status bar text
+  const statusBarItems = []
+  if (memberData.status === 'ACTIVE') {
+    statusBarItems.push('ACTIVE')
+  }
+  if (memberData.availableForGigs === true) {
+    statusBarItems.push('OPEN TO WORK')
+  }
+  const statusBarText = statusBarItems.join(' • ')
+  
+  // Format dates
+  const formatDate = (date) => {
+    if (!date) return null
+    const d = new Date(date)
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const year = d.getFullYear()
+    return `${month}/${year}`
+  }
+  
+  // Get member timezone
+  const timezone = getMemberTimezone(memberData)
+  
+  return {
+    // Member basic info
+    member: {
+      ...memberData,
+      statusBarText,
+      generatedOn: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      timezone: timezone
+    },
+    // Work experience
+    workExperience: workTraits.map(work => ({
+      position: work.position,
+      company: work.companyName,
+      startDate: formatDate(work.startDate),
+      endDate: formatDate(work.endDate),
+      description: work.description,
+      skills: (work.associatedSkills || [])
+        .map(skillId => skillNameMap[skillId])
+        .filter(Boolean) // Remove any undefined (GUIDs without names)
+    })),
+    // Education
+    education: educationTraits.map(edu => ({
+      degree: edu.degree,
+      college: edu.collegeName,
+      endYear: edu.endYear ? String(edu.endYear) : null
+    })),
+    // Languages
+    languages: languageTraits.map(lang => lang.language).filter(Boolean),
+    // Basic info (including shortBio from personalization)
+    basicInfo: {
+      ...(basicInfoTraits[0] || {}),
+      shortBio: shortBio
+    },
+    // Skills
+    skills: {
+      principal: principalSkills,
+      additional: additionalSkills
+    },
+    // Topcoder activity
+    topcoderActivity: {
+      specialRole: specialRoles.length > 0 ? `Topcoder Special Role: ${specialRoles.join(', ')}` : null,
+      achievements: achievements
+    },
+    // Certifications and courses
+    certifications,
+    courses
+  }
+}
+
+/**
  * Download member profile as PDF
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
@@ -1178,11 +1622,11 @@ async function downloadProfile (currentUser, handle) {
     throw new errors.ForbiddenError('You are not allowed to download this member profile.')
   }
 
-  // Fetch full member data for PDF
-  const memberData = await getMember(currentUser, handle, {})
+  // Aggregate all PDF data
+  const pdfData = await aggregatePDFData(currentUser, handle)
 
   // Generate PDF stream
-  const pdfStream = await profilePDFService.generatePDF(memberData)
+  const pdfStream = await profilePDFService.generatePDF(pdfData)
 
   return pdfStream
 }

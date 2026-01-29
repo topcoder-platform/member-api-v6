@@ -122,6 +122,12 @@ module.exports = {
   MAMBO_PRIVATE_KEY: process.env.MAMBO_PRIVATE_KEY,
   MAMBO_DOMAIN_URL: process.env.MAMBO_DOMAIN_URL,
   MAMBO_DEFAULT_SITE: process.env.MAMBO_DEFAULT_SITE,
+  
+  // Learning Paths API
+  LEARNING_PATHS_API_URL: process.env.LEARNING_PATHS_API_URL || 'https://api.topcoder-dev.com/v5/learning-paths',
+  
+  // Gamification API
+  GAMIFICATION_API_URL: process.env.GAMIFICATION_API_URL || 'https://api.topcoder-dev.com/v5/gamification',
 
   HASHING_KEYS: {
     USERFLOW: process.env.USERFLOW_PRIVATE_KEY
