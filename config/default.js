@@ -9,6 +9,7 @@ module.exports = {
   AUTH_SECRET: process.env.AUTH_SECRET || 'mysecret',
   VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
   IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
+  VANILLA_DB_URL: process.env.VANILLA_DB_URL,
   RESOURCES_DB_URL: process.env.RESOURCES_DB_URL,
 
   // used to get M2M token
