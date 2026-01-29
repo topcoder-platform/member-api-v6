@@ -838,27 +838,35 @@ async function updateIdentityHandle (userId, oldHandle, newHandle, timestamp) {
   const lowerHandle = newHandle.toLowerCase()
   const updatedAt = timestamp || new Date()
 
-  let userResult
-  let securityUserResult
   try {
-    userResult = await identityPrisma.$executeRaw`
-      UPDATE identity."user"
-      SET handle=${newHandle}, handle_lower=${lowerHandle}, modify_date=${updatedAt}
-      WHERE user_id=${userId}
-    `
+    await identityPrisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { user_id: userId },
+        data: {
+          handle: newHandle,
+          handle_lower: lowerHandle,
+          modify_date: updatedAt
+        }
+      })
 
-    securityUserResult = await identityPrisma.$executeRaw`
-      UPDATE identity.security_user
-      SET user_id=${newHandle}
-      WHERE user_id=${oldHandle}
-    `
+      const securityUserResult = await tx.security_user.updateMany({
+        where: {
+          login_id: userId,
+          user_id: oldHandle
+        },
+        data: {
+          user_id: newHandle,
+          modify_date: updatedAt
+        }
+      })
+
+      if (securityUserResult.count === 0) {
+        throw new Error(`Security user not updated for user ${userId}`)
+      }
+    })
   } catch (err) {
     logger.error(`Failed to update identity handle for user ${userId}: ${err.message}`)
     throw err
-  }
-
-  if (userResult === 0 || securityUserResult === 0) {
-    throw new Error(`Identity records not updated for user ${userId}`)
   }
 }
 

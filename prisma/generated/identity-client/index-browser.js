@@ -135,6 +135,14 @@ exports.Prisma.EmailScalarFieldEnum = {
   modify_date: 'modify_date'
 };
 
+exports.Prisma.Security_userScalarFieldEnum = {
+  login_id: 'login_id',
+  user_id: 'user_id',
+  password: 'password',
+  create_user_id: 'create_user_id',
+  modify_date: 'modify_date'
+};
+
 exports.Prisma.SortOrder = {
   asc: 'asc',
   desc: 'desc'
@@ -153,7 +161,8 @@ exports.Prisma.NullsOrder = {
 
 exports.Prisma.ModelName = {
   user: 'user',
-  email: 'email'
+  email: 'email',
+  security_user: 'security_user'
 };
 
 /**
