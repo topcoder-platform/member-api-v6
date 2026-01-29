@@ -23,6 +23,11 @@ export type user = $Result.DefaultSelection<Prisma.$userPayload>
  * 
  */
 export type email = $Result.DefaultSelection<Prisma.$emailPayload>
+/**
+ * Model security_user
+ * 
+ */
+export type security_user = $Result.DefaultSelection<Prisma.$security_userPayload>
 
 /**
  * ##  Prisma Client ʲˢ
@@ -168,6 +173,16 @@ export class PrismaClient<
     * ```
     */
   get email(): Prisma.emailDelegate<ExtArgs, ClientOptions>;
+
+  /**
+   * `prisma.security_user`: Exposes CRUD operations for the **security_user** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more Security_users
+    * const security_users = await prisma.security_user.findMany()
+    * ```
+    */
+  get security_user(): Prisma.security_userDelegate<ExtArgs, ClientOptions>;
 }
 
 export namespace Prisma {
@@ -609,7 +624,8 @@ export namespace Prisma {
 
   export const ModelName: {
     user: 'user',
-    email: 'email'
+    email: 'email',
+    security_user: 'security_user'
   };
 
   export type ModelName = (typeof ModelName)[keyof typeof ModelName]
@@ -628,7 +644,7 @@ export namespace Prisma {
       omit: GlobalOmitOptions
     }
     meta: {
-      modelProps: "user" | "email"
+      modelProps: "user" | "email" | "security_user"
       txIsolationLevel: Prisma.TransactionIsolationLevel
     }
     model: {
@@ -780,6 +796,80 @@ export namespace Prisma {
           }
         }
       }
+      security_user: {
+        payload: Prisma.$security_userPayload<ExtArgs>
+        fields: Prisma.security_userFieldRefs
+        operations: {
+          findUnique: {
+            args: Prisma.security_userFindUniqueArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload> | null
+          }
+          findUniqueOrThrow: {
+            args: Prisma.security_userFindUniqueOrThrowArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>
+          }
+          findFirst: {
+            args: Prisma.security_userFindFirstArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload> | null
+          }
+          findFirstOrThrow: {
+            args: Prisma.security_userFindFirstOrThrowArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>
+          }
+          findMany: {
+            args: Prisma.security_userFindManyArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>[]
+          }
+          create: {
+            args: Prisma.security_userCreateArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>
+          }
+          createMany: {
+            args: Prisma.security_userCreateManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          createManyAndReturn: {
+            args: Prisma.security_userCreateManyAndReturnArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>[]
+          }
+          delete: {
+            args: Prisma.security_userDeleteArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>
+          }
+          update: {
+            args: Prisma.security_userUpdateArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>
+          }
+          deleteMany: {
+            args: Prisma.security_userDeleteManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          updateMany: {
+            args: Prisma.security_userUpdateManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          updateManyAndReturn: {
+            args: Prisma.security_userUpdateManyAndReturnArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>[]
+          }
+          upsert: {
+            args: Prisma.security_userUpsertArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$security_userPayload>
+          }
+          aggregate: {
+            args: Prisma.Security_userAggregateArgs<ExtArgs>
+            result: $Utils.Optional<AggregateSecurity_user>
+          }
+          groupBy: {
+            args: Prisma.security_userGroupByArgs<ExtArgs>
+            result: $Utils.Optional<Security_userGroupByOutputType>[]
+          }
+          count: {
+            args: Prisma.security_userCountArgs<ExtArgs>
+            result: $Utils.Optional<Security_userCountAggregateOutputType> | number
+          }
+        }
+      }
     }
   } & {
     other: {
@@ -874,6 +964,7 @@ export namespace Prisma {
   export type GlobalOmitConfig = {
     user?: userOmit
     email?: emailOmit
+    security_user?: security_userOmit
   }
 
   /* Types for Logging */
@@ -3023,6 +3114,1039 @@ export namespace Prisma {
 
 
   /**
+   * Model security_user
+   */
+
+  export type AggregateSecurity_user = {
+    _count: Security_userCountAggregateOutputType | null
+    _avg: Security_userAvgAggregateOutputType | null
+    _sum: Security_userSumAggregateOutputType | null
+    _min: Security_userMinAggregateOutputType | null
+    _max: Security_userMaxAggregateOutputType | null
+  }
+
+  export type Security_userAvgAggregateOutputType = {
+    login_id: Decimal | null
+    create_user_id: Decimal | null
+  }
+
+  export type Security_userSumAggregateOutputType = {
+    login_id: Decimal | null
+    create_user_id: Decimal | null
+  }
+
+  export type Security_userMinAggregateOutputType = {
+    login_id: Decimal | null
+    user_id: string | null
+    password: string | null
+    create_user_id: Decimal | null
+    modify_date: Date | null
+  }
+
+  export type Security_userMaxAggregateOutputType = {
+    login_id: Decimal | null
+    user_id: string | null
+    password: string | null
+    create_user_id: Decimal | null
+    modify_date: Date | null
+  }
+
+  export type Security_userCountAggregateOutputType = {
+    login_id: number
+    user_id: number
+    password: number
+    create_user_id: number
+    modify_date: number
+    _all: number
+  }
+
+
+  export type Security_userAvgAggregateInputType = {
+    login_id?: true
+    create_user_id?: true
+  }
+
+  export type Security_userSumAggregateInputType = {
+    login_id?: true
+    create_user_id?: true
+  }
+
+  export type Security_userMinAggregateInputType = {
+    login_id?: true
+    user_id?: true
+    password?: true
+    create_user_id?: true
+    modify_date?: true
+  }
+
+  export type Security_userMaxAggregateInputType = {
+    login_id?: true
+    user_id?: true
+    password?: true
+    create_user_id?: true
+    modify_date?: true
+  }
+
+  export type Security_userCountAggregateInputType = {
+    login_id?: true
+    user_id?: true
+    password?: true
+    create_user_id?: true
+    modify_date?: true
+    _all?: true
+  }
+
+  export type Security_userAggregateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Filter which security_user to aggregate.
+     */
+    where?: security_userWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of security_users to fetch.
+     */
+    orderBy?: security_userOrderByWithRelationInput | security_userOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the start position
+     */
+    cursor?: security_userWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` security_users from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` security_users.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Count returned security_users
+    **/
+    _count?: true | Security_userCountAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to average
+    **/
+    _avg?: Security_userAvgAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to sum
+    **/
+    _sum?: Security_userSumAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to find the minimum value
+    **/
+    _min?: Security_userMinAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to find the maximum value
+    **/
+    _max?: Security_userMaxAggregateInputType
+  }
+
+  export type GetSecurity_userAggregateType<T extends Security_userAggregateArgs> = {
+        [P in keyof T & keyof AggregateSecurity_user]: P extends '_count' | 'count'
+      ? T[P] extends true
+        ? number
+        : GetScalarType<T[P], AggregateSecurity_user[P]>
+      : GetScalarType<T[P], AggregateSecurity_user[P]>
+  }
+
+
+
+
+  export type security_userGroupByArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: security_userWhereInput
+    orderBy?: security_userOrderByWithAggregationInput | security_userOrderByWithAggregationInput[]
+    by: Security_userScalarFieldEnum[] | Security_userScalarFieldEnum
+    having?: security_userScalarWhereWithAggregatesInput
+    take?: number
+    skip?: number
+    _count?: Security_userCountAggregateInputType | true
+    _avg?: Security_userAvgAggregateInputType
+    _sum?: Security_userSumAggregateInputType
+    _min?: Security_userMinAggregateInputType
+    _max?: Security_userMaxAggregateInputType
+  }
+
+  export type Security_userGroupByOutputType = {
+    login_id: Decimal
+    user_id: string
+    password: string
+    create_user_id: Decimal | null
+    modify_date: Date | null
+    _count: Security_userCountAggregateOutputType | null
+    _avg: Security_userAvgAggregateOutputType | null
+    _sum: Security_userSumAggregateOutputType | null
+    _min: Security_userMinAggregateOutputType | null
+    _max: Security_userMaxAggregateOutputType | null
+  }
+
+  type GetSecurity_userGroupByPayload<T extends security_userGroupByArgs> = Prisma.PrismaPromise<
+    Array<
+      PickEnumerable<Security_userGroupByOutputType, T['by']> &
+        {
+          [P in ((keyof T) & (keyof Security_userGroupByOutputType))]: P extends '_count'
+            ? T[P] extends boolean
+              ? number
+              : GetScalarType<T[P], Security_userGroupByOutputType[P]>
+            : GetScalarType<T[P], Security_userGroupByOutputType[P]>
+        }
+      >
+    >
+
+
+  export type security_userSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    login_id?: boolean
+    user_id?: boolean
+    password?: boolean
+    create_user_id?: boolean
+    modify_date?: boolean
+  }, ExtArgs["result"]["security_user"]>
+
+  export type security_userSelectCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    login_id?: boolean
+    user_id?: boolean
+    password?: boolean
+    create_user_id?: boolean
+    modify_date?: boolean
+  }, ExtArgs["result"]["security_user"]>
+
+  export type security_userSelectUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    login_id?: boolean
+    user_id?: boolean
+    password?: boolean
+    create_user_id?: boolean
+    modify_date?: boolean
+  }, ExtArgs["result"]["security_user"]>
+
+  export type security_userSelectScalar = {
+    login_id?: boolean
+    user_id?: boolean
+    password?: boolean
+    create_user_id?: boolean
+    modify_date?: boolean
+  }
+
+  export type security_userOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"login_id" | "user_id" | "password" | "create_user_id" | "modify_date", ExtArgs["result"]["security_user"]>
+
+  export type $security_userPayload<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    name: "security_user"
+    objects: {}
+    scalars: $Extensions.GetPayloadResult<{
+      login_id: Prisma.Decimal
+      user_id: string
+      password: string
+      create_user_id: Prisma.Decimal | null
+      modify_date: Date | null
+    }, ExtArgs["result"]["security_user"]>
+    composites: {}
+  }
+
+  type security_userGetPayload<S extends boolean | null | undefined | security_userDefaultArgs> = $Result.GetResult<Prisma.$security_userPayload, S>
+
+  type security_userCountArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> =
+    Omit<security_userFindManyArgs, 'select' | 'include' | 'distinct' | 'omit'> & {
+      select?: Security_userCountAggregateInputType | true
+    }
+
+  export interface security_userDelegate<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> {
+    [K: symbol]: { types: Prisma.TypeMap<ExtArgs>['model']['security_user'], meta: { name: 'security_user' } }
+    /**
+     * Find zero or one Security_user that matches the filter.
+     * @param {security_userFindUniqueArgs} args - Arguments to find a Security_user
+     * @example
+     * // Get one Security_user
+     * const security_user = await prisma.security_user.findUnique({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findUnique<T extends security_userFindUniqueArgs>(args: SelectSubset<T, security_userFindUniqueArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "findUnique", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find one Security_user that matches the filter or throw an error with `error.code='P2025'`
+     * if no matches were found.
+     * @param {security_userFindUniqueOrThrowArgs} args - Arguments to find a Security_user
+     * @example
+     * // Get one Security_user
+     * const security_user = await prisma.security_user.findUniqueOrThrow({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findUniqueOrThrow<T extends security_userFindUniqueOrThrowArgs>(args: SelectSubset<T, security_userFindUniqueOrThrowArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find the first Security_user that matches the filter.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {security_userFindFirstArgs} args - Arguments to find a Security_user
+     * @example
+     * // Get one Security_user
+     * const security_user = await prisma.security_user.findFirst({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findFirst<T extends security_userFindFirstArgs>(args?: SelectSubset<T, security_userFindFirstArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "findFirst", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find the first Security_user that matches the filter or
+     * throw `PrismaKnownClientError` with `P2025` code if no matches were found.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {security_userFindFirstOrThrowArgs} args - Arguments to find a Security_user
+     * @example
+     * // Get one Security_user
+     * const security_user = await prisma.security_user.findFirstOrThrow({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findFirstOrThrow<T extends security_userFindFirstOrThrowArgs>(args?: SelectSubset<T, security_userFindFirstOrThrowArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "findFirstOrThrow", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find zero or more Security_users that matches the filter.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {security_userFindManyArgs} args - Arguments to filter and select certain fields only.
+     * @example
+     * // Get all Security_users
+     * const security_users = await prisma.security_user.findMany()
+     * 
+     * // Get first 10 Security_users
+     * const security_users = await prisma.security_user.findMany({ take: 10 })
+     * 
+     * // Only select the `login_id`
+     * const security_userWithLogin_idOnly = await prisma.security_user.findMany({ select: { login_id: true } })
+     * 
+     */
+    findMany<T extends security_userFindManyArgs>(args?: SelectSubset<T, security_userFindManyArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "findMany", GlobalOmitOptions>>
+
+    /**
+     * Create a Security_user.
+     * @param {security_userCreateArgs} args - Arguments to create a Security_user.
+     * @example
+     * // Create one Security_user
+     * const Security_user = await prisma.security_user.create({
+     *   data: {
+     *     // ... data to create a Security_user
+     *   }
+     * })
+     * 
+     */
+    create<T extends security_userCreateArgs>(args: SelectSubset<T, security_userCreateArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "create", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Create many Security_users.
+     * @param {security_userCreateManyArgs} args - Arguments to create many Security_users.
+     * @example
+     * // Create many Security_users
+     * const security_user = await prisma.security_user.createMany({
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     *     
+     */
+    createMany<T extends security_userCreateManyArgs>(args?: SelectSubset<T, security_userCreateManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Create many Security_users and returns the data saved in the database.
+     * @param {security_userCreateManyAndReturnArgs} args - Arguments to create many Security_users.
+     * @example
+     * // Create many Security_users
+     * const security_user = await prisma.security_user.createManyAndReturn({
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * 
+     * // Create many Security_users and only return the `login_id`
+     * const security_userWithLogin_idOnly = await prisma.security_user.createManyAndReturn({
+     *   select: { login_id: true },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * 
+     */
+    createManyAndReturn<T extends security_userCreateManyAndReturnArgs>(args?: SelectSubset<T, security_userCreateManyAndReturnArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "createManyAndReturn", GlobalOmitOptions>>
+
+    /**
+     * Delete a Security_user.
+     * @param {security_userDeleteArgs} args - Arguments to delete one Security_user.
+     * @example
+     * // Delete one Security_user
+     * const Security_user = await prisma.security_user.delete({
+     *   where: {
+     *     // ... filter to delete one Security_user
+     *   }
+     * })
+     * 
+     */
+    delete<T extends security_userDeleteArgs>(args: SelectSubset<T, security_userDeleteArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "delete", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Update one Security_user.
+     * @param {security_userUpdateArgs} args - Arguments to update one Security_user.
+     * @example
+     * // Update one Security_user
+     * const security_user = await prisma.security_user.update({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: {
+     *     // ... provide data here
+     *   }
+     * })
+     * 
+     */
+    update<T extends security_userUpdateArgs>(args: SelectSubset<T, security_userUpdateArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "update", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Delete zero or more Security_users.
+     * @param {security_userDeleteManyArgs} args - Arguments to filter Security_users to delete.
+     * @example
+     * // Delete a few Security_users
+     * const { count } = await prisma.security_user.deleteMany({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     * 
+     */
+    deleteMany<T extends security_userDeleteManyArgs>(args?: SelectSubset<T, security_userDeleteManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Update zero or more Security_users.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {security_userUpdateManyArgs} args - Arguments to update one or more rows.
+     * @example
+     * // Update many Security_users
+     * const security_user = await prisma.security_user.updateMany({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: {
+     *     // ... provide data here
+     *   }
+     * })
+     * 
+     */
+    updateMany<T extends security_userUpdateManyArgs>(args: SelectSubset<T, security_userUpdateManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Update zero or more Security_users and returns the data updated in the database.
+     * @param {security_userUpdateManyAndReturnArgs} args - Arguments to update many Security_users.
+     * @example
+     * // Update many Security_users
+     * const security_user = await prisma.security_user.updateManyAndReturn({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * 
+     * // Update zero or more Security_users and only return the `login_id`
+     * const security_userWithLogin_idOnly = await prisma.security_user.updateManyAndReturn({
+     *   select: { login_id: true },
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * 
+     */
+    updateManyAndReturn<T extends security_userUpdateManyAndReturnArgs>(args: SelectSubset<T, security_userUpdateManyAndReturnArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "updateManyAndReturn", GlobalOmitOptions>>
+
+    /**
+     * Create or update one Security_user.
+     * @param {security_userUpsertArgs} args - Arguments to update or create a Security_user.
+     * @example
+     * // Update or create a Security_user
+     * const security_user = await prisma.security_user.upsert({
+     *   create: {
+     *     // ... data to create a Security_user
+     *   },
+     *   update: {
+     *     // ... in case it already exists, update
+     *   },
+     *   where: {
+     *     // ... the filter for the Security_user we want to update
+     *   }
+     * })
+     */
+    upsert<T extends security_userUpsertArgs>(args: SelectSubset<T, security_userUpsertArgs<ExtArgs>>): Prisma__security_userClient<$Result.GetResult<Prisma.$security_userPayload<ExtArgs>, T, "upsert", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+
+    /**
+     * Count the number of Security_users.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {security_userCountArgs} args - Arguments to filter Security_users to count.
+     * @example
+     * // Count the number of Security_users
+     * const count = await prisma.security_user.count({
+     *   where: {
+     *     // ... the filter for the Security_users we want to count
+     *   }
+     * })
+    **/
+    count<T extends security_userCountArgs>(
+      args?: Subset<T, security_userCountArgs>,
+    ): Prisma.PrismaPromise<
+      T extends $Utils.Record<'select', any>
+        ? T['select'] extends true
+          ? number
+          : GetScalarType<T['select'], Security_userCountAggregateOutputType>
+        : number
+    >
+
+    /**
+     * Allows you to perform aggregations operations on a Security_user.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {Security_userAggregateArgs} args - Select which aggregations you would like to apply and on what fields.
+     * @example
+     * // Ordered by age ascending
+     * // Where email contains prisma.io
+     * // Limited to the 10 users
+     * const aggregations = await prisma.user.aggregate({
+     *   _avg: {
+     *     age: true,
+     *   },
+     *   where: {
+     *     email: {
+     *       contains: "prisma.io",
+     *     },
+     *   },
+     *   orderBy: {
+     *     age: "asc",
+     *   },
+     *   take: 10,
+     * })
+    **/
+    aggregate<T extends Security_userAggregateArgs>(args: Subset<T, Security_userAggregateArgs>): Prisma.PrismaPromise<GetSecurity_userAggregateType<T>>
+
+    /**
+     * Group by Security_user.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {security_userGroupByArgs} args - Group by arguments.
+     * @example
+     * // Group by city, order by createdAt, get count
+     * const result = await prisma.user.groupBy({
+     *   by: ['city', 'createdAt'],
+     *   orderBy: {
+     *     createdAt: true
+     *   },
+     *   _count: {
+     *     _all: true
+     *   },
+     * })
+     * 
+    **/
+    groupBy<
+      T extends security_userGroupByArgs,
+      HasSelectOrTake extends Or<
+        Extends<'skip', Keys<T>>,
+        Extends<'take', Keys<T>>
+      >,
+      OrderByArg extends True extends HasSelectOrTake
+        ? { orderBy: security_userGroupByArgs['orderBy'] }
+        : { orderBy?: security_userGroupByArgs['orderBy'] },
+      OrderFields extends ExcludeUnderscoreKeys<Keys<MaybeTupleToUnion<T['orderBy']>>>,
+      ByFields extends MaybeTupleToUnion<T['by']>,
+      ByValid extends Has<ByFields, OrderFields>,
+      HavingFields extends GetHavingFields<T['having']>,
+      HavingValid extends Has<ByFields, HavingFields>,
+      ByEmpty extends T['by'] extends never[] ? True : False,
+      InputErrors extends ByEmpty extends True
+      ? `Error: "by" must not be empty.`
+      : HavingValid extends False
+      ? {
+          [P in HavingFields]: P extends ByFields
+            ? never
+            : P extends string
+            ? `Error: Field "${P}" used in "having" needs to be provided in "by".`
+            : [
+                Error,
+                'Field ',
+                P,
+                ` in "having" needs to be provided in "by"`,
+              ]
+        }[HavingFields]
+      : 'take' extends Keys<T>
+      ? 'orderBy' extends Keys<T>
+        ? ByValid extends True
+          ? {}
+          : {
+              [P in OrderFields]: P extends ByFields
+                ? never
+                : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+            }[OrderFields]
+        : 'Error: If you provide "take", you also need to provide "orderBy"'
+      : 'skip' extends Keys<T>
+      ? 'orderBy' extends Keys<T>
+        ? ByValid extends True
+          ? {}
+          : {
+              [P in OrderFields]: P extends ByFields
+                ? never
+                : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+            }[OrderFields]
+        : 'Error: If you provide "skip", you also need to provide "orderBy"'
+      : ByValid extends True
+      ? {}
+      : {
+          [P in OrderFields]: P extends ByFields
+            ? never
+            : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+        }[OrderFields]
+    >(args: SubsetIntersection<T, security_userGroupByArgs, OrderByArg> & InputErrors): {} extends InputErrors ? GetSecurity_userGroupByPayload<T> : Prisma.PrismaPromise<InputErrors>
+  /**
+   * Fields of the security_user model
+   */
+  readonly fields: security_userFieldRefs;
+  }
+
+  /**
+   * The delegate class that acts as a "Promise-like" for security_user.
+   * Why is this prefixed with `Prisma__`?
+   * Because we want to prevent naming conflicts as mentioned in
+   * https://github.com/prisma/prisma-client-js/issues/707
+   */
+  export interface Prisma__security_userClient<T, Null = never, ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
+    readonly [Symbol.toStringTag]: "PrismaPromise"
+    /**
+     * Attaches callbacks for the resolution and/or rejection of the Promise.
+     * @param onfulfilled The callback to execute when the Promise is resolved.
+     * @param onrejected The callback to execute when the Promise is rejected.
+     * @returns A Promise for the completion of which ever callback is executed.
+     */
+    then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): $Utils.JsPromise<TResult1 | TResult2>
+    /**
+     * Attaches a callback for only the rejection of the Promise.
+     * @param onrejected The callback to execute when the Promise is rejected.
+     * @returns A Promise for the completion of the callback.
+     */
+    catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): $Utils.JsPromise<T | TResult>
+    /**
+     * Attaches a callback that is invoked when the Promise is settled (fulfilled or rejected). The
+     * resolved value cannot be modified from the callback.
+     * @param onfinally The callback to execute when the Promise is settled (fulfilled or rejected).
+     * @returns A Promise for the completion of the callback.
+     */
+    finally(onfinally?: (() => void) | undefined | null): $Utils.JsPromise<T>
+  }
+
+
+
+
+  /**
+   * Fields of the security_user model
+   */
+  interface security_userFieldRefs {
+    readonly login_id: FieldRef<"security_user", 'Decimal'>
+    readonly user_id: FieldRef<"security_user", 'String'>
+    readonly password: FieldRef<"security_user", 'String'>
+    readonly create_user_id: FieldRef<"security_user", 'Decimal'>
+    readonly modify_date: FieldRef<"security_user", 'DateTime'>
+  }
+    
+
+  // Custom InputTypes
+  /**
+   * security_user findUnique
+   */
+  export type security_userFindUniqueArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * Filter, which security_user to fetch.
+     */
+    where: security_userWhereUniqueInput
+  }
+
+  /**
+   * security_user findUniqueOrThrow
+   */
+  export type security_userFindUniqueOrThrowArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * Filter, which security_user to fetch.
+     */
+    where: security_userWhereUniqueInput
+  }
+
+  /**
+   * security_user findFirst
+   */
+  export type security_userFindFirstArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * Filter, which security_user to fetch.
+     */
+    where?: security_userWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of security_users to fetch.
+     */
+    orderBy?: security_userOrderByWithRelationInput | security_userOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for searching for security_users.
+     */
+    cursor?: security_userWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` security_users from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` security_users.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/distinct Distinct Docs}
+     * 
+     * Filter by unique combinations of security_users.
+     */
+    distinct?: Security_userScalarFieldEnum | Security_userScalarFieldEnum[]
+  }
+
+  /**
+   * security_user findFirstOrThrow
+   */
+  export type security_userFindFirstOrThrowArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * Filter, which security_user to fetch.
+     */
+    where?: security_userWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of security_users to fetch.
+     */
+    orderBy?: security_userOrderByWithRelationInput | security_userOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for searching for security_users.
+     */
+    cursor?: security_userWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` security_users from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` security_users.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/distinct Distinct Docs}
+     * 
+     * Filter by unique combinations of security_users.
+     */
+    distinct?: Security_userScalarFieldEnum | Security_userScalarFieldEnum[]
+  }
+
+  /**
+   * security_user findMany
+   */
+  export type security_userFindManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * Filter, which security_users to fetch.
+     */
+    where?: security_userWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of security_users to fetch.
+     */
+    orderBy?: security_userOrderByWithRelationInput | security_userOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for listing security_users.
+     */
+    cursor?: security_userWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` security_users from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` security_users.
+     */
+    skip?: number
+    distinct?: Security_userScalarFieldEnum | Security_userScalarFieldEnum[]
+  }
+
+  /**
+   * security_user create
+   */
+  export type security_userCreateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * The data needed to create a security_user.
+     */
+    data: XOR<security_userCreateInput, security_userUncheckedCreateInput>
+  }
+
+  /**
+   * security_user createMany
+   */
+  export type security_userCreateManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * The data used to create many security_users.
+     */
+    data: security_userCreateManyInput | security_userCreateManyInput[]
+    skipDuplicates?: boolean
+  }
+
+  /**
+   * security_user createManyAndReturn
+   */
+  export type security_userCreateManyAndReturnArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelectCreateManyAndReturn<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * The data used to create many security_users.
+     */
+    data: security_userCreateManyInput | security_userCreateManyInput[]
+    skipDuplicates?: boolean
+  }
+
+  /**
+   * security_user update
+   */
+  export type security_userUpdateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * The data needed to update a security_user.
+     */
+    data: XOR<security_userUpdateInput, security_userUncheckedUpdateInput>
+    /**
+     * Choose, which security_user to update.
+     */
+    where: security_userWhereUniqueInput
+  }
+
+  /**
+   * security_user updateMany
+   */
+  export type security_userUpdateManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * The data used to update security_users.
+     */
+    data: XOR<security_userUpdateManyMutationInput, security_userUncheckedUpdateManyInput>
+    /**
+     * Filter which security_users to update
+     */
+    where?: security_userWhereInput
+    /**
+     * Limit how many security_users to update.
+     */
+    limit?: number
+  }
+
+  /**
+   * security_user updateManyAndReturn
+   */
+  export type security_userUpdateManyAndReturnArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelectUpdateManyAndReturn<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * The data used to update security_users.
+     */
+    data: XOR<security_userUpdateManyMutationInput, security_userUncheckedUpdateManyInput>
+    /**
+     * Filter which security_users to update
+     */
+    where?: security_userWhereInput
+    /**
+     * Limit how many security_users to update.
+     */
+    limit?: number
+  }
+
+  /**
+   * security_user upsert
+   */
+  export type security_userUpsertArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * The filter to search for the security_user to update in case it exists.
+     */
+    where: security_userWhereUniqueInput
+    /**
+     * In case the security_user found by the `where` argument doesn't exist, create a new security_user with this data.
+     */
+    create: XOR<security_userCreateInput, security_userUncheckedCreateInput>
+    /**
+     * In case the security_user was found with the provided `where` argument, update it with this data.
+     */
+    update: XOR<security_userUpdateInput, security_userUncheckedUpdateInput>
+  }
+
+  /**
+   * security_user delete
+   */
+  export type security_userDeleteArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+    /**
+     * Filter which security_user to delete.
+     */
+    where: security_userWhereUniqueInput
+  }
+
+  /**
+   * security_user deleteMany
+   */
+  export type security_userDeleteManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Filter which security_users to delete
+     */
+    where?: security_userWhereInput
+    /**
+     * Limit how many security_users to delete.
+     */
+    limit?: number
+  }
+
+  /**
+   * security_user without action
+   */
+  export type security_userDefaultArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the security_user
+     */
+    select?: security_userSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the security_user
+     */
+    omit?: security_userOmit<ExtArgs> | null
+  }
+
+
+  /**
    * Enums
    */
 
@@ -3055,6 +4179,17 @@ export namespace Prisma {
   };
 
   export type EmailScalarFieldEnum = (typeof EmailScalarFieldEnum)[keyof typeof EmailScalarFieldEnum]
+
+
+  export const Security_userScalarFieldEnum: {
+    login_id: 'login_id',
+    user_id: 'user_id',
+    password: 'password',
+    create_user_id: 'create_user_id',
+    modify_date: 'modify_date'
+  };
+
+  export type Security_userScalarFieldEnum = (typeof Security_userScalarFieldEnum)[keyof typeof Security_userScalarFieldEnum]
 
 
   export const SortOrder: {
@@ -3248,6 +4383,60 @@ export namespace Prisma {
     modify_date?: DateTimeNullableWithAggregatesFilter<"email"> | Date | string | null
   }
 
+  export type security_userWhereInput = {
+    AND?: security_userWhereInput | security_userWhereInput[]
+    OR?: security_userWhereInput[]
+    NOT?: security_userWhereInput | security_userWhereInput[]
+    login_id?: DecimalFilter<"security_user"> | Decimal | DecimalJsLike | number | string
+    user_id?: StringFilter<"security_user"> | string
+    password?: StringFilter<"security_user"> | string
+    create_user_id?: DecimalNullableFilter<"security_user"> | Decimal | DecimalJsLike | number | string | null
+    modify_date?: DateTimeNullableFilter<"security_user"> | Date | string | null
+  }
+
+  export type security_userOrderByWithRelationInput = {
+    login_id?: SortOrder
+    user_id?: SortOrder
+    password?: SortOrder
+    create_user_id?: SortOrderInput | SortOrder
+    modify_date?: SortOrderInput | SortOrder
+  }
+
+  export type security_userWhereUniqueInput = Prisma.AtLeast<{
+    login_id?: Decimal | DecimalJsLike | number | string
+    user_id?: string
+    AND?: security_userWhereInput | security_userWhereInput[]
+    OR?: security_userWhereInput[]
+    NOT?: security_userWhereInput | security_userWhereInput[]
+    password?: StringFilter<"security_user"> | string
+    create_user_id?: DecimalNullableFilter<"security_user"> | Decimal | DecimalJsLike | number | string | null
+    modify_date?: DateTimeNullableFilter<"security_user"> | Date | string | null
+  }, "login_id" | "user_id">
+
+  export type security_userOrderByWithAggregationInput = {
+    login_id?: SortOrder
+    user_id?: SortOrder
+    password?: SortOrder
+    create_user_id?: SortOrderInput | SortOrder
+    modify_date?: SortOrderInput | SortOrder
+    _count?: security_userCountOrderByAggregateInput
+    _avg?: security_userAvgOrderByAggregateInput
+    _max?: security_userMaxOrderByAggregateInput
+    _min?: security_userMinOrderByAggregateInput
+    _sum?: security_userSumOrderByAggregateInput
+  }
+
+  export type security_userScalarWhereWithAggregatesInput = {
+    AND?: security_userScalarWhereWithAggregatesInput | security_userScalarWhereWithAggregatesInput[]
+    OR?: security_userScalarWhereWithAggregatesInput[]
+    NOT?: security_userScalarWhereWithAggregatesInput | security_userScalarWhereWithAggregatesInput[]
+    login_id?: DecimalWithAggregatesFilter<"security_user"> | Decimal | DecimalJsLike | number | string
+    user_id?: StringWithAggregatesFilter<"security_user"> | string
+    password?: StringWithAggregatesFilter<"security_user"> | string
+    create_user_id?: DecimalNullableWithAggregatesFilter<"security_user"> | Decimal | DecimalJsLike | number | string | null
+    modify_date?: DateTimeNullableWithAggregatesFilter<"security_user"> | Date | string | null
+  }
+
   export type userCreateInput = {
     user_id?: Decimal | DecimalJsLike | number | string
     handle: string
@@ -3350,6 +4539,62 @@ export namespace Prisma {
     email_id?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
     user_id?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     address?: NullableStringFieldUpdateOperationsInput | string | null
+    modify_date?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  }
+
+  export type security_userCreateInput = {
+    login_id: Decimal | DecimalJsLike | number | string
+    user_id: string
+    password: string
+    create_user_id?: Decimal | DecimalJsLike | number | string | null
+    modify_date?: Date | string | null
+  }
+
+  export type security_userUncheckedCreateInput = {
+    login_id: Decimal | DecimalJsLike | number | string
+    user_id: string
+    password: string
+    create_user_id?: Decimal | DecimalJsLike | number | string | null
+    modify_date?: Date | string | null
+  }
+
+  export type security_userUpdateInput = {
+    login_id?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    user_id?: StringFieldUpdateOperationsInput | string
+    password?: StringFieldUpdateOperationsInput | string
+    create_user_id?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    modify_date?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  }
+
+  export type security_userUncheckedUpdateInput = {
+    login_id?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    user_id?: StringFieldUpdateOperationsInput | string
+    password?: StringFieldUpdateOperationsInput | string
+    create_user_id?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    modify_date?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  }
+
+  export type security_userCreateManyInput = {
+    login_id: Decimal | DecimalJsLike | number | string
+    user_id: string
+    password: string
+    create_user_id?: Decimal | DecimalJsLike | number | string | null
+    modify_date?: Date | string | null
+  }
+
+  export type security_userUpdateManyMutationInput = {
+    login_id?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    user_id?: StringFieldUpdateOperationsInput | string
+    password?: StringFieldUpdateOperationsInput | string
+    create_user_id?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
+    modify_date?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+  }
+
+  export type security_userUncheckedUpdateManyInput = {
+    login_id?: DecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string
+    user_id?: StringFieldUpdateOperationsInput | string
+    password?: StringFieldUpdateOperationsInput | string
+    create_user_id?: NullableDecimalFieldUpdateOperationsInput | Decimal | DecimalJsLike | number | string | null
     modify_date?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
   }
 
@@ -3564,6 +4809,40 @@ export namespace Prisma {
     _sum?: NestedDecimalNullableFilter<$PrismaModel>
     _min?: NestedDecimalNullableFilter<$PrismaModel>
     _max?: NestedDecimalNullableFilter<$PrismaModel>
+  }
+
+  export type security_userCountOrderByAggregateInput = {
+    login_id?: SortOrder
+    user_id?: SortOrder
+    password?: SortOrder
+    create_user_id?: SortOrder
+    modify_date?: SortOrder
+  }
+
+  export type security_userAvgOrderByAggregateInput = {
+    login_id?: SortOrder
+    create_user_id?: SortOrder
+  }
+
+  export type security_userMaxOrderByAggregateInput = {
+    login_id?: SortOrder
+    user_id?: SortOrder
+    password?: SortOrder
+    create_user_id?: SortOrder
+    modify_date?: SortOrder
+  }
+
+  export type security_userMinOrderByAggregateInput = {
+    login_id?: SortOrder
+    user_id?: SortOrder
+    password?: SortOrder
+    create_user_id?: SortOrder
+    modify_date?: SortOrder
+  }
+
+  export type security_userSumOrderByAggregateInput = {
+    login_id?: SortOrder
+    create_user_id?: SortOrder
   }
 
   export type DecimalFieldUpdateOperationsInput = {

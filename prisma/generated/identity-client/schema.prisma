@@ -34,3 +34,14 @@ model email {
   @@map("email")
   @@schema("identity")
 }
+
+model security_user {
+  login_id       Decimal   @id(map: "pk_security_user") @identitydb.Decimal(12, 0)
+  user_id        String    @unique(map: "security_user_i2") @identitydb.VarChar(50)
+  password       String    @identitydb.VarChar(300)
+  create_user_id Decimal?  @identitydb.Decimal(12, 0)
+  modify_date    DateTime? @identitydb.Timestamp(6)
+
+  @@map("security_user")
+  @@schema("identity")
+}
