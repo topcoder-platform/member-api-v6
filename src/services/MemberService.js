@@ -164,8 +164,7 @@ async function getMemberRecentActivity (userId) {
   }
 }
 
-/** Country codes from country-calling-code (isoCode3 -> country name) */
-const countryCodes = countryCallingCodes.default || countryCallingCodes.codes || []
+const countryCodes = countryCallingCodes.codes || []
 
 /**
  * Get country display name from ISO 3166-1 alpha-3 code (e.g. ALB -> Albania)
