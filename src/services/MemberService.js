@@ -1184,6 +1184,20 @@ confirmProfileData.schema = {
 }
 
 /**
+ * Normalize badge name for grouping: strip year/digits after TCO (e.g. TCO18, TCO19 -> TCO)
+ * so "TCO18 Marathon Champion" and "TCO19 Marathon Champion" group as "TCO Marathon Champion"
+ * @param {string} badgeName - raw or html-stripped badge name
+ * @returns {string} normalized name for map key and display
+ */
+function normalizeAchievementName (badgeName) {
+  if (!badgeName || typeof badgeName !== 'string') return ''
+  return badgeName
+    .replace(/\bTCO\d+\b/gi, 'TCO')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
  * Fetch gamification achievements for a member
  * @param {Number} userId the member userId
  * @returns {Promise<String>} formatted achievements string
@@ -1259,7 +1273,8 @@ async function fetchGamificationAchievements (userId) {
               
               if (isActive && isActiveStatus) {
                 const name = htmlToText(orgBadge.badge_name)
-                achievementMap[name] = (achievementMap[name] || 0) + 1
+                const key = normalizeAchievementName(name)
+                achievementMap[key] = (achievementMap[key] || 0) + 1
               } else {
                 logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
               }
