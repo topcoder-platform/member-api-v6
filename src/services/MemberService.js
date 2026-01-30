@@ -1591,7 +1591,6 @@ async function aggregatePDFData (currentUser, handle) {
   // Get member timezone
   const timezone = getMemberTimezone(memberData)
   
-  // Resolve country for PDF: prefer name from homeCountryCode (e.g. ALB -> Albania), else memberData.country
   const countryDisplayName = getCountryNameFromCode(memberData.homeCountryCode) || memberData.country || ''
 
   return {
