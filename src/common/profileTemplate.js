@@ -44,7 +44,8 @@ const styles = StyleSheet.create({
   generatedOn: {
     fontSize: 9,
     color: '#666666',
-    textAlign: 'left'
+    textAlign: 'left',
+    fontStyle: 'italic'
   },
   memberName: {
     fontSize: 28,
@@ -128,6 +129,7 @@ const styles = StyleSheet.create({
   // Languages
   languagesText: {
     fontSize: 10,
+    marginBottom: 10,
     color: '#000000'
   },
   // Topcoder Activity
@@ -154,6 +156,7 @@ const styles = StyleSheet.create({
   itemDate: {
     fontSize: 10,
     textAlign: 'right',
+    fontStyle: 'italic',
     color: '#000000'
   },
   itemRow: {
@@ -164,14 +167,13 @@ const styles = StyleSheet.create({
   itemDescription: {
     fontSize: 10,
     marginTop: 5,
-    marginBottom: 5,
+    marginBottom: 2,
     lineHeight: 1.4,
     color: '#000000'
   },
   itemSkills: {
     fontSize: 10,
-    marginTop: 5,
-    fontStyle: 'italic',
+    marginTop: 2,
     color: '#000000'
   },
   bulletPoint: {
@@ -180,6 +182,12 @@ const styles = StyleSheet.create({
     marginBottom: 3,
     lineHeight: 1.4,
     color: '#000000'
+  },
+  // Work description HTML list alignment (ul/ol/li)
+  descriptionListStylesheet: {
+    ul: { paddingLeft: 15, marginTop: 3, marginBottom: 3 },
+    ol: { paddingLeft: 15, marginTop: 3, marginBottom: 3 },
+    li: { marginBottom: 2 }
   },
   // Certifications
   certificationItem: {
@@ -413,7 +421,8 @@ function buildProfileTemplate (pdfData) {
     const experienceContent = [createSectionHeader('EXPERIENCE')]
     
     workExperience.forEach((work, index) => {
-      const dateRange = [work.startDate, work.endDate].filter(Boolean).join(' - ')
+      const endPart = work.endDate || (work.startDate ? 'PRESENT' : null)
+      const dateRange = [work.startDate, endPart].filter(Boolean).join(' - ')
       experienceContent.push(
         React.createElement(
           View,
@@ -439,7 +448,7 @@ function buildProfileTemplate (pdfData) {
           ),
           work.description ? React.createElement(
             Html,
-            { style: styles.itemDescription },
+            { style: styles.itemDescription, stylesheet: styles.descriptionListStylesheet },
             work.description
           ) : null,
           work.skills && work.skills.length > 0 ? React.createElement(
