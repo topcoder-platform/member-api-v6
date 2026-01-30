@@ -20,6 +20,7 @@ const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const { htmlToText } = require('../common/htmlUtils')
+const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const { Prisma } = prismaManager
@@ -161,6 +162,21 @@ async function getMemberRecentActivity (userId) {
     console.error(`Failed to query recent activity for userId: ${userId}`, err)
     return false
   }
+}
+
+/** Country codes from country-calling-code (isoCode3 -> country name) */
+const countryCodes = countryCallingCodes.default || countryCallingCodes.codes || []
+
+/**
+ * Get country display name from ISO 3166-1 alpha-3 code (e.g. ALB -> Albania)
+ * @param {string} isoCode3 - 3-letter country code (e.g. homeCountryCode)
+ * @returns {string|null} country name or null if not found
+ */
+function getCountryNameFromCode (isoCode3) {
+  if (!isoCode3 || typeof isoCode3 !== 'string') return null
+  const code = isoCode3.trim().toUpperCase()
+  const item = countryCodes.find(c => (c.isoCode3 || '').toUpperCase() === code)
+  return item ? item.country : null
 }
 
 /**
@@ -1537,9 +1553,10 @@ async function aggregatePDFData (currentUser, handle) {
   // Fetch certifications and courses
   const { certifications, courses } = await fetchCertificationsAndCourses(userId)
   
-  // Build status bar text
+  // Build status bar text (Active = has recent activity in last 3 months)
   const statusBarItems = []
-  if (memberData.status === 'ACTIVE') {
+  const hasRecentActivity = await getMemberRecentActivity(userId)
+  if (hasRecentActivity) {
     statusBarItems.push('ACTIVE')
   }
   if (memberData.availableForGigs === true) {
@@ -1559,10 +1576,14 @@ async function aggregatePDFData (currentUser, handle) {
   // Get member timezone
   const timezone = getMemberTimezone(memberData)
   
+  // Resolve country for PDF: prefer name from homeCountryCode (e.g. ALB -> Albania), else memberData.country
+  const countryDisplayName = getCountryNameFromCode(memberData.homeCountryCode) || memberData.country || ''
+
   return {
     // Member basic info
     member: {
       ...memberData,
+      country: countryDisplayName,
       statusBarText,
       generatedOn: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       timezone: timezone
