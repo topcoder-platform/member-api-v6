@@ -44,7 +44,7 @@ const styles = StyleSheet.create({
   generatedOn: {
     fontSize: 9,
     color: '#666666',
-    textAlign: 'right'
+    textAlign: 'left'
   },
   memberName: {
     fontSize: 28,
@@ -281,7 +281,7 @@ function buildProfileTemplate (pdfData) {
         ),
         React.createElement(
           View,
-          { style: { alignItems: 'flex-end' } },
+          { style: { alignItems: 'flex-start' } },
           React.createElement(
             Text,
             { style: styles.generatedOn },
