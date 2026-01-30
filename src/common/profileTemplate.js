@@ -64,6 +64,7 @@ const styles = StyleSheet.create({
   personalInfo: {
     fontSize: 10,
     textAlign: 'center',
+    marginTop: 10,
     marginBottom: 5,
     color: '#000000'
   },
