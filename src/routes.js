@@ -51,6 +51,14 @@ module.exports = {
       access: ['copilot', 'administrator', 'admin']
     }
   },
+  '/members/bulk-search': {
+    post: {
+      controller: 'SearchController',
+      method: 'bulkSearch',
+      auth: 'jwt',
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
+    }
+  },
   '/members/uid-signature': {
     get: {
       controller: 'MemberController',

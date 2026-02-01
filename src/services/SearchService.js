@@ -603,6 +603,81 @@ searchMembersBySkills.schema = {
 }
 
 /**
+ * Bulk search members by handle or email.
+ * @param {Object} currentUser the user who performs operation
+ * @param {Object} data the request body data
+ * @returns {Object} the bulk search result
+ */
+async function bulkSearch (currentUser, data) {
+  const identifiers = _.get(data, 'identifiers')
+  if (!_.isArray(identifiers) || identifiers.length === 0) {
+    throw new errors.BadRequestError('identifiers is required and must be a non-empty array')
+  }
+  if (identifiers.length > 1000) {
+    throw new errors.BadRequestError('identifiers must not exceed 1000 items')
+  }
+
+  const logContext = _.omitBy({
+    identifiersCount: identifiers.length,
+    isMachine: currentUser && currentUser.isMachine
+  }, _.isUndefined)
+  logger.debug(`bulkSearch: received ${stringifyForLog(logContext)}`)
+
+  const hasEmailIdentifier = identifiers.some(identifier => _.includes(_.trim(identifier), '@'))
+  if (hasEmailIdentifier) {
+    if (currentUser == null) {
+      throw new errors.UnauthorizedError('Authentication token is required to query users by email')
+    }
+    if (currentUser.isMachine) {
+      const allowedScopes = [config.SCOPES.MEMBERS.READ, config.SCOPES.MEMBERS.ALL]
+      if (!helper.checkIfExists(allowedScopes, currentUser.scopes || [])) {
+        throw new errors.ForbiddenError('read:user_profiles scope is required to query users by email')
+      }
+    } else if (!helper.hasSearchByEmailRole(currentUser)) {
+      throw new errors.BadRequestError('Additional role is required to query users by email')
+    }
+  }
+
+  try {
+    const results = await Promise.all(identifiers.map(async (identifier) => {
+      const trimmed = _.trim(identifier)
+      const member = await prisma.member.findFirst({
+        where: {
+          OR: [
+            { handleLower: trimmed.toLowerCase() },
+            { email: { equals: trimmed, mode: 'insensitive' } }
+          ]
+        },
+        select: {
+          userId: true,
+          handle: true,
+          email: true
+        }
+      })
+
+      return {
+        input: identifier,
+        userId: member ? helper.bigIntToNumber(member.userId) : null,
+        matched: !!member
+      }
+    }))
+
+    return { results }
+  } catch (err) {
+    logger.error('bulkSearch: error searching members')
+    logger.error(err)
+    throw new errors.ServiceUnavailableError('Failed to search members', err)
+  }
+}
+
+bulkSearch.schema = {
+  currentUser: Joi.any(),
+  data: Joi.object().keys({
+    identifiers: Joi.array().items(Joi.string()).min(1).max(1000).required()
+  }).required()
+}
+
+/**
  * members autocomplete.
  * @param {Object} currentUser the user who performs operation
  * @param {Object} query the query parameters
@@ -734,6 +809,7 @@ autocompleteByHandlePrefix.schema = {
 module.exports = {
   searchMembers,
   searchMembersBySkills,
+  bulkSearch,
   autocomplete,
   autocompleteByHandlePrefix
 }

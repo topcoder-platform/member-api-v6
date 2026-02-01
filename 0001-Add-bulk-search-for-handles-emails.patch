@@ -1,0 +1,172 @@
+From 2d3835b0e00c0a16677a486457ebdd07e3578d00 Mon Sep 17 00:00:00 2001
+From: Justin Gasper <jmgasper@gmail.com>
+Date: Mon, 2 Feb 2026 10:21:04 +1100
+Subject: [PATCH] Add bulk search for handles / emails
+
+---
+ app-constants.js                    |  4 +-
+ src/controllers/SearchController.js | 13 ++++-
+ src/routes.js                       |  8 +++
+ src/services/SearchService.js       | 76 +++++++++++++++++++++++++++++
+ 4 files changed, 98 insertions(+), 3 deletions(-)
+
+diff --git a/app-constants.js b/app-constants.js
+index 5ad131e..3962d22 100644
+--- a/app-constants.js
++++ b/app-constants.js
+@@ -2,8 +2,8 @@
+  * App constants
+  */
+ const ADMIN_ROLES = ['administrator', 'admin']
+-const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin')
+-const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive']
++const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin', 'copilot', 'Project Manager')
++const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive', 'Project Manager']
+ 
+ const EVENT_ORIGINATOR = 'topcoder-member-api'
+ 
+diff --git a/src/controllers/SearchController.js b/src/controllers/SearchController.js
+index f34fddc..79561ba 100644
+--- a/src/controllers/SearchController.js
++++ b/src/controllers/SearchController.js
+@@ -36,6 +36,16 @@ async function autocompleteByHandlePrefix (req, res) {
+   res.send(result)
+ }
+ 
++/**
++ * Bulk search members by handle or email
++ * @param {Object} req the request
++ * @param {Object} res the response
++ */
++async function bulkSearch (req, res) {
++  const result = await service.bulkSearch(req.authUser, req.body)
++  res.send(result)
++}
++
+ /**
+  * Search members with additional parameters, like skills
+  * @param {Object} req the request
+@@ -50,5 +60,6 @@ module.exports = {
+   searchMembers,
+   searchMembersBySkills,
+   autocomplete,
+-  autocompleteByHandlePrefix
++  autocompleteByHandlePrefix,
++  bulkSearch
+ }
+diff --git a/src/routes.js b/src/routes.js
+index b098385..32e4e1c 100644
+--- a/src/routes.js
++++ b/src/routes.js
+@@ -51,6 +51,14 @@ module.exports = {
+       access: ['copilot', 'administrator', 'admin']
+     }
+   },
++  '/members/bulk-search': {
++    post: {
++      controller: 'SearchController',
++      method: 'bulkSearch',
++      auth: 'jwt',
++      scopes: [MEMBERS.READ, MEMBERS.ALL]
++    }
++  },
+   '/members/uid-signature': {
+     get: {
+       controller: 'MemberController',
+diff --git a/src/services/SearchService.js b/src/services/SearchService.js
+index 652f893..239cc91 100644
+--- a/src/services/SearchService.js
++++ b/src/services/SearchService.js
+@@ -602,6 +602,81 @@ searchMembersBySkills.schema = {
+   })
+ }
+ 
++/**
++ * Bulk search members by handle or email.
++ * @param {Object} currentUser the user who performs operation
++ * @param {Object} data the request body data
++ * @returns {Object} the bulk search result
++ */
++async function bulkSearch (currentUser, data) {
++  const identifiers = _.get(data, 'identifiers')
++  if (!_.isArray(identifiers) || identifiers.length === 0) {
++    throw new errors.BadRequestError('identifiers is required and must be a non-empty array')
++  }
++  if (identifiers.length > 1000) {
++    throw new errors.BadRequestError('identifiers must not exceed 1000 items')
++  }
++
++  const logContext = _.omitBy({
++    identifiersCount: identifiers.length,
++    isMachine: currentUser && currentUser.isMachine
++  }, _.isUndefined)
++  logger.debug(`bulkSearch: received ${stringifyForLog(logContext)}`)
++
++  const hasEmailIdentifier = identifiers.some(identifier => _.includes(_.trim(identifier), '@'))
++  if (hasEmailIdentifier) {
++    if (currentUser == null) {
++      throw new errors.UnauthorizedError('Authentication token is required to query users by email')
++    }
++    if (currentUser.isMachine) {
++      const allowedScopes = [config.SCOPES.MEMBERS.READ, config.SCOPES.MEMBERS.ALL]
++      if (!helper.checkIfExists(allowedScopes, currentUser.scopes || [])) {
++        throw new errors.ForbiddenError('read:user_profiles scope is required to query users by email')
++      }
++    } else if (!helper.hasSearchByEmailRole(currentUser)) {
++      throw new errors.BadRequestError('Additional role is required to query users by email')
++    }
++  }
++
++  try {
++    const results = await Promise.all(identifiers.map(async (identifier) => {
++      const trimmed = _.trim(identifier)
++      const member = await prisma.member.findFirst({
++        where: {
++          OR: [
++            { handleLower: trimmed.toLowerCase() },
++            { email: { equals: trimmed, mode: 'insensitive' } }
++          ]
++        },
++        select: {
++          userId: true,
++          handle: true,
++          email: true
++        }
++      })
++
++      return {
++        input: identifier,
++        userId: member ? helper.bigIntToNumber(member.userId) : null,
++        matched: !!member
++      }
++    }))
++
++    return { results }
++  } catch (err) {
++    logger.error('bulkSearch: error searching members')
++    logger.error(err)
++    throw new errors.ServiceUnavailableError('Failed to search members', err)
++  }
++}
++
++bulkSearch.schema = {
++  currentUser: Joi.any(),
++  data: Joi.object().keys({
++    identifiers: Joi.array().items(Joi.string()).min(1).max(1000).required()
++  }).required()
++}
++
+ /**
+  * members autocomplete.
+  * @param {Object} currentUser the user who performs operation
+@@ -734,6 +809,7 @@ autocompleteByHandlePrefix.schema = {
+ module.exports = {
+   searchMembers,
+   searchMembersBySkills,
++  bulkSearch,
+   autocomplete,
+   autocompleteByHandlePrefix
+ }
+-- 
+2.52.0
+

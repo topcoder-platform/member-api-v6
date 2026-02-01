@@ -37,6 +37,16 @@ async function autocompleteByHandlePrefix (req, res) {
 }
 
 /**
+ * Bulk search members by handle or email
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function bulkSearch (req, res) {
+  const result = await service.bulkSearch(req.authUser, req.body)
+  res.send(result)
+}
+
+/**
  * Search members with additional parameters, like skills
  * @param {Object} req the request
  * @param {Object} res the response
@@ -50,5 +60,6 @@ module.exports = {
   searchMembers,
   searchMembersBySkills,
   autocomplete,
-  autocompleteByHandlePrefix
+  autocompleteByHandlePrefix,
+  bulkSearch
 }
