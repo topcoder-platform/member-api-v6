@@ -20,6 +20,7 @@ const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const { htmlToText } = require('../common/htmlUtils')
+const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const { Prisma } = prismaManager
@@ -161,6 +162,20 @@ async function getMemberRecentActivity (userId) {
     console.error(`Failed to query recent activity for userId: ${userId}`, err)
     return false
   }
+}
+
+const countryCodes = countryCallingCodes.codes || []
+
+/**
+ * Get country display name from ISO 3166-1 alpha-3 code (e.g. ALB -> Albania)
+ * @param {string} isoCode3 - 3-letter country code (e.g. homeCountryCode)
+ * @returns {string|null} country name or null if not found
+ */
+function getCountryNameFromCode (isoCode3) {
+  if (!isoCode3 || typeof isoCode3 !== 'string') return null
+  const code = isoCode3.trim().toUpperCase()
+  const item = countryCodes.find(c => (c.isoCode3 || '').toUpperCase() === code)
+  return item ? item.country : null
 }
 
 /**
@@ -1168,6 +1183,20 @@ confirmProfileData.schema = {
 }
 
 /**
+ * Normalize badge name for grouping: strip year/digits after TCO (e.g. TCO18, TCO19 -> TCO)
+ * so "TCO18 Marathon Champion" and "TCO19 Marathon Champion" group as "TCO Marathon Champion"
+ * @param {string} badgeName - raw or html-stripped badge name
+ * @returns {string} normalized name for map key and display
+ */
+function normalizeAchievementName (badgeName) {
+  if (!badgeName || typeof badgeName !== 'string') return ''
+  return badgeName
+    .replace(/\bTCO\d+\b/gi, 'TCO')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
  * Fetch gamification achievements for a member
  * @param {Number} userId the member userId
  * @returns {Promise<String>} formatted achievements string
@@ -1243,7 +1272,8 @@ async function fetchGamificationAchievements (userId) {
               
               if (isActive && isActiveStatus) {
                 const name = htmlToText(orgBadge.badge_name)
-                achievementMap[name] = (achievementMap[name] || 0) + 1
+                const key = normalizeAchievementName(name)
+                achievementMap[key] = (achievementMap[key] || 0) + 1
               } else {
                 logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
               }
@@ -1539,9 +1569,10 @@ async function aggregatePDFData (currentUser, handle) {
   // Fetch certifications and courses
   const { certifications, courses } = await fetchCertificationsAndCourses(userId)
   
-  // Build status bar text
+  // Build status bar text (Active = has recent activity in last 3 months)
   const statusBarItems = []
-  if (memberData.status === 'ACTIVE') {
+  const hasRecentActivity = await getMemberRecentActivity(userId)
+  if (hasRecentActivity) {
     statusBarItems.push('ACTIVE')
   }
   if (memberData.availableForGigs === true) {
@@ -1561,10 +1592,13 @@ async function aggregatePDFData (currentUser, handle) {
   // Get member timezone
   const timezone = getMemberTimezone(memberData)
   
+  const countryDisplayName = getCountryNameFromCode(memberData.homeCountryCode) || memberData.country || ''
+
   return {
     // Member basic info
     member: {
       ...memberData,
+      country: countryDisplayName,
       statusBarText,
       generatedOn: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       timezone: timezone
