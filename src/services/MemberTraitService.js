@@ -163,18 +163,6 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
 }
 
 /**
- * 
- * @param {Object} current user object
- * @param {Object} member object
- * @returns boolean true for current user and auto complete roles
- */
-function canReadPrivatePersonalization (currentUser, member) {
-  if (!currentUser) return false
-  if (currentUser.userId === member.userId) return true
-  return helper.hasAutocompleteRole(currentUser) || helper.hasAdminRole(currentUser)
-}
-
-/**
  * Query trait data from db with traitIds
  * @param {BigInt} userId user id
  * @param {Array} traitIds string array
@@ -221,9 +209,15 @@ async function getTraits (currentUser, handle, query) {
   const traitIds = helper.parseCommaSeparatedString(query.traitIds, TRAIT_IDS) || TRAIT_IDS
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
 
+  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && 
+      currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+    
   // can read private personalisation info on a member
-  const canReadPrivate = canReadPrivatePersonalization(currentUser, member)
-  console.log('[getTraits] currentUser.roles:', currentUser.roles, 'canReadPrivate:', canReadPrivate)
+  const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
+
+  console.log('canReadPrivate:', canReadPrivate)
 
   const personalizationFilter = canReadPrivate
     ? { private: true }
