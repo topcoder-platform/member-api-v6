@@ -220,8 +220,8 @@ async function getTraits (currentUser, handle, query) {
   const traitIds = helper.parseCommaSeparatedString(query.traitIds, TRAIT_IDS) || TRAIT_IDS
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
 
-  // can read private persolisation info on a member
-  const canReadPrivate = helper.canReadPrivatePersonalization(currentUser, member)
+  // can read private personalisation info on a member
+  const canReadPrivate = canReadPrivatePersonalization(currentUser, member)
 
   const personalizationFilter = canReadPrivate
     ? { private: true }
