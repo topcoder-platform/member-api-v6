@@ -171,7 +171,7 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
 function canReadPrivatePersonalization (currentUser, member) {
   if (!currentUser) return false
   if (currentUser.userId === member.userId) return true
-  return helper.hasAutocompleteRole(currentUser)
+  return helper.hasAutocompleteRole(currentUser) || helper.hasAdminRole(currentUser)
 }
 
 /**
