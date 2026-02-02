@@ -223,6 +223,7 @@ async function getTraits (currentUser, handle, query) {
 
   // can read private personalisation info on a member
   const canReadPrivate = canReadPrivatePersonalization(currentUser, member)
+  console.log('[getTraits] currentUser.roles:', currentUser.roles, 'canReadPrivate:', canReadPrivate)
 
   const personalizationFilter = canReadPrivate
     ? { private: true }
