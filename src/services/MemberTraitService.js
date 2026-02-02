@@ -162,20 +162,38 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
 }
 
 /**
+ * 
+ * @param {Object} current user object
+ * @param {Object} member object
+ * @returns boolean true for current user and auto complete roles
+ */
+function canReadPrivatePersonalization (currentUser, member) {
+  if (!currentUser) return false
+  if (currentUser.userId === member.userId) return true
+  return helper.hasRole(currentUser, constants.AUTOCOMPLETE_ROLES)
+}
+
+/**
  * Query trait data from db with traitIds
  * @param {BigInt} userId user id
  * @param {Array} traitIds string array
  * @returns member trait prisma data
  */
-async function queryTraits (userId, traitIds = TRAIT_IDS) {
+async function queryTraits (userId, traitIds = TRAIT_IDS, personalizationFilter = {}) {
   // build prisma query
   const prismaFilter = {
     where: { userId },
     include: {}
   }
   // for each trait id, get prisma model and put it into "include"
-  _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
-    prismaFilter.include[t] = true
+ _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
+    if (t === 'personalization') {
+      prismaFilter.include[t] = {
+        where: personalizationFilter
+      }
+    } else {
+      prismaFilter.include[t] = true
+    }
   })
   const traitData = await prisma.memberTraits.findUnique(prismaFilter)
   if (!traitData) {
@@ -201,8 +219,18 @@ async function getTraits (currentUser, handle, query) {
   // parse query parameters
   const traitIds = helper.parseCommaSeparatedString(query.traitIds, TRAIT_IDS) || TRAIT_IDS
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
+
+  // can read private persolisation info on a member
+  const canReadPrivate =
+    helper.canManageMember(currentUser, member) ||
+    helper.hasRole(currentUser, constants.AUTOCOMPLETE_ROLES)
+
+  const personalizationFilter = canReadPrivate
+    ? { private: true }
+    : { private: false }
+
   // query trait from db and convert to response
-  let queryResult = await queryTraits(member.userId, traitIds)
+  let queryResult = await queryTraits(member.userId, traitIds, personalizationFilter)
   let result = queryResult.data
 
   // keep only those of given trait ids
