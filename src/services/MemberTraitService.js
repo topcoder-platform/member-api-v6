@@ -224,7 +224,7 @@ async function getTraits (currentUser, handle, query) {
   const canReadPrivate = canReadPrivatePersonalization(currentUser, member)
 
   const personalizationFilter = canReadPrivate
-    ? { private: true }
+    ? undefined
     : { private: false }
 
   // query trait from db and convert to response
