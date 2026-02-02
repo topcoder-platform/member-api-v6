@@ -380,7 +380,7 @@ function buildTraitPrismaData (data, operatorId, result) {
           valuePairs.push({
             key,
             value: t[key],
-            private: true,
+            private: key === 'openToWork',
             createdBy: operatorId
           })
         }
