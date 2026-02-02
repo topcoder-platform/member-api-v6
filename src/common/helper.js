@@ -239,7 +239,7 @@ async function uploadPhotoToS3 (data, mimetype, fileName) {
   }
   // Upload to S3
   await getS3().upload(params).promise()
-  
+
   // construct photo URL
   return config.PHOTO_URL_TEMPLATE.replace('<key>', fileName)
 }
@@ -625,7 +625,7 @@ function convertBigIntDeep (value) {
   if (value === null || value === undefined) {
     return value
   }
-  if (typeof value === 'bigint') {
+  if (Object.prototype.toString.call(value) === '[object BigInt]') {
     return bigIntToNumber(value)
   }
   if (Array.isArray(value)) {

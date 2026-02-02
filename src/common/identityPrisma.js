@@ -6,7 +6,7 @@ let identityClient
 
 const clientOptions = {
   transactionOptions: {
-    timeout: config.MEMBER_SERVICE_PRISMA_TIMEOUT,
+    timeout: config.MEMBER_SERVICE_PRISMA_TIMEOUT
   },
   log: [
     { level: 'query', emit: 'event' },

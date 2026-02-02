@@ -1261,7 +1261,7 @@ async function fetchGamificationAchievements (userId) {
           logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
           resolve(achievements)
         } catch (parseError) {
-          logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body?.substring(0, 200)}`)
+          logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
           resolve('')
         }
       })
@@ -1370,13 +1370,15 @@ async function fetchCertificationsAndCourses (userId) {
  * @returns {String|null} timezone abbreviation or null if not found
  */
 function getMemberTimezone (memberData) {
-  const city = memberData.addresses?.[0]?.city
+  const city = memberData && memberData.addresses && memberData.addresses[0]
+    ? memberData.addresses[0].city
+    : null
   if (!city) return null
 
   const cityTimezoneData = cityTimezones.lookupViaCity(city)
   let memberTimezone = null
 
-  if (cityTimezoneData?.length) {
+  if (cityTimezoneData && cityTimezoneData.length) {
     memberTimezone = cityTimezoneData[0].timezone
   }
 

@@ -30,7 +30,7 @@ async function deleteContactByEmail (email) {
       params: {
         idProperty: 'email'
       },
-      headers: {Authorization: `Bearer ${apiKey}`}
+      headers: { Authorization: `Bearer ${apiKey}` }
     })
     contactId = response.id
   } catch (err) {
@@ -49,7 +49,7 @@ async function deleteContactByEmail (email) {
 
   try {
     await axios.delete(`${baseUrl}/crm/v3/objects/contacts/${contactId}`, {
-      headers: {Authorization: `Bearer ${apiKey}`}
+      headers: { Authorization: `Bearer ${apiKey}` }
     })
   } catch (err) {
     if (err.response && err.response.status === 404) {

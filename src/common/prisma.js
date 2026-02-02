@@ -20,7 +20,7 @@ const financeDbUrl = process.env.FINANCE_DATABASE_URL
 
 const clientOptions = {
   transactionOptions: {
-    timeout: config.MEMBER_SERVICE_PRISMA_TIMEOUT,
+    timeout: config.MEMBER_SERVICE_PRISMA_TIMEOUT
   },
   log: [
     { level: 'query', emit: 'event' },
@@ -86,8 +86,8 @@ const getEngagementsClient = () => {
     if (!engagementsDbUrl) {
       throw new Error('ENGAGEMENTS_DB_URL must be set for engagements Prisma client')
     }
-    console.log('here', engagementsDbUrl);
-    
+    console.log('here', engagementsDbUrl)
+
     engagementsClient = new EngagementsPrismaClient({
       ...clientOptions,
       datasources: { db: { url: engagementsDbUrl } }
@@ -109,7 +109,6 @@ const getResourcesClient = () => {
   }
   return resourcesClient
 }
-
 
 let financeClient
 /**

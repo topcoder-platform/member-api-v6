@@ -299,16 +299,16 @@ function buildProfileTemplate (pdfData) {
         { style: styles.memberName },
         `${member.firstName || ''} ${member.lastName || ''}`.trim() || member.handle
       ),
-      basicInfo?.shortBio ? React.createElement(
+      basicInfo && basicInfo.shortBio ? React.createElement(
         Text,
         { style: styles.memberTitle },
         basicInfo.shortBio
       ) : null,
-      (member.addresses && member.addresses.length > 0) || basicInfo?.currentLocation || member.email ? React.createElement(
+      (member.addresses && member.addresses.length > 0) || (basicInfo && basicInfo.currentLocation) || member.email ? React.createElement(
         Text,
         { style: styles.personalInfo },
         [
-          basicInfo?.currentLocation || (() => {
+          (basicInfo && basicInfo.currentLocation) || (() => {
             if (member.addresses && member.addresses.length > 0) {
               const city = member.addresses[0].city || ''
               const stateCode = member.addresses[0].stateCode || ''
@@ -338,9 +338,9 @@ function buildProfileTemplate (pdfData) {
       ) : null
     )
   )
-  
+
   // Biography Section
-  const biography = member.description || basicInfo?.shortBio
+  const biography = member.description || (basicInfo && basicInfo.shortBio)
   if (biography) {
     children.push(
       React.createElement(
@@ -355,7 +355,7 @@ function buildProfileTemplate (pdfData) {
       )
     )
   }
-  
+
   // Technical Skills Section
   const hasSkills = skills.principal.verified.length > 0 || skills.principal.notVerified.length > 0 ||
                     skills.additional.verified.length > 0 || skills.additional.notVerified.length > 0
