@@ -170,7 +170,7 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
 function canReadPrivatePersonalization (currentUser, member) {
   if (!currentUser) return false
   if (currentUser.userId === member.userId) return true
-  return helper.hasRole(currentUser, constants.AUTOCOMPLETE_ROLES)
+  return helper.hasAutocompleteRole(currentUser)
 }
 
 /**
@@ -221,9 +221,7 @@ async function getTraits (currentUser, handle, query) {
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
 
   // can read private persolisation info on a member
-  const canReadPrivate =
-    helper.canManageMember(currentUser, member) ||
-    helper.hasRole(currentUser, constants.AUTOCOMPLETE_ROLES)
+  const canReadPrivate = helper.canReadPrivatePersonalization(currentUser, member)
 
   const personalizationFilter = canReadPrivate
     ? { private: true }
@@ -387,6 +385,7 @@ function buildTraitPrismaData (data, operatorId, result) {
           valuePairs.push({
             key,
             value: t[key],
+            private: true,
             createdBy: operatorId
           })
         }
