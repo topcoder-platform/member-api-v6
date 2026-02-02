@@ -158,6 +158,7 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
     r.createdBy = helper.bigIntToNumber(r.createdBy)
     r.updatedBy = helper.bigIntToNumber(r.updatedBy)
   })
+  console.log('[convertPrismaToRes] Converted traits:', JSON.stringify(ret, null, 2))
   return ret
 }
 
@@ -224,11 +225,14 @@ async function getTraits (currentUser, handle, query) {
   const canReadPrivate = canReadPrivatePersonalization(currentUser, member)
 
   const personalizationFilter = canReadPrivate
-    ? undefined
+    ? { private: true }
     : { private: false }
 
   // query trait from db and convert to response
   let queryResult = await queryTraits(member.userId, traitIds, personalizationFilter)
+  console.log('[queryTraits] Fetched traits:', JSON.stringify(queryResult.data, null, 2))
+  console.log('[queryTraits] personalizationFilter:', personalizationFilter)
+
   let result = queryResult.data
 
   // keep only those of given trait ids
@@ -382,12 +386,14 @@ function buildTraitPrismaData (data, operatorId, result) {
       const valuePairs = []
       _.forEach(item.traits.data, t => {
         for (let key of _.keys(t)) {
-          valuePairs.push({
-            key,
-            value: t[key],
-            private: true,
-            createdBy: operatorId
-          })
+          const valueObj = {
+          key,
+          value: t[key],
+          private: true,
+          createdBy: operatorId
+        }
+        console.log('[updateTraits] Adding personalization trait:', valueObj)
+        valuePairs.push(valueObj)
         }
       })
       prismaData['personalization'] = {
