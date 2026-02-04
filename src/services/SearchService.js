@@ -809,7 +809,21 @@ async function bulkSearch (currentUser, data) {
       }
     }))
 
-    return { results }
+    const seenUserIds = new Set()
+    const dedupedResults = results.filter((result) => {
+      if (result.userId == null) {
+        return true
+      }
+
+      const userIdKey = String(result.userId)
+      if (seenUserIds.has(userIdKey)) {
+        return false
+      }
+      seenUserIds.add(userIdKey)
+      return true
+    })
+
+    return { results: dedupedResults }
   } catch (err) {
     logger.error('bulkSearch: error searching members')
     logger.error(err)

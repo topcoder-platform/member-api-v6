@@ -22,7 +22,6 @@ const { bufferContainsScript } = require('../common/image')
 const { htmlToText } = require('../common/htmlUtils')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
-const { Prisma } = prismaManager
 const identityPrismaManager = require('../common/identityPrisma')
 const vanillaDb = require('../common/vanillaDb')
 const prisma = prismaManager.getClient()
@@ -39,7 +38,7 @@ const moment = require('moment-timezone')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified','recentActivity']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified', 'recentActivity']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -216,16 +215,16 @@ async function getMember (currentUser, handle, query) {
   // Phones are visible to: self, admin, M2M, or users with autocomplete roles (Talent Manager, etc.)
   const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
   const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
-  const isSelf = currentUser && currentUser.handle && 
+  const isSelf = currentUser && currentUser.handle &&
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
-  
+
   const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
   const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
   // Identity verified field has same access control as phones
   const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
   const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
 
-  const threeMonthsAgo = new Date() 
+  const threeMonthsAgo = new Date()
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
 
   // Conditionally add phones and recent activity to query if user has permission
@@ -271,7 +270,7 @@ async function getMember (currentUser, handle, query) {
   }
 
   // get member recent activity
-  if(canSeeRecentActivity) {
+  if (canSeeRecentActivity) {
     member.recentActivity = await getMemberRecentActivity(member.userId)
   }
 
@@ -292,7 +291,6 @@ async function getMember (currentUser, handle, query) {
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
-
 
 getMember.schema = {
   currentUser: Joi.any(),
@@ -1178,6 +1176,7 @@ async function fetchGamificationAchievements (userId) {
       logger.warn(`GAMIFICATION_API_URL is not configured for user ${userId}`)
       return ''
     }
+    const gamificationApiUrl = config.GAMIFICATION_API_URL
     let token
     try {
       token = await helper.getM2MToken()
@@ -1185,86 +1184,86 @@ async function fetchGamificationAchievements (userId) {
       logger.warn(`Cannot get M2M token for gamification API for user ${userId}: ${tokenError.message}. Achievements will be empty.`)
       return ''
     }
-    
+
     if (!token) {
       logger.warn(`M2M token is null/undefined for gamification API for user ${userId}`)
       return ''
     }
-    
-    const gamificationUrl = `${config.GAMIFICATION_API_URL}/badges/assigned/${userId}`
-    
+
+    const gamificationUrl = `${gamificationApiUrl}/badges/assigned/${userId}`
+
     if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
       logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
       return ''
     }
-    
+
     const finalGamificationUrl = String(gamificationUrl || '').trim()
     if (!finalGamificationUrl || finalGamificationUrl === 'undefined' || finalGamificationUrl.includes('undefined') || finalGamificationUrl.length === 0) {
       logger.error(`Invalid final gamification URL for user ${userId}: finalUrl="${finalGamificationUrl}", baseUrl="${gamificationApiUrl}", userId=${userId}`)
       return ''
     }
-    
+
     return new Promise((resolve, reject) => {
       try {
         request({
           url: finalGamificationUrl,
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }, (error, response, body) => {
-        if (error) {
-          logger.warn(`Failed to fetch gamification achievements for user ${userId}: ${error.message}`)
-          resolve('')
-          return
-        }
-        if (response.statusCode !== 200) {
-          logger.warn(`Gamification API returned status ${response.statusCode} for user ${userId}`)
-          resolve('')
-          return
-        }
-        try {
-          const data = JSON.parse(body)
-          // Format achievements: count multiples and join with " | "
-          // Response structure: { rows: [...], count: ... }
-          const achievementMap = {}
-          const badges = data.rows || []
-          
-          logger.debug(`Gamification API response for user ${userId}: rows count=${badges.length}, hasRows=${!!data.rows}`)
-          
-          badges.forEach(badge => {
-            const orgBadge = badge.org_badge
-            if (orgBadge && orgBadge.badge_name) {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }, (error, response, body) => {
+          if (error) {
+            logger.warn(`Failed to fetch gamification achievements for user ${userId}: ${error.message}`)
+            resolve('')
+            return
+          }
+          if (response.statusCode !== 200) {
+            logger.warn(`Gamification API returned status ${response.statusCode} for user ${userId}`)
+            resolve('')
+            return
+          }
+          try {
+            const data = JSON.parse(body)
+            // Format achievements: count multiples and join with " | "
+            // Response structure: { rows: [...], count: ... }
+            const achievementMap = {}
+            const badges = data.rows || []
+
+            logger.debug(`Gamification API response for user ${userId}: rows count=${badges.length}, hasRows=${!!data.rows}`)
+
+            badges.forEach(badge => {
+              const orgBadge = badge.org_badge
+              if (orgBadge && orgBadge.badge_name) {
               // Check if badge is active - handle both boolean and string values
-              const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
-              // Check status - case insensitive
-              const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
-              
-              logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
-              
-              if (isActive && isActiveStatus) {
-                const name = htmlToText(orgBadge.badge_name)
-                achievementMap[name] = (achievementMap[name] || 0) + 1
+                const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
+                // Check status - case insensitive
+                const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
+
+                logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+
+                if (isActive && isActiveStatus) {
+                  const name = htmlToText(orgBadge.badge_name)
+                  achievementMap[name] = (achievementMap[name] || 0) + 1
+                } else {
+                  logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+                }
               } else {
-                logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+                logger.debug(`Badge missing org_badge or badge_name:`, { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
               }
-            } else {
-              logger.debug(`Badge missing org_badge or badge_name:`, { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
-            }
-          })
-          
-          logger.debug(`Achievement map for user ${userId}:`, achievementMap)
-          
-          const achievements = Object.entries(achievementMap)
-            .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
-            .join(' | ')
-          
-          logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
-          resolve(achievements)
-        } catch (parseError) {
-          logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
-          resolve('')
-        }
-      })
+            })
+
+            logger.debug(`Achievement map for user ${userId}:`, achievementMap)
+
+            const achievements = Object.entries(achievementMap)
+              .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
+              .join(' | ')
+
+            logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
+            resolve(achievements)
+          } catch (parseError) {
+            logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
+            resolve('')
+          }
+        })
       } catch (requestError) {
         logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}`)
         resolve('')
@@ -1287,6 +1286,7 @@ async function fetchCertificationsAndCourses (userId) {
       logger.warn(`LEARNING_PATHS_API_URL is not configured for user ${userId}`)
       return { certifications: [], courses: [] }
     }
+    const learningPathsApiUrl = config.LEARNING_PATHS_API_URL
     let token
     try {
       token = await helper.getM2MToken()
@@ -1294,65 +1294,65 @@ async function fetchCertificationsAndCourses (userId) {
       logger.warn(`Cannot get M2M token for user ${userId}: ${tokenError.message}. Certifications and courses will be empty.`)
       return { certifications: [], courses: [] }
     }
-    
+
     if (!token) {
       logger.warn(`M2M token is null/undefined for user ${userId}`)
       return { certifications: [], courses: [] }
     }
-    
-    const learningPathsUrl = `${config.LEARNING_PATHS_API_URL}/completed-certifications/${userId}`
-    
+
+    const learningPathsUrl = `${learningPathsApiUrl}/completed-certifications/${userId}`
+
     if (!learningPathsUrl || typeof learningPathsUrl !== 'string' || !userId) {
       logger.error(`Invalid learning-paths URL for user ${userId}: learningPathsUrl=${learningPathsUrl}, userId=${userId}`)
       return { certifications: [], courses: [] }
     }
-    
+
     // Double-check URL is valid before making request
     const finalUrl = String(learningPathsUrl || '').trim()
     if (!finalUrl || finalUrl === 'undefined' || finalUrl.includes('undefined') || finalUrl.length === 0) {
       logger.error(`Invalid final URL constructed for user ${userId}: finalUrl="${finalUrl}", baseUrl="${learningPathsApiUrl}", userId=${userId}`)
       return { certifications: [], courses: [] }
     }
-    
+
     return new Promise((resolve, reject) => {
       try {
         request({
           url: finalUrl,
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
-      }, (error, response, body) => {
-        if (error) {
-          logger.warn(`Failed to fetch certifications for user ${userId}: ${error.message}`)
-          resolve({ certifications: [], courses: [] })
-          return
-        }
-        if (response.statusCode !== 200) {
-          logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}`)
-          resolve({ certifications: [], courses: [] })
-          return
-        }
-        try {
-          const data = JSON.parse(body)
-          
-          // Process certifications
-          const certifications = (data.enrollments || [])
-            .filter(e => e.status === 'completed' && e.topcoderCertification)
-            .map(e => `${e.topcoderCertification.title} - Topcoder Academy`)
-          
-          // Process courses
-          const courses = (data.courses || [])
-            .map(c => {
-              const title = c.certificationTitle || c.certification || 'Course'
-              return `${title} - Topcoder Academy`
-            })
-          
-          resolve({ certifications, courses })
-        } catch (parseError) {
-          logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
-          resolve({ certifications: [], courses: [] })
-        }
-      })
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }, (error, response, body) => {
+          if (error) {
+            logger.warn(`Failed to fetch certifications for user ${userId}: ${error.message}`)
+            resolve({ certifications: [], courses: [] })
+            return
+          }
+          if (response.statusCode !== 200) {
+            logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}`)
+            resolve({ certifications: [], courses: [] })
+            return
+          }
+          try {
+            const data = JSON.parse(body)
+
+            // Process certifications
+            const certifications = (data.enrollments || [])
+              .filter(e => e.status === 'completed' && e.topcoderCertification)
+              .map(e => `${e.topcoderCertification.title} - Topcoder Academy`)
+
+            // Process courses
+            const courses = (data.courses || [])
+              .map(c => {
+                const title = c.certificationTitle || c.certification || 'Course'
+                return `${title} - Topcoder Academy`
+              })
+
+            resolve({ certifications, courses })
+          } catch (parseError) {
+            logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
+            resolve({ certifications: [], courses: [] })
+          }
+        })
       } catch (requestError) {
         logger.error(`Error creating request for user ${userId}: ${requestError.message}`)
         resolve({ certifications: [], courses: [] })
@@ -1449,14 +1449,14 @@ async function aggregatePDFData (currentUser, handle) {
   // Get base member data
   const memberData = await getMember(currentUser, handle, {})
   const userId = helper.bigIntToNumber(memberData.userId)
-  
+
   // Fetch traits (work, education, languages, basicInfo, personalization)
-  const traits = await memberTraitService.getTraits(currentUser, handle, {})
-  const workTraits = traits.find(t => t.traitId === 'work')?.traits?.data || []
-  const educationTraits = traits.find(t => t.traitId === 'education')?.traits?.data || []
-  const languageTraits = traits.find(t => t.traitId === 'languages')?.traits?.data || []
-  const basicInfoTraits = traits.find(t => t.traitId === 'basic_info')?.traits?.data || []
-  
+  const traits = (await memberTraitService.getTraits(currentUser, handle, {})) || []
+  const workTraits = _.get(_.find(traits, { traitId: 'work' }), 'traits.data', [])
+  const educationTraits = _.get(_.find(traits, { traitId: 'education' }), 'traits.data', [])
+  const languageTraits = _.get(_.find(traits, { traitId: 'languages' }), 'traits.data', [])
+  const basicInfoTraits = _.get(_.find(traits, { traitId: 'basic_info' }), 'traits.data', [])
+
   // Collect all skill GUIDs from work experiences for batch lookup
   const allSkillIds = []
   workTraits.forEach(work => {
@@ -1464,27 +1464,27 @@ async function aggregatePDFData (currentUser, handle) {
       allSkillIds.push(...work.associatedSkills)
     }
   })
-  
+
   // Batch lookup all skill names
   const skillNameMap = await getSkillNamesByIds([...new Set(allSkillIds)])
-  
+
   // Extract personalization trait to get shortBio (profileSelfTitle)
-  const personalizationTrait = traits.find(t => t.traitId === 'personalization')
-  const personalizationData = personalizationTrait?.traits?.data?.[0] || {}
+  const personalizationTrait = _.find(traits, { traitId: 'personalization' })
+  const personalizationData = _.get(personalizationTrait, 'traits.data[0]', {})
   const shortBio = personalizationData.profileSelfTitle || null
-  
+
   // Fetch skills from standardized-skills-api
   const skills = await getMemberSkills(memberData.userId)
-  
+
   // Separate skills by display mode and verification status
   const principalSkills = { verified: [], notVerified: [] }
   const additionalSkills = { verified: [], notVerified: [] }
-  
+
   skills.forEach(skill => {
-    const isPrincipal = skill.displayMode?.name === 'principal'
-    const isVerified = skill.levels?.some(level => level.name === 'verified')
+    const isPrincipal = _.get(skill, 'displayMode.name') === 'principal'
+    const isVerified = _.some(_.get(skill, 'levels', []), level => level.name === 'verified')
     const skillName = skill.name
-    
+
     if (isPrincipal) {
       if (isVerified) {
         principalSkills.verified.push(skillName)
@@ -1499,7 +1499,7 @@ async function aggregatePDFData (currentUser, handle) {
       }
     }
   })
-  
+
   const specialRoles = []
   const roleMap = {
     'copilot': 'Copilot',
@@ -1517,12 +1517,12 @@ async function aggregatePDFData (currentUser, handle) {
     'TaxForm Viewer': 'TaxForm Viewer',
     'Topcoder Staff': 'Topcoder Staff',
     'Project Manager': 'Project Manager',
-    'Connect Manager': 'Connect Manager',
+    'Connect Manager': 'Connect Manager'
   }
-  
+
   const currentUserId = currentUser && (currentUser.userId || currentUser.sub)
   const isSelf = currentUserId && String(currentUserId) === String(userId)
-  
+
   if (currentUser && (isSelf || helper.hasAdminRole(currentUser))) {
     const memberRoles = await getMemberRoles(userId)
     memberRoles.forEach(role => {
@@ -1532,13 +1532,13 @@ async function aggregatePDFData (currentUser, handle) {
       }
     })
   }
-  
+
   // Fetch gamification achievements
   const achievements = await fetchGamificationAchievements(userId)
-  
+
   // Fetch certifications and courses
   const { certifications, courses } = await fetchCertificationsAndCourses(userId)
-  
+
   // Build status bar text
   const statusBarItems = []
   if (memberData.status === 'ACTIVE') {
@@ -1548,7 +1548,7 @@ async function aggregatePDFData (currentUser, handle) {
     statusBarItems.push('OPEN TO WORK')
   }
   const statusBarText = statusBarItems.join(' • ')
-  
+
   // Format dates
   const formatDate = (date) => {
     if (!date) return null
@@ -1557,10 +1557,10 @@ async function aggregatePDFData (currentUser, handle) {
     const year = d.getFullYear()
     return `${month}/${year}`
   }
-  
+
   // Get member timezone
   const timezone = getMemberTimezone(memberData)
-  
+
   return {
     // Member basic info
     member: {
@@ -1648,11 +1648,11 @@ downloadProfile.schema = {
 async function getMemberSkill (currentUser, handle, skillId) {
   // Get member data first to get userId
   const member = await getMemberData(handle, {})
-  
+
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
   }
-  
+
   // Check authorization
   if (!helper.canDownloadProfile(currentUser, member)) {
     throw new errors.ForbiddenError('You are not allowed to view this member profile.')
@@ -1667,20 +1667,21 @@ async function getMemberSkill (currentUser, handle, skillId) {
       ...prismaHelper.skillsIncludeParams,
       skill: {
         include: {
-          category: true, skillEvents: {
+          category: true,
+          skillEvents: {
             where: {
-              userId: helper.bigIntToNumber(member.userId),
+              userId: helper.bigIntToNumber(member.userId)
             },
             select: {
               createdAt: true,
               sourceId: true,
               sourceType: {
                 select: { name: true }
-              },
+              }
             }
           }
         }
-      },
+      }
     }
   })
 
@@ -1689,15 +1690,16 @@ async function getMemberSkill (currentUser, handle, skillId) {
   }
 
   // Build and return the skill data
-  const [skill] = prismaHelper.buildMemberSkills([dbSkill]);
-  
+  const [skill] = prismaHelper.buildMemberSkills([dbSkill])
+
   // Replace lastSources IDs with fetched details
   if (skill.activity) {
     const fetchPromises = []
-    
+
     // Prepare challenge fetch
-    if (skill.activity.challenge?.sources?.length > 0) {
-      const challengeIds = skill.activity.challenge.sources
+    const challengeSources = _.get(skill, 'activity.challenge.sources', [])
+    if (challengeSources.length > 0) {
+      const challengeIds = challengeSources
       fetchPromises.push(
         challengesPrisma.Challenge.findMany({
           where: { id: { in: challengeIds.slice(0, 3) } },
@@ -1713,10 +1715,11 @@ async function getMemberSkill (currentUser, handle, skillId) {
         })
       )
     }
-    
+
     // Prepare certification fetch
-    if (skill.activity.certification?.sources?.length > 0) {
-      const certificationIds = skill.activity.certification.sources.filter(Boolean)
+    const certificationSources = _.get(skill, 'activity.certification.sources', [])
+    if (certificationSources.length > 0) {
+      const certificationIds = certificationSources.filter(Boolean)
       if (certificationIds.length > 0) {
         fetchPromises.push(
           academyPrisma.CertificationEnrollments.findMany({
@@ -1732,8 +1735,8 @@ async function getMemberSkill (currentUser, handle, skillId) {
               c.completionEventId,
               {
                 completionEventId: c.completionEventId,
-                dashedName: c.TopcoderCertification?.dashedName,
-                title: c.TopcoderCertification?.title
+                dashedName: _.get(c, 'TopcoderCertification.dashedName'),
+                title: _.get(c, 'TopcoderCertification.title')
               }
             ]))
             skill.activity.certification = {
@@ -1746,10 +1749,11 @@ async function getMemberSkill (currentUser, handle, skillId) {
         )
       }
     }
-    
+
     // Prepare course fetch
-    if (skill.activity.course?.sources?.length > 0) {
-      const courseIds = skill.activity.course.sources.filter(Boolean)
+    const courseSources = _.get(skill, 'activity.course.sources', [])
+    if (courseSources.length > 0) {
+      const courseIds = courseSources.filter(Boolean)
       if (courseIds.length > 0) {
         fetchPromises.push(
           academyPrisma.FccCertificationProgresses.findMany({
@@ -1765,7 +1769,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
               {
                 completionEventId: c.completionEventId,
                 certification: c.certification,
-                title: c.FccCourses?.title
+                title: _.get(c, 'FccCourses.title')
               }
             ]))
             skill.activity.course = {
@@ -1778,10 +1782,11 @@ async function getMemberSkill (currentUser, handle, skillId) {
         )
       }
     }
-    
+
     // Prepare engagement fetch
-    if (skill.activity.engagement?.sources?.length > 0) {
-      const engagementIds = skill.activity.engagement.sources.filter(Boolean)
+    const engagementSources = _.get(skill, 'activity.engagement.sources', [])
+    if (engagementSources.length > 0) {
+      const engagementIds = engagementSources.filter(Boolean)
       if (engagementIds.length > 0) {
         fetchPromises.push(
           engagementsPrisma.EngagementAssignment.findMany({
@@ -1796,18 +1801,18 @@ async function getMemberSkill (currentUser, handle, skillId) {
               count: engagementIds.length,
               lastSources: engagements.map(assignment => ({
                 id: assignment.engagement.id,
-                title: assignment.engagement.title,
-              })),
+                title: assignment.engagement.title
+              }))
             }
           })
         )
       }
     }
-    
+
     // Fetch all sources in parallel
     await Promise.all(fetchPromises)
   }
-  
+
   return skill
 }
 

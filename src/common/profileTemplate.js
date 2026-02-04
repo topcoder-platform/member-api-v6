@@ -215,7 +215,7 @@ function createSectionHeader (title) {
  */
 function createSkillsSubsection (title, verified, notVerified) {
   const items = []
-  
+
   if (verified.length > 0) {
     items.push(
       React.createElement(
@@ -226,7 +226,7 @@ function createSkillsSubsection (title, verified, notVerified) {
       )
     )
   }
-  
+
   if (notVerified.length > 0) {
     items.push(
       React.createElement(
@@ -237,11 +237,11 @@ function createSkillsSubsection (title, verified, notVerified) {
       )
     )
   }
-  
+
   if (items.length === 0) {
     return null
   }
-  
+
   return React.createElement(
     View,
     { style: styles.skillsSubsection },
@@ -261,9 +261,9 @@ function createSkillsSubsection (title, verified, notVerified) {
  */
 function buildProfileTemplate (pdfData) {
   const { member, workExperience, education, languages, basicInfo, skills, topcoderActivity, certifications, courses } = pdfData
-  
+
   const children = []
-  
+
   // Header Section
   children.push(
     React.createElement(
@@ -363,7 +363,7 @@ function buildProfileTemplate (pdfData) {
     const skillsContent = [
       createSectionHeader('TECHNICAL SKILLS')
     ]
-    
+
     const principalSubsection = createSkillsSubsection(
       'Principal Skills:',
       skills.principal.verified,
@@ -372,7 +372,7 @@ function buildProfileTemplate (pdfData) {
     if (principalSubsection) {
       skillsContent.push(principalSubsection)
     }
-    
+
     const additionalSubsection = createSkillsSubsection(
       'Additional Skills:',
       skills.additional.verified,
@@ -381,7 +381,7 @@ function buildProfileTemplate (pdfData) {
     if (additionalSubsection) {
       skillsContent.push(additionalSubsection)
     }
-    
+
     children.push(
       React.createElement(
         View,
@@ -390,7 +390,7 @@ function buildProfileTemplate (pdfData) {
       )
     )
   }
-  
+
   // Languages Section
   if (languages && languages.length > 0) {
     children.push(
@@ -406,11 +406,11 @@ function buildProfileTemplate (pdfData) {
       )
     )
   }
-  
+
   // Experience Section
   if (workExperience && workExperience.length > 0) {
     const experienceContent = [createSectionHeader('EXPERIENCE')]
-    
+
     workExperience.forEach((work, index) => {
       const dateRange = [work.startDate, work.endDate].filter(Boolean).join(' - ')
       experienceContent.push(
@@ -449,7 +449,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
     })
-    
+
     children.push(
       React.createElement(
         View,
@@ -458,11 +458,11 @@ function buildProfileTemplate (pdfData) {
       )
     )
   }
-  
+
   // Topcoder Activity Section
   if (topcoderActivity.specialRole || topcoderActivity.achievements) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
-    
+
     if (topcoderActivity.specialRole) {
       activityContent.push(
         React.createElement(
@@ -472,7 +472,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
     }
-    
+
     if (topcoderActivity.achievements) {
       const achievements = topcoderActivity.achievements
       const plainText = typeof achievements === 'string' && htmlToText(achievements)
@@ -484,7 +484,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
     }
-    
+
     children.push(
       React.createElement(
         View,
@@ -493,11 +493,11 @@ function buildProfileTemplate (pdfData) {
       )
     )
   }
-  
+
   // Education Section
   if (education && education.length > 0) {
     const educationContent = [createSectionHeader('EDUCATION')]
-    
+
     education.forEach((edu, index) => {
       educationContent.push(
         React.createElement(
@@ -525,7 +525,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
     })
-    
+
     children.push(
       React.createElement(
         View,
@@ -534,11 +534,11 @@ function buildProfileTemplate (pdfData) {
       )
     )
   }
-  
+
   // Certifications & Courses Section
   if ((certifications && certifications.length > 0) || (courses && courses.length > 0)) {
     const certContent = [createSectionHeader('CERTIFICATIONS & COURSES')]
-    
+
     if (certifications && certifications.length > 0) {
       const certificationsText = certifications.join(', ')
       certContent.push(
@@ -550,7 +550,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
     }
-    
+
     if (courses && courses.length > 0) {
       const coursesText = courses.join(', ')
       certContent.push(
@@ -562,7 +562,7 @@ function buildProfileTemplate (pdfData) {
         )
       )
     }
-    
+
     children.push(
       React.createElement(
         View,
@@ -571,7 +571,7 @@ function buildProfileTemplate (pdfData) {
       )
     )
   }
-  
+
   return React.createElement(
     Document,
     {},
