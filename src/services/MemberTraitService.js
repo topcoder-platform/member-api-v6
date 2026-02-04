@@ -212,7 +212,7 @@ async function getTraits (currentUser, handle, query) {
   const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   const personalizationFilter = canReadPrivate
-    ? { private: true }
+    ? {}
     : { private: false }
 
   // query trait from db and convert to response
