@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@prisma/adapter-pg':
+        specifier: ^7.0.1
+        version: 7.3.0
       '@prisma/client':
         specifier: ^6.10.1
         version: 6.19.2(prisma@6.19.2(typescript@5.9.3))(typescript@5.9.3)
@@ -101,6 +104,9 @@ importers:
       mysql2:
         specifier: ^3.14.3
         version: 3.16.2
+      pg:
+        specifier: ^8.16.3
+        version: 8.17.2
       prisma:
         specifier: ^6.10.1
         version: 6.19.2(typescript@5.9.3)

@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@prisma/client": "^6.10.1",
+    "@prisma/adapter-pg": "^7.0.1",
     "@react-pdf/renderer": "^3.4.4",
     "@topcoder/challenge-api-v6": "github:topcoder-platform/challenge-api-v6#develop",
     "@topcoder/engagements-api-v6": "topcoder-platform/engagements-api-v6.git#master",
@@ -60,6 +61,7 @@
     "moment": "^2.27.0",
     "moment-timezone": "^0.5.43",
     "mysql2": "^3.14.3",
+    "pg": "^8.16.3",
     "prisma": "^6.10.1",
     "qs": "^6.14.1",
     "react": "^18.3.1",
