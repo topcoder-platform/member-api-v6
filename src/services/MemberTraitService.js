@@ -132,10 +132,6 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
   if (_.includes(traitIds, 'personalization') &&
     !_.isEmpty(traitData.personalization)
   ) {
-    const collectInfo = {}
-    _.forEach(traitData.personalization, t => {
-      collectInfo[t.key] = t.value
-    })
     ret.push({
       userId: helper.bigIntToNumber(userId),
       traitId: 'personalization',
@@ -143,7 +139,9 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
       ..._.pick(traitData, auditFields),
       traits: {
         traitId: 'personalization',
-        data: [collectInfo]
+        data: _.map(traitData.personalization, t => ({
+        [t.key]: t.value
+      }))
       }
     })
   }
@@ -212,7 +210,7 @@ async function getTraits (currentUser, handle, query) {
   const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   const personalizationFilter = canReadPrivate
-    ? { private: true }
+    ? {}
     : { private: false }
 
   // query trait from db and convert to response
