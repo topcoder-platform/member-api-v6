@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     marginBottom: 5,
     color: '#000000',
-    lineHeight: 1.6,
+    lineHeight: 1.6
   },
   skillsLabel: {
     fontWeight: 'bold'

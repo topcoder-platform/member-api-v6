@@ -1262,38 +1262,38 @@ async function fetchGamificationAchievements (userId) {
             badges.forEach(badge => {
               const orgBadge = badge.org_badge
               if (orgBadge && orgBadge.badge_name) {
-              // Check if badge is active - handle both boolean and string values
-              const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
-              // Check status - case insensitive
-              const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
-              
-              logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
-              
-              if (isActive && isActiveStatus) {
-                const name = htmlToText(orgBadge.badge_name)
-                const key = normalizeAchievementName(name)
-                achievementMap[key] = (achievementMap[key] || 0) + 1
+                // Check if badge is active - handle both boolean and string values
+                const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
+                // Check status - case insensitive
+                const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
+
+                logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+
+                if (isActive && isActiveStatus) {
+                  const name = htmlToText(orgBadge.badge_name)
+                  const key = normalizeAchievementName(name)
+                  achievementMap[key] = (achievementMap[key] || 0) + 1
+                } else {
+                  logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+                }
               } else {
-                logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+                logger.debug('Badge missing org_badge or badge_name:', { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
               }
-            } else {
-              logger.debug(`Badge missing org_badge or badge_name:`, { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
-            }
-          })
-          
-          logger.debug(`Achievement map for user ${userId}:`, achievementMap)
-          
-          const achievements = Object.entries(achievementMap)
-            .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
-            .join(' | ')
-          
-          logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
-          resolve(achievements)
-        } catch (parseError) {
-          logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
-          resolve('')
-        }
-      })
+            })
+
+            logger.debug(`Achievement map for user ${userId}:`, achievementMap)
+
+            const achievements = Object.entries(achievementMap)
+              .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
+              .join(' | ')
+
+            logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
+            resolve(achievements)
+          } catch (parseError) {
+            logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
+            resolve('')
+          }
+        })
       } catch (requestError) {
         logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}`)
         resolve('')
@@ -1568,7 +1568,7 @@ async function aggregatePDFData (currentUser, handle) {
 
   // Fetch certifications and courses
   const { certifications, courses } = await fetchCertificationsAndCourses(userId)
-  
+
   // Build status bar text (Active = has recent activity in last 3 months)
   const statusBarItems = []
   const hasRecentActivity = await getMemberRecentActivity(userId)
@@ -1591,7 +1591,7 @@ async function aggregatePDFData (currentUser, handle) {
 
   // Get member timezone
   const timezone = getMemberTimezone(memberData)
-  
+
   const countryDisplayName = getCountryNameFromCode(memberData.homeCountryCode) || memberData.country || ''
 
   return {

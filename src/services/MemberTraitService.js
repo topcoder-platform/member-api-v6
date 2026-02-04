@@ -169,7 +169,7 @@ async function queryTraits (userId, traitIds = TRAIT_IDS, personalizationFilter 
     include: {}
   }
   // for each trait id, get prisma model and put it into "include"
- _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
+  _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
     if (t === 'personalization') {
       prismaFilter.include[t] = {
         where: personalizationFilter
@@ -205,12 +205,11 @@ async function getTraits (currentUser, handle, query) {
 
   const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
   const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
-  const isSelf = currentUser && currentUser.handle && 
-      currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
-    
+  const isSelf = currentUser && currentUser.handle &&
+    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+
   // can read private personalisation info on a member
   const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
-
 
   const personalizationFilter = canReadPrivate
     ? { private: true }

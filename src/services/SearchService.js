@@ -786,28 +786,68 @@ async function bulkSearch (currentUser, data) {
   }
 
   try {
-    const results = await Promise.all(normalizedIdentifiers.map(async (identifier) => {
-      const trimmed = _.trim(identifier)
-      const member = await prisma.member.findFirst({
+    const trimmedIdentifiers = normalizedIdentifiers.map(identifier => _.trim(identifier))
+    const handleIdentifiers = []
+    const emailIdentifiers = []
+
+    for (const identifier of trimmedIdentifiers) {
+      if (_.includes(identifier, '@')) {
+        emailIdentifiers.push(identifier)
+      } else {
+        handleIdentifiers.push(identifier.toLowerCase())
+      }
+    }
+
+    const orConditions = []
+    const uniqueHandles = _.uniq(handleIdentifiers)
+    const uniqueEmails = _.uniq(emailIdentifiers)
+    if (uniqueHandles.length > 0) {
+      orConditions.push({ handleLower: { in: uniqueHandles } })
+    }
+    if (uniqueEmails.length > 0) {
+      for (const email of uniqueEmails) {
+        orConditions.push({ email: { equals: email, mode: 'insensitive' } })
+      }
+    }
+
+    const members = orConditions.length === 0
+      ? []
+      : await prisma.member.findMany({
         where: {
-          OR: [
-            { handleLower: trimmed.toLowerCase() },
-            { email: { equals: trimmed, mode: 'insensitive' } }
-          ]
+          OR: orConditions
         },
         select: {
           userId: true,
-          handle: true,
+          handleLower: true,
           email: true
         }
       })
 
+    const membersByHandle = new Map()
+    const membersByEmail = new Map()
+    for (const member of members) {
+      if (member.handleLower) {
+        membersByHandle.set(member.handleLower, member)
+      }
+      if (member.email) {
+        membersByEmail.set(member.email.toLowerCase(), member)
+      }
+    }
+
+    const results = trimmedIdentifiers.map((identifier, index) => {
+      let member = null
+      if (_.includes(identifier, '@')) {
+        member = membersByEmail.get(identifier.toLowerCase()) || null
+      } else {
+        member = membersByHandle.get(identifier.toLowerCase()) || null
+      }
+
       return {
-        input: identifier,
+        input: normalizedIdentifiers[index],
         userId: member ? helper.bigIntToNumber(member.userId) : null,
         matched: !!member
       }
-    }))
+    })
 
     const seenUserIds = new Set()
     const dedupedResults = results.filter((result) => {
