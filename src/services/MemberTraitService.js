@@ -162,15 +162,21 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
  * @param {Array} traitIds string array
  * @returns member trait prisma data
  */
-async function queryTraits (userId, traitIds = TRAIT_IDS) {
+async function queryTraits (userId, traitIds = TRAIT_IDS, personalizationFilter = {}) {
   // build prisma query
   const prismaFilter = {
     where: { userId },
     include: {}
   }
   // for each trait id, get prisma model and put it into "include"
-  _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
-    prismaFilter.include[t] = true
+ _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
+    if (t === 'personalization') {
+      prismaFilter.include[t] = {
+        where: personalizationFilter
+      }
+    } else {
+      prismaFilter.include[t] = true
+    }
   })
   const traitData = await prisma.memberTraits.findUnique(prismaFilter)
   if (!traitData) {
@@ -196,8 +202,23 @@ async function getTraits (currentUser, handle, query) {
   // parse query parameters
   const traitIds = helper.parseCommaSeparatedString(query.traitIds, TRAIT_IDS) || TRAIT_IDS
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
+
+  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && 
+      currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+    
+  // can read private personalisation info on a member
+  const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
+
+
+  const personalizationFilter = canReadPrivate
+    ? { private: true }
+    : { private: false }
+
   // query trait from db and convert to response
-  let queryResult = await queryTraits(member.userId, traitIds)
+  let queryResult = await queryTraits(member.userId, traitIds, personalizationFilter)
+
   let result = queryResult.data
 
   // keep only those of given trait ids
@@ -354,6 +375,7 @@ function buildTraitPrismaData (data, operatorId, result) {
           valuePairs.push({
             key,
             value: t[key],
+            private: key === 'openToWork',
             createdBy: operatorId
           })
         }

@@ -862,8 +862,9 @@ model memberTraitPersonalization {
 
   memberTraitId BigInt
 
-  key   String?
-  value Json?
+  key     String?
+  value   Json?
+  private Boolean @default(false)
 
   memberTraits memberTraits @relation(fields: [memberTraitId], references: [id], onDelete: Cascade)
 

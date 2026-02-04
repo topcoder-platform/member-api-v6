@@ -20,6 +20,7 @@ const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const { htmlToText } = require('../common/htmlUtils')
+const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const identityPrismaManager = require('../common/identityPrisma')
@@ -160,6 +161,20 @@ async function getMemberRecentActivity (userId) {
     console.error(`Failed to query recent activity for userId: ${userId}`, err)
     return false
   }
+}
+
+const countryCodes = countryCallingCodes.codes || []
+
+/**
+ * Get country display name from ISO 3166-1 alpha-3 code (e.g. ALB -> Albania)
+ * @param {string} isoCode3 - 3-letter country code (e.g. homeCountryCode)
+ * @returns {string|null} country name or null if not found
+ */
+function getCountryNameFromCode (isoCode3) {
+  if (!isoCode3 || typeof isoCode3 !== 'string') return null
+  const code = isoCode3.trim().toUpperCase()
+  const item = countryCodes.find(c => (c.isoCode3 || '').toUpperCase() === code)
+  return item ? item.country : null
 }
 
 /**
@@ -1166,6 +1181,20 @@ confirmProfileData.schema = {
 }
 
 /**
+ * Normalize badge name for grouping: strip year/digits after TCO (e.g. TCO18, TCO19 -> TCO)
+ * so "TCO18 Marathon Champion" and "TCO19 Marathon Champion" group as "TCO Marathon Champion"
+ * @param {string} badgeName - raw or html-stripped badge name
+ * @returns {string} normalized name for map key and display
+ */
+function normalizeAchievementName (badgeName) {
+  if (!badgeName || typeof badgeName !== 'string') return ''
+  return badgeName
+    .replace(/\bTCO\d+\b/gi, 'TCO')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
  * Fetch gamification achievements for a member
  * @param {Number} userId the member userId
  * @returns {Promise<String>} formatted achievements string
@@ -1234,36 +1263,37 @@ async function fetchGamificationAchievements (userId) {
               const orgBadge = badge.org_badge
               if (orgBadge && orgBadge.badge_name) {
               // Check if badge is active - handle both boolean and string values
-                const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
-                // Check status - case insensitive
-                const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
-
-                logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
-
-                if (isActive && isActiveStatus) {
-                  const name = htmlToText(orgBadge.badge_name)
-                  achievementMap[name] = (achievementMap[name] || 0) + 1
-                } else {
-                  logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
-                }
+              const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
+              // Check status - case insensitive
+              const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
+              
+              logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+              
+              if (isActive && isActiveStatus) {
+                const name = htmlToText(orgBadge.badge_name)
+                const key = normalizeAchievementName(name)
+                achievementMap[key] = (achievementMap[key] || 0) + 1
               } else {
-                logger.debug(`Badge missing org_badge or badge_name:`, { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
+                logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
               }
-            })
-
-            logger.debug(`Achievement map for user ${userId}:`, achievementMap)
-
-            const achievements = Object.entries(achievementMap)
-              .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
-              .join(' | ')
-
-            logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
-            resolve(achievements)
-          } catch (parseError) {
-            logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
-            resolve('')
-          }
-        })
+            } else {
+              logger.debug(`Badge missing org_badge or badge_name:`, { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
+            }
+          })
+          
+          logger.debug(`Achievement map for user ${userId}:`, achievementMap)
+          
+          const achievements = Object.entries(achievementMap)
+            .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
+            .join(' | ')
+          
+          logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
+          resolve(achievements)
+        } catch (parseError) {
+          logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
+          resolve('')
+        }
+      })
       } catch (requestError) {
         logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}`)
         resolve('')
@@ -1538,10 +1568,11 @@ async function aggregatePDFData (currentUser, handle) {
 
   // Fetch certifications and courses
   const { certifications, courses } = await fetchCertificationsAndCourses(userId)
-
-  // Build status bar text
+  
+  // Build status bar text (Active = has recent activity in last 3 months)
   const statusBarItems = []
-  if (memberData.status === 'ACTIVE') {
+  const hasRecentActivity = await getMemberRecentActivity(userId)
+  if (hasRecentActivity) {
     statusBarItems.push('ACTIVE')
   }
   if (memberData.availableForGigs === true) {
@@ -1560,11 +1591,14 @@ async function aggregatePDFData (currentUser, handle) {
 
   // Get member timezone
   const timezone = getMemberTimezone(memberData)
+  
+  const countryDisplayName = getCountryNameFromCode(memberData.homeCountryCode) || memberData.country || ''
 
   return {
     // Member basic info
     member: {
       ...memberData,
+      country: countryDisplayName,
       statusBarText,
       generatedOn: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
       timezone: timezone
