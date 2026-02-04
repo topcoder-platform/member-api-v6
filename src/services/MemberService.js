@@ -44,6 +44,11 @@ const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
 
+const HANDLE_MIN_LENGTH = 3
+const HANDLE_MAX_LENGTH = 64
+const HANDLE_REGEX = /^[-A-Za-z0-9_.`{}[\]]{3,64}$/
+const HANDLE_PUNCTUATION_ONLY_REGEX = /^[-_.{}[\]]+$/
+
 /**
  * Clean member fields according to current user.
  * @param {Object} currentUser the user who performs operation
@@ -120,6 +125,25 @@ function omitMemberAttributes (currentUser, mb) {
   }
 
   return res
+}
+
+function validateHandleRules (handle, rawHandle) {
+  if (handle.length < HANDLE_MIN_LENGTH || handle.length > HANDLE_MAX_LENGTH) {
+    throw new errors.BadRequestError(
+      `Length of Handle in character should be between ${HANDLE_MIN_LENGTH} and ${HANDLE_MAX_LENGTH}.`
+    )
+  }
+  if ((rawHandle || handle).indexOf(' ') !== -1) {
+    throw new errors.BadRequestError('Handle may not contain a space')
+  }
+  if (!HANDLE_REGEX.test(handle)) {
+    throw new errors.BadRequestError(
+      'Handle must be 3-64 characters long and can only contain alphanumeric characters and _.-`[]{} symbols.'
+    )
+  }
+  if (HANDLE_PUNCTUATION_ONLY_REGEX.test(handle)) {
+    throw new errors.BadRequestError('Handle may not contain only punctuation.')
+  }
 }
 
 /**
@@ -648,6 +672,8 @@ updateMember.schema = {
     fields: Joi.string()
   }),
   data: Joi.object().keys({
+    handle: Joi.forbidden(),
+    handleLower: Joi.forbidden(),
     handle: Joi.forbidden(),
     handleLower: Joi.forbidden(),
     firstName: Joi.string(),

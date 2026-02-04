@@ -16,11 +16,11 @@ model user {
   modify_date  DateTime? @default(now()) @identitydb.Timestamp(6)
   status       String    @identitydb.VarChar(3)
 
+  @@map("user")
+  @@schema("identity")
   @@index([handle])
   @@index([handle_lower], map: "user_lower_handle_idx")
   @@index([status, handle_lower])
-  @@map("user")
-  @@schema("identity")
 }
 
 model email {
@@ -29,10 +29,10 @@ model email {
   address     String?   @identitydb.VarChar(100)
   modify_date DateTime? @default(now()) @identitydb.Timestamp(6)
 
-  @@index([user_id], map: "email_user_id_idx")
-  @@index([address])
   @@map("email")
   @@schema("identity")
+  @@index([user_id], map: "email_user_id_idx")
+  @@index([address])
 }
 
 model security_user {

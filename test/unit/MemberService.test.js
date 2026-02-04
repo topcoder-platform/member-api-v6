@@ -252,6 +252,18 @@ describe('member service unit tests', () => {
       throw new Error('should not reach here')
     })
 
+    it('update member - handle change not allowed', async () => {
+      try {
+        await service.updateMember({ isMachine: true, sub: 'sub1' }, member2.handle, {}, {
+          handle: 'newHandle'
+        })
+      } catch (e) {
+        should.equal(e.message.indexOf('"handle" is not allowed') >= 0, true)
+        return
+      }
+      throw new Error('should not reach here')
+    })
+
     it('update member - unexpected field', async () => {
       try {
         await service.updateMember({ isMachine: true, sub: 'sub1' }, member2.handle, {}, {
