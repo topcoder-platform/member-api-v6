@@ -70,12 +70,16 @@ const migrationRuntimeState = {
 }
 const destructiveApprovals = new Map()
 
+function isBigIntValue (value) {
+  return Object.prototype.toString.call(value) === '[object BigInt]'
+}
+
 function logWithLevel (level, message, context = null) {
   const timestamp = new Date().toISOString()
   let contextSuffix = ''
   if (context) {
     try {
-      contextSuffix = ` | ${JSON.stringify(context, (_, value) => (typeof value === 'bigint' ? value.toString() : value))}`
+      contextSuffix = ` | ${JSON.stringify(context, (_, value) => (isBigIntValue(value) ? value.toString() : value))}`
     } catch (serializeErr) {
       contextSuffix = ` | ${JSON.stringify({ serializationError: serializeErr.message })}`
     }
@@ -118,7 +122,7 @@ async function executeWrite (description, operation, context = {}) {
   try {
     return await operation()
   } catch (err) {
-    logError(`Failed to execute write: ${description}`, { ...context, error: err?.message })
+    logError(`Failed to execute write: ${description}`, { ...context, error: err && err.message })
     throw err
   }
 }
@@ -187,7 +191,7 @@ function normalizeUserId (value) {
     return Math.trunc(value)
   }
 
-  if (typeof value === 'bigint') {
+  if (isBigIntValue(value)) {
     return Number(value)
   }
 
@@ -227,7 +231,7 @@ function toSerializable (value) {
   if (value === null || value === undefined) {
     return value
   }
-  if (typeof value === 'bigint') {
+  if (isBigIntValue(value)) {
     return value.toString()
   }
   if (value instanceof Date) {
@@ -262,13 +266,16 @@ function recordChildHistory (entityName, records, action, context = {}) {
     dateFilter: migrationRuntimeState.dateFilter ? migrationRuntimeState.dateFilter.toISOString() : null
   }
   records.forEach((record) => {
+    const recordId = record && record.id != null ? record.id : null
+    const userId = record && record.userId != null ? record.userId : (baseContext.userId != null ? baseContext.userId : null)
+    const validFrom = record && record.createdAt ? new Date(record.createdAt).toISOString() : null
     appendChildHistoryLog({
       timestamp,
       action,
       entityName,
-      recordId: record?.id ?? null,
-      userId: record?.userId ?? baseContext.userId ?? null,
-      validFrom: record?.createdAt ? new Date(record.createdAt).toISOString() : null,
+      recordId,
+      userId,
+      validFrom,
       validTo: timestamp,
       context: baseContext,
       snapshot: toSerializable(record)
@@ -1429,7 +1436,7 @@ async function fixMemberData (memberItem, batchItems) {
 }
 
 function isTransactionTimeoutError (err) {
-  return err?.code === 'P2028' || (err?.message && err.message.includes('Transaction already closed'))
+  return (err && err.code === 'P2028') || (err && err.message && err.message.includes('Transaction already closed'))
 }
 
 function delay (ms) {
@@ -1475,13 +1482,13 @@ function isUniqueConstraintError (err) {
 
 function logUniqueConstraintSkip (memberItem, err) {
   const identifier = compactObject({
-    userId: memberItem?.userId,
-    handle: memberItem?.handle,
-    handleLower: memberItem?.handleLower
+    userId: memberItem ? memberItem.userId : undefined,
+    handle: memberItem ? memberItem.handle : undefined,
+    handleLower: memberItem ? memberItem.handleLower : undefined
   })
   logWarn('Skipping member due to unique constraint violation', {
     ...identifier,
-    target: err?.meta?.target
+    target: err && err.meta ? err.meta.target : undefined
   })
 }
 
@@ -2298,13 +2305,13 @@ async function importDynamoBasicInfoTraits (filename, dateFilter = null) {
         errors += 1
         logWarn('Skipping basic_info trait due to invalid JSON payload', {
           userId: dataItem.userId,
-          error: err?.message
+          error: err && err.message
         })
         return
       }
     }
 
-    const traitEntries = Array.isArray(traitsPayload?.data) ? traitsPayload.data : []
+    const traitEntries = Array.isArray(traitsPayload && traitsPayload.data) ? traitsPayload.data : []
     if (!traitEntries.length) {
       skipped += 1
       return
@@ -2358,7 +2365,7 @@ async function importDynamoBasicInfoTraits (filename, dateFilter = null) {
       }
     } catch (err) {
       errors += 1
-      logError('Failed to upsert basic_info trait', { userId: targetUserId, error: err?.message })
+      logError('Failed to upsert basic_info trait', { userId: targetUserId, error: err && err.message })
     }
   }
 
@@ -2424,7 +2431,7 @@ async function importDynamoBasicInfoTraits (filename, dateFilter = null) {
         await processBasicInfoRecord(dataItem)
       } catch (err) {
         errors += 1
-        logWarn('Skipping trailing basic_info trait due to invalid JSON payload', { error: err?.message })
+        logWarn('Skipping trailing basic_info trait due to invalid JSON payload', { error: err && err.message })
       }
     }
   }

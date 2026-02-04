@@ -2,6 +2,8 @@
  * This service provides operations of statistics.
  */
 
+/* global BigInt */
+
 const _ = require('lodash')
 const Joi = require('joi')
 const config = require('config')
@@ -16,7 +18,7 @@ const skillsPrisma = prismaManager.getSkillsClient()
 const stringifyForLog = (value) => {
   try {
     const serialized = JSON.stringify(value, (_, val) => {
-      if (typeof val === 'bigint') {
+      if (Object.prototype.toString.call(val) === '[object BigInt]') {
         return val.toString()
       }
       if (val instanceof Date) {
@@ -52,6 +54,10 @@ const SKILL_LEVEL_WEIGHTS = {
 }
 
 const DEFAULT_SKILL_SCORE_DEDUCTION = -0.04
+
+const BULK_IDENTIFIER_MAX_LENGTH = 256
+const BULK_EMAIL_REGEX = /^[+_A-Za-z0-9-]+(\.[+_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9]+)*(\.[A-Za-z]{2,}$)/
+const BULK_HANDLE_REGEX = /^[-A-Za-z0-9_.`{}[\]]+$/
 
 const monthsAgo = (n) => {
   const date = new Date()
@@ -126,6 +132,145 @@ function omitMemberAttributes (currentUser, query, allowedValues) {
     fields = _.without(fields, ...config.COMMUNICATION_SECURE_FIELDS)
   }
   return fields
+}
+
+function parseCsvLine (line) {
+  const fields = []
+  let field = ''
+  let inQuotes = false
+  let justClosedQuote = false
+
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i]
+    if (inQuotes) {
+      if (char === '"') {
+        if (line[i + 1] === '"') {
+          field += '"'
+          i += 1
+        } else {
+          inQuotes = false
+          justClosedQuote = true
+        }
+      } else {
+        field += char
+      }
+      continue
+    }
+
+    if (justClosedQuote) {
+      if (char === ',') {
+        fields.push(field)
+        field = ''
+        justClosedQuote = false
+      } else if (/\s/.test(char)) {
+        continue
+      } else {
+        return { valid: false, fields: [] }
+      }
+      continue
+    }
+
+    if (char === ',') {
+      fields.push(field)
+      field = ''
+      continue
+    }
+
+    if (char === '"') {
+      if (field.trim().length === 0) {
+        field = ''
+        inQuotes = true
+      } else {
+        return { valid: false, fields: [] }
+      }
+      continue
+    }
+
+    field += char
+  }
+
+  if (inQuotes) {
+    return { valid: false, fields: [] }
+  }
+
+  fields.push(field)
+  return { valid: true, fields }
+}
+
+function containsControlChars (value) {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i)
+    if (code < 32 || code === 127) {
+      return true
+    }
+  }
+  return false
+}
+
+function isValidBulkIdentifier (value) {
+  if (!value) {
+    return false
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return false
+  }
+
+  if (trimmed.length > BULK_IDENTIFIER_MAX_LENGTH) {
+    return false
+  }
+
+  if (containsControlChars(trimmed)) {
+    return false
+  }
+
+  if (/\s/.test(trimmed)) {
+    return false
+  }
+
+  if (trimmed.includes('@')) {
+    return BULK_EMAIL_REGEX.test(trimmed)
+  }
+
+  return BULK_HANDLE_REGEX.test(trimmed)
+}
+
+function normalizeBulkIdentifiers (rawIdentifiers) {
+  const normalized = []
+
+  for (const rawIdentifier of rawIdentifiers) {
+    if (rawIdentifier == null) {
+      throw new errors.ForbiddenError('Invalid file format. Expected CSV or one handle/email per line.')
+    }
+
+    const line = String(rawIdentifier).replace(/^\uFEFF/, '').trim()
+    if (!line) {
+      continue
+    }
+
+    if (containsControlChars(line)) {
+      throw new errors.ForbiddenError('Invalid file format. Expected CSV or one handle/email per line.')
+    }
+
+    const parsed = parseCsvLine(line)
+    if (!parsed.valid || parsed.fields.length === 0) {
+      throw new errors.ForbiddenError('Invalid file format. Expected CSV or one handle/email per line.')
+    }
+
+    const firstColumn = parsed.fields[0].replace(/^\uFEFF/, '').trim()
+    if (!isValidBulkIdentifier(firstColumn)) {
+      throw new errors.ForbiddenError('Invalid file format. Expected CSV or one handle/email per line.')
+    }
+
+    normalized.push(firstColumn)
+  }
+
+  if (normalized.length === 0) {
+    throw new errors.BadRequestError('identifiers is required and must be a non-empty array')
+  }
+
+  return normalized
 }
 /**
  * Search members.
@@ -603,6 +748,137 @@ searchMembersBySkills.schema = {
 }
 
 /**
+ * Bulk search members by handle or email.
+ * @param {Object} currentUser the user who performs operation
+ * @param {Object} data the request body data
+ * @returns {Object} the bulk search result
+ */
+async function bulkSearch (currentUser, data) {
+  const identifiers = _.get(data, 'identifiers')
+  if (!_.isArray(identifiers) || identifiers.length === 0) {
+    throw new errors.BadRequestError('identifiers is required and must be a non-empty array')
+  }
+
+  const normalizedIdentifiers = normalizeBulkIdentifiers(identifiers)
+  if (normalizedIdentifiers.length > 1000) {
+    throw new errors.BadRequestError('identifiers must not exceed 1000 items')
+  }
+
+  const logContext = _.omitBy({
+    identifiersCount: normalizedIdentifiers.length,
+    isMachine: currentUser && currentUser.isMachine
+  }, _.isUndefined)
+  logger.debug(`bulkSearch: received ${stringifyForLog(logContext)}`)
+
+  const hasEmailIdentifier = normalizedIdentifiers.some(identifier => _.includes(_.trim(identifier), '@'))
+  if (hasEmailIdentifier) {
+    if (currentUser == null) {
+      throw new errors.UnauthorizedError('Authentication token is required to query users by email')
+    }
+    if (currentUser.isMachine) {
+      const allowedScopes = [config.SCOPES.MEMBERS.READ, config.SCOPES.MEMBERS.ALL]
+      if (!helper.checkIfExists(allowedScopes, currentUser.scopes || [])) {
+        throw new errors.ForbiddenError('read:user_profiles scope is required to query users by email')
+      }
+    } else if (!helper.hasSearchByEmailRole(currentUser)) {
+      throw new errors.BadRequestError('Additional role is required to query users by email')
+    }
+  }
+
+  try {
+    const trimmedIdentifiers = normalizedIdentifiers.map(identifier => _.trim(identifier))
+    const handleIdentifiers = []
+    const emailIdentifiers = []
+
+    for (const identifier of trimmedIdentifiers) {
+      if (_.includes(identifier, '@')) {
+        emailIdentifiers.push(identifier)
+      } else {
+        handleIdentifiers.push(identifier.toLowerCase())
+      }
+    }
+
+    const orConditions = []
+    const uniqueHandles = _.uniq(handleIdentifiers)
+    const uniqueEmails = _.uniq(emailIdentifiers)
+    if (uniqueHandles.length > 0) {
+      orConditions.push({ handleLower: { in: uniqueHandles } })
+    }
+    if (uniqueEmails.length > 0) {
+      for (const email of uniqueEmails) {
+        orConditions.push({ email: { equals: email, mode: 'insensitive' } })
+      }
+    }
+
+    const members = orConditions.length === 0
+      ? []
+      : await prisma.member.findMany({
+        where: {
+          OR: orConditions
+        },
+        select: {
+          userId: true,
+          handleLower: true,
+          email: true
+        }
+      })
+
+    const membersByHandle = new Map()
+    const membersByEmail = new Map()
+    for (const member of members) {
+      if (member.handleLower) {
+        membersByHandle.set(member.handleLower, member)
+      }
+      if (member.email) {
+        membersByEmail.set(member.email.toLowerCase(), member)
+      }
+    }
+
+    const results = trimmedIdentifiers.map((identifier, index) => {
+      let member = null
+      if (_.includes(identifier, '@')) {
+        member = membersByEmail.get(identifier.toLowerCase()) || null
+      } else {
+        member = membersByHandle.get(identifier.toLowerCase()) || null
+      }
+
+      return {
+        input: normalizedIdentifiers[index],
+        userId: member ? helper.bigIntToNumber(member.userId) : null,
+        matched: !!member
+      }
+    })
+
+    const seenUserIds = new Set()
+    const dedupedResults = results.filter((result) => {
+      if (result.userId == null) {
+        return true
+      }
+
+      const userIdKey = String(result.userId)
+      if (seenUserIds.has(userIdKey)) {
+        return false
+      }
+      seenUserIds.add(userIdKey)
+      return true
+    })
+
+    return { results: dedupedResults }
+  } catch (err) {
+    logger.error('bulkSearch: error searching members')
+    logger.error(err)
+    throw new errors.ServiceUnavailableError('Failed to search members', err)
+  }
+}
+
+bulkSearch.schema = {
+  currentUser: Joi.any(),
+  data: Joi.object().keys({
+    identifiers: Joi.array().items(Joi.string()).min(1).max(1000).required()
+  }).required()
+}
+
+/**
  * members autocomplete.
  * @param {Object} currentUser the user who performs operation
  * @param {Object} query the query parameters
@@ -682,7 +958,7 @@ async function autocompleteByHandlePrefix (currentUser, term) {
     where: {
       handleLower: {
         startsWith: normalizedTerm.toLowerCase()
-      },
+      }
     },
     select: {
       userId: true,
@@ -734,6 +1010,7 @@ autocompleteByHandlePrefix.schema = {
 module.exports = {
   searchMembers,
   searchMembersBySkills,
+  bulkSearch,
   autocomplete,
   autocompleteByHandlePrefix
 }

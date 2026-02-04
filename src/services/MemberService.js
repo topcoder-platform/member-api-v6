@@ -19,20 +19,30 @@ const fileType = require('file-type')
 const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
+const { htmlToText } = require('../common/htmlUtils')
+const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const identityPrismaManager = require('../common/identityPrisma')
 const vanillaDb = require('../common/vanillaDb')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
+const challengesPrisma = prismaManager.getChallengesClient()
+const academyPrisma = prismaManager.getAcademyClient()
+const resourcesPrisma = prismaManager.getResourcesClient()
+const engagementsPrisma = prismaManager.getEngagementsClient()
+const profilePDFService = require('./ProfilePDFService')
+const request = require('request')
+const cityTimezones = require('city-timezones')
+const moment = require('moment-timezone')
 
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified', 'recentActivity']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
-  'newEmailVerifyTokenDate', 'handleSuggest']
+  'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
 
 const HANDLE_MIN_LENGTH = 3
 const HANDLE_MAX_LENGTH = 64
@@ -72,6 +82,13 @@ function cleanMember (currentUser, member, selectFields) {
     })
   }
 
+  if (response.skills) {
+    response.skills.forEach((skill) => {
+      skill.createdAt = undefined
+      skill.updatedAt = undefined
+    })
+  }
+
   return response
 }
 
@@ -81,6 +98,11 @@ function omitMemberAttributes (currentUser, mb) {
   // remove identifiable info fields if user is not admin, not M2M and not member himself
   const canManageMember = helper.canManageMember(currentUser, mb)
   const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle && mb.handleLower &&
+    currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
@@ -89,6 +111,17 @@ function omitMemberAttributes (currentUser, mb) {
   }
   if (!canManageMember && !hasAutocompleteRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
+    if (res.phones) {
+      delete res.phones
+    }
+  }
+  // Remove identityVerified if user doesn't have permission
+  if (!canSeeIdentityVerified && res.identityVerified !== undefined) {
+    delete res.identityVerified
+  }
+
+  if (!canSeeRecentActivity && res.recentActivity !== undefined) {
+    delete res.recentActivity
   }
 
   return res
@@ -128,15 +161,56 @@ async function getMemberSkills (userId) {
 }
 
 /**
+ * Compute member recent activity with user id
+ * @param {BigInt} userId prisma BigInt userId
+ * @returns {Boolean} true if member has recent activity in last 3 months
+ */
+async function getMemberRecentActivity (userId) {
+  try {
+    const threeMonthsAgo = new Date()
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+    const recent = await resourcesPrisma.resource.findFirst({
+      where: {
+        memberId: String(userId),
+        resourceRole: {
+          name: { in: ['Submitter', 'Copilot', 'Reviewer'] }
+        },
+        createdAt: { gte: threeMonthsAgo }
+      }
+    })
+
+    return !!recent
+  } catch (err) {
+    console.error(`Failed to query recent activity for userId: ${userId}`, err)
+    return false
+  }
+}
+
+const countryCodes = countryCallingCodes.codes || []
+
+/**
+ * Get country display name from ISO 3166-1 alpha-3 code (e.g. ALB -> Albania)
+ * @param {string} isoCode3 - 3-letter country code (e.g. homeCountryCode)
+ * @returns {string|null} country name or null if not found
+ */
+function getCountryNameFromCode (isoCode3) {
+  if (!isoCode3 || typeof isoCode3 !== 'string') return null
+  const code = isoCode3.trim().toUpperCase()
+  const item = countryCodes.find(c => (c.isoCode3 || '').toUpperCase() === code)
+  return item ? item.country : null
+}
+
+/**
  * Get member profile data.
- * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
+ * @param {Array} allowedFields optional array of allowed fields (defaults to MEMBER_FIELDS)
  * @returns {Object} the member profile data
  */
-async function getMember (currentUser, handle, query) {
+async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
   // validate and parse query parameter
-  const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
+  const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
 
   const prismaFilter = {
     where: {
@@ -150,19 +224,109 @@ async function getMember (currentUser, handle, query) {
   if (_.includes(selectFields, 'addresses')) {
     prismaFilter.include.addresses = true
   }
+  if (_.includes(selectFields, 'phones')) {
+    prismaFilter.include.phones = true
+  }
 
   // To keep original business logic, let's use findMany
   const member = await prisma.member.findUnique(prismaFilter)
   if (!member || !member.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
   }
-  // convert members data structure to response
-  prismaHelper.convertMember(member)
+
   // get member skills
   if (_.includes(selectFields, 'skills')) {
     member.skills = await getMemberSkills(member.userId)
   }
 
+  return member
+}
+
+/**
+ * Get member profile data.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {Object} query the query parameters
+ * @returns {Object} the member profile data
+ */
+async function getMember (currentUser, handle, query) {
+  // Check if user has permission to see phones
+  // Phones are visible to: self, admin, M2M, or users with autocomplete roles (Talent Manager, etc.)
+  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle &&
+    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+
+  const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
+  // Identity verified field has same access control as phones
+  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
+
+  const threeMonthsAgo = new Date()
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3)
+
+  // Conditionally add phones and recent activity to query if user has permission
+  const modifiedQuery = { ...query }
+  if (canSeePhones) {
+    // If fields are specified, check if phones is already included
+    if (modifiedQuery.fields) {
+      const fieldsArray = modifiedQuery.fields.split(',').map(f => f.trim())
+      if (!_.includes(fieldsArray, 'phones')) {
+        modifiedQuery.fields = `${modifiedQuery.fields},phones`
+      }
+    } else {
+      // If no fields specified, add phones to the default fields
+      modifiedQuery.fields = MEMBER_FIELDS.join(',') + ',phones'
+    }
+  }
+
+  const member = await getMemberData(handle, modifiedQuery, allowedFields)
+
+  if (!member || !member.userId) {
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
+  }
+  // convert members data structure to response
+  prismaHelper.convertMember(member)
+
+  // Query identity verification status from finance schema if user has permission
+  if (canSeeIdentityVerified) {
+    try {
+      const financePrisma = prismaManager.getFinanceClient()
+      const userIdString = String(helper.bigIntToNumber(member.userId))
+      const verification = await financePrisma.user_identity_verification_associations.findFirst({
+        where: {
+          user_id: userIdString,
+          verification_status: 'ACTIVE'
+        }
+      })
+      member.identityVerified = verification !== null
+    } catch (err) {
+      // If finance schema query fails, log error but don't fail the request
+      logger.error(`Failed to query identity verification for user ${member.userId}: ${err.message}`)
+      member.identityVerified = false
+    }
+  }
+
+  // get member recent activity
+  if (canSeeRecentActivity) {
+    member.recentActivity = await getMemberRecentActivity(member.userId)
+  }
+
+  // validate and parse query parameter
+  const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
+  // Add phones to selectFields if user has permission
+  if (canSeePhones && !_.includes(selectFields, 'phones')) {
+    selectFields.push('phones')
+  }
+  // add recent activity to selectFields if permitted user
+  if (_.includes(selectFields, 'recentActivity') && canSeeRecentActivity) {
+    selectFields.push('recentActivity')
+  }
+  // Add identityVerified to selectFields if user has permission
+  if (canSeeIdentityVerified && !_.includes(selectFields, 'identityVerified')) {
+    selectFields.push('identityVerified')
+  }
   // clean member fields according to current user
   return cleanMember(currentUser, member, selectFields)
 }
@@ -188,18 +352,14 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs' }
-  const member = await getMember(currentUser, handle, memberFields)
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs,availableForGigsLastUpdateDate,lastProfileConfirmationDate,updatedAt,addresses' }
+  const member = await getMemberData(handle, memberFields)
 
   // Used for calculating the percentComplete
   let completeItems = 0
 
-  // Magic number - 6 total items for profile "completeness"
-  // TODO: Bump this back up to 7 once verification is implemented
-  const totalItems = 6
-
   let response = {}
-  response.userId = member.userId
+  response.userId = helper.bigIntToNumber(member.userId)
   response.handle = member.handle
   let data = {}
 
@@ -210,28 +370,41 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
   // TODO: Turn this back on once we have verification flow implemented elsewhere
   // data.verified = false
-
   data.skills = false
   data.gigAvailability = false
   data.bio = false
   data.profilePicture = false
   data.workHistory = false
   data.education = false
+  data.location = false
+
+  const totalItems = Object.keys(data).length
+
+  data.skillsLastUpdateDate = undefined
+  data.gigAvailabilityLastUpdateDate = undefined
+  data.workHistoryLastUpdateDate = undefined
+  data.educationLastUpdateDate = undefined
+  data.locationLastUpdateDate = undefined
+  data.profileLastUpdateDate = new Date(member.updatedAt).toISOString()
+  data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined
 
   if (member.availableForGigs != null) {
     completeItems += 1
     data.gigAvailability = true
+    data.gigAvailabilityLastUpdateDate = member.availableForGigsLastUpdateDate || undefined
   }
 
   _.forEach(memberTraits, (item) => {
-    if (item.traitId === 'education' && item.traits.data.length > 0 && data.education === false) {
+    if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
       completeItems += 1
       data.education = true
+      data.educationLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
 
-    if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory === false) {
+    if (item.traitId === 'work' && item.traits.data.length > 0 && !data.workHistory) {
       completeItems += 1
       data.workHistory = true
+      data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
   })
   // Push on the incomplete traits for picking a random toast to show
@@ -266,6 +439,11 @@ async function getProfileCompleteness (currentUser, handle, query) {
   if (member.skills && member.skills.length >= 3) {
     completeItems += 1
     data.skills = true
+
+    const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
+      Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
+    ), new Date(0))
+    data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
   } else {
     showToast.push('skills')
   }
@@ -275,6 +453,20 @@ async function getProfileCompleteness (currentUser, handle, query) {
     data.profilePicture = true
   } else {
     showToast.push('profilePicture')
+  }
+
+  if (member.addresses && member.addresses.length) {
+    completeItems += 1
+    data.location = true
+
+    const addrDates = member.addresses
+      .map(s => s.updatedAt || s.createdAt)
+      .filter(Boolean)
+      .map(d => new Date(d).getTime())
+
+    if (addrDates.length > 0) {
+      data.locationLastUpdateDate = new Date(Math.max(...addrDates)).toISOString()
+    }
   }
 
   // Calculate the percent complete and round to 2 decimal places
@@ -362,9 +554,32 @@ async function updateMember (currentUser, handle, query, data) {
     data.newEmailVerifyToken = uuid()
     data.newEmailVerifyTokenDate = new Date(new Date().getTime() + Number(config.VERIFY_TOKEN_EXPIRATION) * 60000).toISOString()
   }
+  const phoneRegex = constants.PHONE_REGEX
+  if (data.phones !== undefined) {
+    if (!Array.isArray(data.phones)) {
+      throw new errors.BadRequestError('phones must be an array')
+    }
+    for (const phone of data.phones) {
+      if (!phone.type || typeof phone.type !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a type (string)')
+      }
+      if (!phone.number || typeof phone.number !== 'string') {
+        throw new errors.BadRequestError('Each phone must have a number (string)')
+      }
+      if (!phoneRegex.test(phone.number)) {
+        throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
+      }
+    }
+  }
+
   // set updated fields in data
   data.updatedAt = new Date()
   data.updatedBy = operatorId
+
+  // Track availableForGigs changes
+  if (data.availableForGigs !== undefined) {
+    data.availableForGigsLastUpdateDate = new Date()
+  }
 
   // open a transaction to handle update
   const result = await prisma.$transaction(async (tx) => {
@@ -388,10 +603,33 @@ async function updateMember (currentUser, handle, query, data) {
     // clear addresses so it doesn't affect prisma.udpate
     delete data.addresses
 
+    const phonesWereUpdated = data.phones !== undefined
+    if (phonesWereUpdated) {
+      await tx.memberPhone.deleteMany({
+        where: { userId: member.userId }
+      })
+      if (data.phones.length > 0) {
+        await tx.memberPhone.createMany({
+          data: _.map(data.phones, t => ({
+            type: t.type,
+            number: t.number,
+            userId: member.userId,
+            createdBy: operatorId
+          }))
+        })
+      }
+    }
+    delete data.phones
+
+    const includeFields = { addresses: true }
+    if (_.includes(selectFields, 'phones') || phonesWereUpdated) {
+      includeFields.phones = true
+    }
+
     return tx.member.update({
       where: { userId: member.userId },
       data,
-      include: { addresses: true }
+      include: includeFields
     })
   })
 
@@ -436,6 +674,8 @@ updateMember.schema = {
   data: Joi.object().keys({
     handle: Joi.forbidden(),
     handleLower: Joi.forbidden(),
+    handle: Joi.forbidden(),
+    handleLower: Joi.forbidden(),
     firstName: Joi.string(),
     lastName: Joi.string(),
     description: Joi.string().allow(''),
@@ -449,6 +689,10 @@ updateMember.schema = {
       zip: Joi.string().allow('').allow(null),
       stateCode: Joi.string().allow('').allow(null),
       type: Joi.string()
+    })),
+    phones: Joi.array().items(Joi.object().keys({
+      type: Joi.string().required(),
+      number: Joi.string().regex(constants.PHONE_REGEX, 'E.164 format').required()
     })),
     verified: Joi.bool(),
     country: Joi.string(),
@@ -477,8 +721,7 @@ async function updateHandle (currentUser, handle, query, data) {
     throw new errors.ForbiddenError('You are not allowed to update the member handle.')
   }
 
-  const rawHandle = data.newHandle || ''
-  const newHandle = rawHandle.trim()
+  const newHandle = (data.newHandle || '').trim()
   if (!newHandle) {
     throw new errors.BadRequestError('newHandle is required')
   }
@@ -486,10 +729,10 @@ async function updateHandle (currentUser, handle, query, data) {
   const selectFields = helper.parseCommaSeparatedString(query.fields, MEMBER_FIELDS) || MEMBER_FIELDS
 
   if (newHandle === member.handle) {
-    return getMember(currentUser, handle, query)
+    const currentMember = await getMemberData(handle, query, MEMBER_FIELDS)
+    prismaHelper.convertMember(currentMember)
+    return cleanMember(currentUser, currentMember, selectFields)
   }
-
-  validateHandleRules(newHandle, rawHandle)
 
   const newHandleLower = newHandle.toLowerCase()
   const existingMember = await prisma.member.findUnique({
@@ -507,12 +750,6 @@ async function updateHandle (currentUser, handle, query, data) {
   if (existingIdentity && Number(existingIdentity.user_id) !== identityUserId) {
     throw new errors.BadRequestError(`Handle "${newHandle}" is already registered`)
   }
-  const existingSecurityUser = await identityPrisma.security_user.findUnique({
-    where: { user_id: newHandle }
-  })
-  if (existingSecurityUser && Number(existingSecurityUser.login_id) !== identityUserId) {
-    throw new errors.BadRequestError(`Handle "${newHandle}" is already registered`)
-  }
 
   const vanillaPool = vanillaDb.getVanillaPool()
   const now = new Date()
@@ -522,7 +759,7 @@ async function updateHandle (currentUser, handle, query, data) {
   let vanillaUpdated = false
 
   try {
-    await updateIdentityHandle(identityUserId, member.handle, newHandle, now)
+    await updateIdentityHandle(identityUserId, newHandle, now)
     identityUpdated = true
 
     updatedMember = await prisma.member.update({
@@ -537,12 +774,8 @@ async function updateHandle (currentUser, handle, query, data) {
     })
     memberUpdated = true
 
-    try {
-      await updateVanillaHandle(member.handle, newHandle, vanillaPool)
-      vanillaUpdated = true
-    } catch (err) {
-      logger.warn(`Vanilla handle update skipped for ${member.userId}: ${err.message}`)
-    }
+    await updateVanillaHandle(member.handle, newHandle, vanillaPool)
+    vanillaUpdated = true
   } catch (err) {
     if (vanillaUpdated) {
       try {
@@ -568,7 +801,7 @@ async function updateHandle (currentUser, handle, query, data) {
     }
     if (identityUpdated) {
       try {
-        await updateIdentityHandle(identityUserId, newHandle, member.handle, new Date())
+        await updateIdentityHandle(identityUserId, member.handle, new Date())
       } catch (rollbackErr) {
         logger.error(`Failed to rollback identity handle update for ${member.userId}: ${rollbackErr.message}`)
       }
@@ -870,40 +1103,25 @@ async function updateVanillaHandle (oldHandle, newHandle, pool) {
   }
 }
 
-async function updateIdentityHandle (userId, oldHandle, newHandle, timestamp) {
+async function updateIdentityHandle (userId, handle, timestamp) {
   const identityPrisma = identityPrismaManager.getIdentityClient()
-  const lowerHandle = newHandle.toLowerCase()
+  const lowerHandle = handle.toLowerCase()
   const updatedAt = timestamp || new Date()
 
+  let userResult
   try {
-    await identityPrisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { user_id: userId },
-        data: {
-          handle: newHandle,
-          handle_lower: lowerHandle,
-          modify_date: updatedAt
-        }
-      })
-
-      const securityUserResult = await tx.security_user.updateMany({
-        where: {
-          login_id: userId,
-          user_id: oldHandle
-        },
-        data: {
-          user_id: newHandle,
-          modify_date: updatedAt
-        }
-      })
-
-      if (securityUserResult.count === 0) {
-        throw new Error(`Security user not updated for user ${userId}`)
-      }
-    })
+    userResult = await identityPrisma.$executeRaw`
+      UPDATE identity."user"
+      SET handle=${handle}, handle_lower=${lowerHandle}, modify_date=${updatedAt}
+      WHERE user_id=${userId}
+    `
   } catch (err) {
     logger.error(`Failed to update identity handle for user ${userId}: ${err.message}`)
     throw err
+  }
+
+  if (userResult === 0) {
+    throw new Error(`Identity user not updated for user ${userId}`)
   }
 }
 
@@ -952,15 +1170,730 @@ deleteMember.schema = {
   }).required()
 }
 
+/**
+ * Confirm member profile data.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Object} the updated member profile data
+ */
+async function confirmProfileData (currentUser, handle) {
+  const member = await helper.getMemberByHandle(handle)
+  // check authorization - only the profile owner or admin can confirm
+  if (!helper.canManageMember(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to confirm this member profile.')
+  }
+
+  // Update the lastProfileConfirmationDate
+  const result = await prisma.member.update({
+    where: { userId: member.userId },
+    data: {
+      lastProfileConfirmationDate: new Date(),
+      updatedAt: new Date(),
+      updatedBy: currentUser.userId || currentUser.sub
+    },
+    include: { addresses: true }
+  })
+
+  // convert prisma data to response format
+  prismaHelper.convertMember(result)
+
+  // clean member fields according to current user
+  return cleanMember(currentUser, result, MEMBER_FIELDS)
+}
+
+confirmProfileData.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required()
+}
+
+/**
+ * Normalize badge name for grouping: strip year/digits after TCO (e.g. TCO18, TCO19 -> TCO)
+ * so "TCO18 Marathon Champion" and "TCO19 Marathon Champion" group as "TCO Marathon Champion"
+ * @param {string} badgeName - raw or html-stripped badge name
+ * @returns {string} normalized name for map key and display
+ */
+function normalizeAchievementName (badgeName) {
+  if (!badgeName || typeof badgeName !== 'string') return ''
+  return badgeName
+    .replace(/\bTCO\d+\b/gi, 'TCO')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Fetch gamification achievements for a member
+ * @param {Number} userId the member userId
+ * @returns {Promise<String>} formatted achievements string
+ */
+async function fetchGamificationAchievements (userId) {
+  try {
+    if (!config.GAMIFICATION_API_URL) {
+      logger.warn(`GAMIFICATION_API_URL is not configured for user ${userId}`)
+      return ''
+    }
+    const gamificationApiUrl = config.GAMIFICATION_API_URL
+    let token
+    try {
+      token = await helper.getM2MToken()
+    } catch (tokenError) {
+      logger.warn(`Cannot get M2M token for gamification API for user ${userId}: ${tokenError.message}. Achievements will be empty.`)
+      return ''
+    }
+
+    if (!token) {
+      logger.warn(`M2M token is null/undefined for gamification API for user ${userId}`)
+      return ''
+    }
+
+    const gamificationUrl = `${gamificationApiUrl}/badges/assigned/${userId}`
+
+    if (!gamificationUrl || typeof gamificationUrl !== 'string' || !userId) {
+      logger.error(`Invalid gamification URL for user ${userId}: gamificationUrl=${gamificationUrl}, userId=${userId}`)
+      return ''
+    }
+
+    const finalGamificationUrl = String(gamificationUrl || '').trim()
+    if (!finalGamificationUrl || finalGamificationUrl === 'undefined' || finalGamificationUrl.includes('undefined') || finalGamificationUrl.length === 0) {
+      logger.error(`Invalid final gamification URL for user ${userId}: finalUrl="${finalGamificationUrl}", baseUrl="${gamificationApiUrl}", userId=${userId}`)
+      return ''
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        request({
+          url: finalGamificationUrl,
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }, (error, response, body) => {
+          if (error) {
+            logger.warn(`Failed to fetch gamification achievements for user ${userId}: ${error.message}`)
+            resolve('')
+            return
+          }
+          if (response.statusCode !== 200) {
+            logger.warn(`Gamification API returned status ${response.statusCode} for user ${userId}`)
+            resolve('')
+            return
+          }
+          try {
+            const data = JSON.parse(body)
+            // Format achievements: count multiples and join with " | "
+            // Response structure: { rows: [...], count: ... }
+            const achievementMap = {}
+            const badges = data.rows || []
+
+            logger.debug(`Gamification API response for user ${userId}: rows count=${badges.length}, hasRows=${!!data.rows}`)
+
+            badges.forEach(badge => {
+              const orgBadge = badge.org_badge
+              if (orgBadge && orgBadge.badge_name) {
+                // Check if badge is active - handle both boolean and string values
+                const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
+                // Check status - case insensitive
+                const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
+
+                logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+
+                if (isActive && isActiveStatus) {
+                  const name = htmlToText(orgBadge.badge_name)
+                  const key = normalizeAchievementName(name)
+                  achievementMap[key] = (achievementMap[key] || 0) + 1
+                } else {
+                  logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+                }
+              } else {
+                logger.debug('Badge missing org_badge or badge_name:', { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
+              }
+            })
+
+            logger.debug(`Achievement map for user ${userId}:`, achievementMap)
+
+            const achievements = Object.entries(achievementMap)
+              .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
+              .join(' | ')
+
+            logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
+            resolve(achievements)
+          } catch (parseError) {
+            logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
+            resolve('')
+          }
+        })
+      } catch (requestError) {
+        logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}`)
+        resolve('')
+      }
+    })
+  } catch (error) {
+    logger.warn(`Error fetching gamification achievements for user ${userId}: ${error.message}`)
+    return ''
+  }
+}
+
+/**
+ * Fetch completed certifications and courses from learning-paths-api
+ * @param {Number} userId the member userId
+ * @returns {Promise<Object>} object with certifications and courses arrays
+ */
+async function fetchCertificationsAndCourses (userId) {
+  try {
+    if (!config.LEARNING_PATHS_API_URL) {
+      logger.warn(`LEARNING_PATHS_API_URL is not configured for user ${userId}`)
+      return { certifications: [], courses: [] }
+    }
+    const learningPathsApiUrl = config.LEARNING_PATHS_API_URL
+    let token
+    try {
+      token = await helper.getM2MToken()
+    } catch (tokenError) {
+      logger.warn(`Cannot get M2M token for user ${userId}: ${tokenError.message}. Certifications and courses will be empty.`)
+      return { certifications: [], courses: [] }
+    }
+
+    if (!token) {
+      logger.warn(`M2M token is null/undefined for user ${userId}`)
+      return { certifications: [], courses: [] }
+    }
+
+    const learningPathsUrl = `${learningPathsApiUrl}/completed-certifications/${userId}`
+
+    if (!learningPathsUrl || typeof learningPathsUrl !== 'string' || !userId) {
+      logger.error(`Invalid learning-paths URL for user ${userId}: learningPathsUrl=${learningPathsUrl}, userId=${userId}`)
+      return { certifications: [], courses: [] }
+    }
+
+    // Double-check URL is valid before making request
+    const finalUrl = String(learningPathsUrl || '').trim()
+    if (!finalUrl || finalUrl === 'undefined' || finalUrl.includes('undefined') || finalUrl.length === 0) {
+      logger.error(`Invalid final URL constructed for user ${userId}: finalUrl="${finalUrl}", baseUrl="${learningPathsApiUrl}", userId=${userId}`)
+      return { certifications: [], courses: [] }
+    }
+
+    return new Promise((resolve, reject) => {
+      try {
+        request({
+          url: finalUrl,
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }, (error, response, body) => {
+          if (error) {
+            logger.warn(`Failed to fetch certifications for user ${userId}: ${error.message}`)
+            resolve({ certifications: [], courses: [] })
+            return
+          }
+          if (response.statusCode !== 200) {
+            logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}`)
+            resolve({ certifications: [], courses: [] })
+            return
+          }
+          try {
+            const data = JSON.parse(body)
+
+            // Process certifications
+            const certifications = (data.enrollments || [])
+              .filter(e => e.status === 'completed' && e.topcoderCertification)
+              .map(e => `${e.topcoderCertification.title} - Topcoder Academy`)
+
+            // Process courses
+            const courses = (data.courses || [])
+              .map(c => {
+                const title = c.certificationTitle || c.certification || 'Course'
+                return `${title} - Topcoder Academy`
+              })
+
+            resolve({ certifications, courses })
+          } catch (parseError) {
+            logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
+            resolve({ certifications: [], courses: [] })
+          }
+        })
+      } catch (requestError) {
+        logger.error(`Error creating request for user ${userId}: ${requestError.message}`)
+        resolve({ certifications: [], courses: [] })
+      }
+    })
+  } catch (error) {
+    logger.warn(`Error fetching certifications for user ${userId}: ${error.message}`)
+    return { certifications: [], courses: [] }
+  }
+}
+
+/**
+ * Get member timezone based on city
+ * @param {Object} memberData the member data
+ * @returns {String|null} timezone abbreviation or null if not found
+ */
+function getMemberTimezone (memberData) {
+  const city = memberData && memberData.addresses && memberData.addresses[0]
+    ? memberData.addresses[0].city
+    : null
+  if (!city) return null
+
+  const cityTimezoneData = cityTimezones.lookupViaCity(city)
+  let memberTimezone = null
+
+  if (cityTimezoneData && cityTimezoneData.length) {
+    memberTimezone = cityTimezoneData[0].timezone
+  }
+
+  // Validate timezone exists
+  if (memberTimezone && moment.tz.zone(memberTimezone)) {
+    // Get abbreviation for display
+    return moment.tz(new Date(), memberTimezone).zoneAbbr()
+  }
+
+  return null
+}
+
+/**
+ * Get skill names by their IDs
+ * @param {Array<String>} skillIds array of skill UUIDs
+ * @returns {Promise<Object>} map of skillId -> skillName
+ */
+async function getSkillNamesByIds (skillIds) {
+  if (!skillIds || skillIds.length === 0) {
+    return {}
+  }
+
+  const skills = await skillsPrisma.skill.findMany({
+    where: { id: { in: skillIds } },
+    select: { id: true, name: true }
+  })
+
+  const skillMap = {}
+  skills.forEach(skill => {
+    skillMap[skill.id] = skill.name
+  })
+
+  return skillMap
+}
+
+/**
+ * Get member roles from identity database (role_assignment + role tables)
+ * @param {Number} userId the member userId
+ * @returns {Promise<String[]>} array of role names
+ */
+async function getMemberRoles (userId) {
+  try {
+    if (!config.IDENTITY_DB_URL) {
+      logger.warn('IDENTITY_DB_URL is not configured; cannot fetch member roles')
+      return []
+    }
+    const identityPrisma = identityPrismaManager.getIdentityClient()
+    const assignments = await identityPrisma.roleAssignment.findMany({
+      where: { subjectId: Number(userId), subjectType: 1 },
+      include: { role: true }
+    })
+    return (assignments || [])
+      .filter(a => a.role && a.role.name)
+      .map(a => a.role.name)
+  } catch (err) {
+    logger.warn(`Failed to fetch roles for user ${userId}: ${err.message}`)
+    return []
+  }
+}
+
+/**
+ * Aggregate all data needed for PDF generation
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Promise<Object>} aggregated PDF data
+ */
+async function aggregatePDFData (currentUser, handle) {
+  // Get base member data
+  const memberData = await getMember(currentUser, handle, {})
+  const userId = helper.bigIntToNumber(memberData.userId)
+
+  // Fetch traits (work, education, languages, basicInfo, personalization)
+  const traits = (await memberTraitService.getTraits(currentUser, handle, {})) || []
+  const workTraits = _.get(_.find(traits, { traitId: 'work' }), 'traits.data', [])
+  const educationTraits = _.get(_.find(traits, { traitId: 'education' }), 'traits.data', [])
+  const languageTraits = _.get(_.find(traits, { traitId: 'languages' }), 'traits.data', [])
+  const basicInfoTraits = _.get(_.find(traits, { traitId: 'basic_info' }), 'traits.data', [])
+
+  // Collect all skill GUIDs from work experiences for batch lookup
+  const allSkillIds = []
+  workTraits.forEach(work => {
+    if (work.associatedSkills && work.associatedSkills.length > 0) {
+      allSkillIds.push(...work.associatedSkills)
+    }
+  })
+
+  // Batch lookup all skill names
+  const skillNameMap = await getSkillNamesByIds([...new Set(allSkillIds)])
+
+  // Extract personalization trait to get shortBio (profileSelfTitle)
+  const personalizationTrait = _.find(traits, { traitId: 'personalization' })
+  const personalizationData = _.get(personalizationTrait, 'traits.data[0]', {})
+  const shortBio = personalizationData.profileSelfTitle || null
+
+  // Fetch skills from standardized-skills-api
+  const skills = await getMemberSkills(memberData.userId)
+
+  // Separate skills by display mode and verification status
+  const principalSkills = { verified: [], notVerified: [] }
+  const additionalSkills = { verified: [], notVerified: [] }
+
+  skills.forEach(skill => {
+    const isPrincipal = _.get(skill, 'displayMode.name') === 'principal'
+    const isVerified = _.some(_.get(skill, 'levels', []), level => level.name === 'verified')
+    const skillName = skill.name
+
+    if (isPrincipal) {
+      if (isVerified) {
+        principalSkills.verified.push(skillName)
+      } else {
+        principalSkills.notVerified.push(skillName)
+      }
+    } else {
+      if (isVerified) {
+        additionalSkills.verified.push(skillName)
+      } else {
+        additionalSkills.notVerified.push(skillName)
+      }
+    }
+  })
+
+  const specialRoles = []
+  const roleMap = {
+    'copilot': 'Copilot',
+    'administrator': 'Administrator',
+    'Talent Manager': 'Talent Manager',
+    'Gamification Admin': 'Gamification Admin',
+    'Self-Service Customer': 'Self-Service Customer',
+    'Topcoder User': 'Topcoder User',
+    'TCA Admin': 'TCA Admin',
+    'Payment Admin': 'Payment Admin',
+    'Payment Viewer': 'Payment Viewer',
+    'PaymentProvider Admin': 'PaymentProvider Admin',
+    'PaymentProvider Viewer': 'PaymentProvider Viewer',
+    'TaxForm Admin': 'TaxForm Admin',
+    'TaxForm Viewer': 'TaxForm Viewer',
+    'Topcoder Staff': 'Topcoder Staff',
+    'Project Manager': 'Project Manager',
+    'Connect Manager': 'Connect Manager'
+  }
+
+  const currentUserId = currentUser && (currentUser.userId || currentUser.sub)
+  const isSelf = currentUserId && String(currentUserId) === String(userId)
+
+  if (currentUser && (isSelf || helper.hasAdminRole(currentUser))) {
+    const memberRoles = await getMemberRoles(userId)
+    memberRoles.forEach(role => {
+      const roleName = roleMap[role.toLowerCase()]
+      if (roleName && !specialRoles.includes(roleName)) {
+        specialRoles.push(roleName)
+      }
+    })
+  }
+
+  // Fetch gamification achievements
+  const achievements = await fetchGamificationAchievements(userId)
+
+  // Fetch certifications and courses
+  const { certifications, courses } = await fetchCertificationsAndCourses(userId)
+
+  // Build status bar text (Active = has recent activity in last 3 months)
+  const statusBarItems = []
+  const hasRecentActivity = await getMemberRecentActivity(userId)
+  if (hasRecentActivity) {
+    statusBarItems.push('ACTIVE')
+  }
+  if (memberData.availableForGigs === true) {
+    statusBarItems.push('OPEN TO WORK')
+  }
+  const statusBarText = statusBarItems.join(' • ')
+
+  // Format dates
+  const formatDate = (date) => {
+    if (!date) return null
+    const d = new Date(date)
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const year = d.getFullYear()
+    return `${month}/${year}`
+  }
+
+  // Get member timezone
+  const timezone = getMemberTimezone(memberData)
+
+  const countryDisplayName = getCountryNameFromCode(memberData.homeCountryCode) || memberData.country || ''
+
+  return {
+    // Member basic info
+    member: {
+      ...memberData,
+      country: countryDisplayName,
+      statusBarText,
+      generatedOn: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+      timezone: timezone
+    },
+    // Work experience
+    workExperience: workTraits.map(work => ({
+      position: work.position,
+      company: work.companyName,
+      startDate: formatDate(work.startDate),
+      endDate: formatDate(work.endDate),
+      description: work.description,
+      skills: (work.associatedSkills || [])
+        .map(skillId => skillNameMap[skillId])
+        .filter(Boolean) // Remove any undefined (GUIDs without names)
+    })),
+    // Education
+    education: educationTraits.map(edu => ({
+      degree: edu.degree,
+      college: edu.collegeName,
+      endYear: edu.endYear ? String(edu.endYear) : null
+    })),
+    // Languages
+    languages: languageTraits.map(lang => lang.language).filter(Boolean),
+    // Basic info (including shortBio from personalization)
+    basicInfo: {
+      ...(basicInfoTraits[0] || {}),
+      shortBio: shortBio
+    },
+    // Skills
+    skills: {
+      principal: principalSkills,
+      additional: additionalSkills
+    },
+    // Topcoder activity
+    topcoderActivity: {
+      specialRole: specialRoles.length > 0 ? `Topcoder Special Role: ${specialRoles.join(', ')}` : null,
+      achievements: achievements
+    },
+    // Certifications and courses
+    certifications,
+    courses
+  }
+}
+
+/**
+ * Download member profile as PDF
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Stream} PDF stream
+ */
+async function downloadProfile (currentUser, handle) {
+  // Validate handle exists
+  const member = await helper.getMemberByHandle(handle)
+
+  // Check authorization
+  if (!helper.canDownloadProfile(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to download this member profile.')
+  }
+
+  // Aggregate all PDF data
+  const pdfData = await aggregatePDFData(currentUser, handle)
+
+  // Generate PDF stream
+  const pdfStream = await profilePDFService.generatePDF(pdfData)
+
+  return pdfStream
+}
+
+downloadProfile.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required()
+}
+
+/**
+ * Get a specific member skill by skill ID
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {String} skillId the skill ID
+ * @returns {Object} the member skill data
+ */
+async function getMemberSkill (currentUser, handle, skillId) {
+  // Get member data first to get userId
+  const member = await getMemberData(handle, {})
+
+  if (!member || !member.userId) {
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
+  }
+
+  // Check authorization
+  if (!helper.canDownloadProfile(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to view this member profile.')
+  }
+
+  const dbSkill = await skillsPrisma.userSkill.findFirst({
+    where: {
+      userId: helper.bigIntToNumber(member.userId),
+      skillId: skillId
+    },
+    include: {
+      ...prismaHelper.skillsIncludeParams,
+      skill: {
+        include: {
+          category: true,
+          skillEvents: {
+            where: {
+              userId: helper.bigIntToNumber(member.userId)
+            },
+            select: {
+              createdAt: true,
+              sourceId: true,
+              sourceType: {
+                select: { name: true }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+
+  if (!dbSkill) {
+    throw new errors.NotFoundError(`Skill with ID: "${skillId}" not found for member: "${handle}"`)
+  }
+
+  // Build and return the skill data
+  const [skill] = prismaHelper.buildMemberSkills([dbSkill])
+
+  // Replace lastSources IDs with fetched details
+  if (skill.activity) {
+    const fetchPromises = []
+
+    // Prepare challenge fetch
+    const challengeSources = _.get(skill, 'activity.challenge.sources', [])
+    if (challengeSources.length > 0) {
+      const challengeIds = challengeSources
+      fetchPromises.push(
+        challengesPrisma.Challenge.findMany({
+          where: { id: { in: challengeIds.slice(0, 3) } },
+          select: { id: true, name: true }
+        }).then(dbChallenges => {
+          const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
+          skill.activity.challenge = {
+            count: challengeIds.length,
+            lastSources: challengeIds
+              .map(id => challengeMap.get(id))
+              .filter(Boolean)
+          }
+        })
+      )
+    }
+
+    // Prepare certification fetch
+    const certificationSources = _.get(skill, 'activity.certification.sources', [])
+    if (certificationSources.length > 0) {
+      const certificationIds = certificationSources.filter(Boolean)
+      if (certificationIds.length > 0) {
+        fetchPromises.push(
+          academyPrisma.CertificationEnrollments.findMany({
+            where: { completionEventId: { in: certificationIds.slice(0, 3) } },
+            select: {
+              completionEventId: true,
+              TopcoderCertification: {
+                select: { dashedName: true, title: true }
+              }
+            }
+          }).then(dbCertifications => {
+            const certificationMap = new Map(dbCertifications.map(c => [
+              c.completionEventId,
+              {
+                completionEventId: c.completionEventId,
+                dashedName: _.get(c, 'TopcoderCertification.dashedName'),
+                title: _.get(c, 'TopcoderCertification.title')
+              }
+            ]))
+            skill.activity.certification = {
+              count: certificationIds.length,
+              lastSources: certificationIds
+                .map(id => certificationMap.get(id))
+                .filter(Boolean)
+            }
+          })
+        )
+      }
+    }
+
+    // Prepare course fetch
+    const courseSources = _.get(skill, 'activity.course.sources', [])
+    if (courseSources.length > 0) {
+      const courseIds = courseSources.filter(Boolean)
+      if (courseIds.length > 0) {
+        fetchPromises.push(
+          academyPrisma.FccCertificationProgresses.findMany({
+            where: { completionEventId: { in: courseIds.slice(0, 3) } },
+            select: {
+              certification: true,
+              completionEventId: true,
+              FccCourses: { select: { title: true } }
+            }
+          }).then(dbCourses => {
+            const courseMap = new Map(dbCourses.map(c => [
+              c.completionEventId,
+              {
+                completionEventId: c.completionEventId,
+                certification: c.certification,
+                title: _.get(c, 'FccCourses.title')
+              }
+            ]))
+            skill.activity.course = {
+              count: courseIds.length,
+              lastSources: courseIds
+                .map(id => courseMap.get(id))
+                .filter(Boolean)
+            }
+          })
+        )
+      }
+    }
+
+    // Prepare engagement fetch
+    const engagementSources = _.get(skill, 'activity.engagement.sources', [])
+    if (engagementSources.length > 0) {
+      const engagementIds = engagementSources.filter(Boolean)
+      if (engagementIds.length > 0) {
+        fetchPromises.push(
+          engagementsPrisma.EngagementAssignment.findMany({
+            where: { id: { in: engagementIds.slice(0, 3) } },
+            select: {
+              engagement: {
+                select: { title: true, id: true }
+              }
+            }
+          }).then(engagements => {
+            skill.activity.engagement = {
+              count: engagementIds.length,
+              lastSources: engagements.map(assignment => ({
+                id: assignment.engagement.id,
+                title: assignment.engagement.title
+              }))
+            }
+          })
+        )
+      }
+    }
+
+    // Fetch all sources in parallel
+    await Promise.all(fetchPromises)
+  }
+
+  return skill
+}
+
+getMemberSkill.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required(),
+  skillId: Joi.string().uuid().required()
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
   getMemberUserIdSignature,
+  getMemberSkill,
   updateMember,
   updateHandle,
   verifyEmail,
   uploadPhoto,
-  deleteMember
+  deleteMember,
+  confirmProfileData,
+  downloadProfile
 }
 
 logger.buildService(module.exports)

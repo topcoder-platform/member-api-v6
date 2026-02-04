@@ -12,7 +12,6 @@ const prismaManager = require('../common/prisma')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 const prismaHelper = require('../common/prismaHelper')
-const { v4: uuidv4 } = require('uuid')
 
 const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', 'updatedAt',
   'createdBy', 'updatedBy']
@@ -1747,8 +1746,6 @@ async function verifyMemberSkills (currentUser, handle, data) {
   if (!verifiedLevel || !verifiedLevel.id) {
     throw new errors.NotFoundError('Verified skill level not found')
   }
-
-  const operatorId = currentUser.handle || currentUser.sub
 
   // process each skill: upsert memberSkill and set levels to verified only
   for (const skillId of data.skillIds) {

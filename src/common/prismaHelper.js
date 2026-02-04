@@ -61,6 +61,10 @@ function convertMember (member) {
     member.addresses = _.map(member.addresses, d => _.omit(d,
       ['id', 'userId', ...auditFields]))
   }
+  if (member.phones) {
+    member.phones = _.map(member.phones, d => _.omit(d,
+      ['id', 'userId', ...auditFields]))
+  }
   member.verified = member.verified || false
 }
 
@@ -78,7 +82,7 @@ function buildMemberSkills (skillList) {
 
   if (!isStandardized) {
     return _.map(skillList, item => {
-      const ret = _.pick(item.skill, ['id', 'name'])
+      const ret = _.pick(item.skill, ['id', 'name', 'updatedAt'])
       ret.category = _.pick(item.skill.category, ['id', 'name'])
       if (item.displayMode) {
         ret.displayMode = _.pick(item.displayMode, ['id', 'name'])
@@ -92,13 +96,26 @@ function buildMemberSkills (skillList) {
 
   // Standardized: one UserSkill per (userId, skillId, level). Group by skill and aggregate levels
   const bySkill = _.groupBy(skillList, (i) => i.skill.id)
-  return _.map(bySkill, (items) => {
+  const skills = _.map(bySkill, (items) => {
     const first = items[0]
     const ret = _.pick(first.skill, ['id', 'name'])
+    // keep userSkill's created & updated fields
+    ret.createdAt = first.createdAt
+    ret.updatedAt = first.updatedAt
     ret.category = _.pick(first.skill.category, ['id', 'name'])
     if (first.userSkillDisplayMode) {
       ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])
     }
+
+    if (first.skill && first.skill.skillEvents) {
+      const events = _.orderBy(first.skill.skillEvents || [], 'createdAt', 'desc')
+      const grouped = _.groupBy(events, 'sourceType.name')
+      ret.lastUsedDate = events[0].createdAt
+      ret.activity = _.mapValues(grouped, (v, k) => ({
+        sources: _.uniqBy(v, 'sourceId').map(s => s.sourceId)
+      }))
+    }
+
     const levels = _.uniqBy(
       _.map(items, (i) => _.pick(i.userSkillLevel, ['id', 'name', 'description'])),
       'id'
@@ -108,8 +125,9 @@ function buildMemberSkills (skillList) {
     }
     return ret
   })
-}
 
+  return skills
+}
 /**
  * Build prisma filter with member search query
  * @param {Object} query request query parameters

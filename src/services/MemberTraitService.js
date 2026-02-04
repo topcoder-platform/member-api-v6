@@ -11,15 +11,12 @@ const logger = require('../common/logger')
 const errors = require('../common/errors')
 const constants = require('../../app-constants')
 const prisma = require('../common/prisma').getClient()
+const prismaManager = require('../common/prisma')
+const skillsPrisma = prismaManager.getSkillsClient()
 
 const TRAIT_IDS = ['basic_info', 'education', 'work', 'communities', 'languages', 'hobby', 'organization', 'device', 'software', 'service_provider', 'subscription', 'personalization', 'connect_info', 'onboarding_checklist']
 
 const TRAIT_FIELDS = ['userId', 'traitId', 'categoryName', 'traits', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
-
-const DeviceType = ['Console', 'Desktop', 'Laptop', 'Smartphone', 'Tablet', 'Wearable', 'Other']
-const SoftwareType = ['DeveloperTools', 'Browser', 'Productivity', 'GraphAndDesign', 'Utilities']
-const ServiceProviderType = ['InternetServiceProvider', 'MobileCarrier', 'Television', 'FinancialInstitution', 'Other']
-const WorkIndustryType = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
 
 /**
  * Used to generate prisma query parameters
@@ -135,10 +132,6 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
   if (_.includes(traitIds, 'personalization') &&
     !_.isEmpty(traitData.personalization)
   ) {
-    const collectInfo = {}
-    _.forEach(traitData.personalization, t => {
-      collectInfo[t.key] = t.value
-    })
     ret.push({
       userId: helper.bigIntToNumber(userId),
       traitId: 'personalization',
@@ -146,7 +139,9 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
       ..._.pick(traitData, auditFields),
       traits: {
         traitId: 'personalization',
-        data: [collectInfo]
+        data: _.map(traitData.personalization, t => ({
+        [t.key]: t.value
+      }))
       }
     })
   }
@@ -165,7 +160,7 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
  * @param {Array} traitIds string array
  * @returns member trait prisma data
  */
-async function queryTraits (userId, traitIds = TRAIT_IDS) {
+async function queryTraits (userId, traitIds = TRAIT_IDS, personalizationFilter = {}) {
   // build prisma query
   const prismaFilter = {
     where: { userId },
@@ -173,7 +168,13 @@ async function queryTraits (userId, traitIds = TRAIT_IDS) {
   }
   // for each trait id, get prisma model and put it into "include"
   _.forEach(_.pick(traitIdPrismaMap, traitIds), t => {
-    prismaFilter.include[t] = true
+    if (t === 'personalization') {
+      prismaFilter.include[t] = {
+        where: personalizationFilter
+      }
+    } else {
+      prismaFilter.include[t] = true
+    }
   })
   const traitData = await prisma.memberTraits.findUnique(prismaFilter)
   if (!traitData) {
@@ -199,8 +200,22 @@ async function getTraits (currentUser, handle, query) {
   // parse query parameters
   const traitIds = helper.parseCommaSeparatedString(query.traitIds, TRAIT_IDS) || TRAIT_IDS
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
+
+  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
+  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const isSelf = currentUser && currentUser.handle &&
+    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+
+  // can read private personalisation info on a member
+  const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
+
+  const personalizationFilter = canReadPrivate
+    ? {}
+    : { private: false }
+
   // query trait from db and convert to response
-  let queryResult = await queryTraits(member.userId, traitIds)
+  let queryResult = await queryTraits(member.userId, traitIds, personalizationFilter)
+
   let result = queryResult.data
 
   // keep only those of given trait ids
@@ -251,6 +266,23 @@ getTraits.schema = {
     traitIds: Joi.string(),
     fields: Joi.string()
   })
+}
+
+/**
+ * Validate that all provided skill IDs exist in the system
+ * @param {Array<String>} skillIds array of skill UUIDs to validate
+ * @throws {BadRequestError} if any skill IDs are invalid
+ */
+async function validateWorkAssociatedSkills (skillIds) {
+  if (!skillIds || skillIds.length === 0) {
+    return
+  }
+  const skillsCount = await skillsPrisma.skill.count({
+    where: { id: { in: skillIds } }
+  })
+  if (skillsCount < skillIds.length) {
+    throw new errors.BadRequestError('One or more provided skill IDs do not exist in the system')
+  }
 }
 
 /**
@@ -340,6 +372,7 @@ function buildTraitPrismaData (data, operatorId, result) {
           valuePairs.push({
             key,
             value: t[key],
+            private: key === 'openToWork',
             createdBy: operatorId
           })
         }
@@ -377,6 +410,16 @@ async function createTraits (currentUser, handle, data) {
       throw new errors.BadRequestError(`The trait id ${item.traitId} already exists for the member.`)
     }
   })
+  // validate work trait associatedSkills if present
+  for (const item of data) {
+    if (item.traitId === 'work' && item.traits && item.traits.data) {
+      for (const workItem of item.traits.data) {
+        if (workItem.associatedSkills && workItem.associatedSkills.length > 0) {
+          await validateWorkAssociatedSkills(workItem.associatedSkills)
+        }
+      }
+    }
+  }
   // create traits
   const result = []
   const operatorId = String(currentUser.userId || config.TC_WEBSERVICE_USERID)
@@ -417,69 +460,6 @@ async function createTraits (currentUser, handle, data) {
   return result
 }
 
-// define schema for each trait
-const traitSchemas = {
-  hobby: Joi.array().items(Joi.string()),
-  subscription: Joi.array().items(Joi.string()),
-  device: Joi.array().items(Joi.object({
-    deviceType: Joi.string().valid(...DeviceType).required(),
-    manufacturer: Joi.string().required(),
-    model: Joi.string().required(),
-    operatingSystem: Joi.string().required(),
-    osLanguage: Joi.string(),
-    osVersion: Joi.string()
-  })),
-  software: Joi.array().items(Joi.object({
-    softwareType: Joi.string().valid(...SoftwareType).required(),
-    name: Joi.string().required()
-  })),
-  service_provider: Joi.array().items(Joi.object({
-    type: Joi.string().valid(...ServiceProviderType).required(),
-    name: Joi.string().required()
-  })),
-  work: Joi.array().items(Joi.object({
-    industry: Joi.string().valid(...WorkIndustryType).allow(null),
-    companyName: Joi.string().required(),
-    position: Joi.string().required(),
-    startDate: Joi.date().iso().allow(null),
-    endDate: Joi.date().iso().allow(null),
-    working: Joi.boolean().allow(null)
-  })),
-  education: Joi.array().items(Joi.object({
-    collegeName: Joi.string().required(),
-    degree: Joi.string().required(),
-    endYear: Joi.number().integer().min(1900).max(new Date().getFullYear()).allow(null)
-  })),
-  basic_info: Joi.array().items(Joi.object({
-    country: Joi.string().required(),
-    primaryInterestInTopcoder: Joi.string().required(),
-    tshirtSize: Joi.string().allow(null, ''),
-    gender: Joi.string().allow(null, ''),
-    shortBio: Joi.string().required(),
-    birthDate: Joi.date().iso().allow(null),
-    currentLocation: Joi.string().allow(null, '')
-  })),
-  languages: Joi.array().items(Joi.object({
-    language: Joi.string().required(),
-    spokenLevel: Joi.string().allow(null, ''),
-    writtenLevel: Joi.string().allow(null, '')
-  })),
-  onboarding_checklist: Joi.array().items(Joi.object({
-    listItemType: Joi.string().required(),
-    date: Joi.date().iso().required(),
-    message: Joi.string().required(),
-    status: Joi.string().required(),
-    metadata: Joi.any().allow(null)
-  })),
-  personalization: Joi.array().items(Joi.object()),
-  communities: Joi.array().items(Joi.object({
-    communityName: Joi.string().required(),
-    status: Joi.boolean().required()
-  }))
-}
-
-const traitSchemaSwitch = _.keys(traitSchemas).map(k => ({ is: k, then: traitSchemas[k] }))
-
 createTraits.schema = {
   currentUser: Joi.any(),
   handle: Joi.string().required(),
@@ -513,6 +493,17 @@ async function updateTraits (currentUser, handle, data) {
   const existingTraits = queryResult.data
   // allow upserting traits: if a trait does not exist yet for the member,
   // create it instead of throwing a NotFound error
+
+  // validate work trait associatedSkills if present
+  for (const item of data) {
+    if (item.traitId === 'work' && item.traits && item.traits.data) {
+      for (const workItem of item.traits.data) {
+        if (workItem.associatedSkills && workItem.associatedSkills.length > 0) {
+          await validateWorkAssociatedSkills(workItem.associatedSkills)
+        }
+      }
+    }
+  }
 
   const result = []
   const operatorId = String(currentUser.userId || config.TC_WEBSERVICE_USERID)

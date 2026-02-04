@@ -51,6 +51,14 @@ module.exports = {
       access: ['copilot', 'administrator', 'admin']
     }
   },
+  '/members/bulk-search': {
+    post: {
+      controller: 'SearchController',
+      method: 'bulkSearch',
+      auth: 'jwt',
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
+    }
+  },
   '/members/uid-signature': {
     get: {
       controller: 'MemberController',
@@ -112,6 +120,22 @@ module.exports = {
       method: 'uploadPhoto',
       auth: 'jwt',
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
+  },
+  '/members/:handle/confirmProfile': {
+    post: {
+      controller: 'MemberController',
+      method: 'confirmProfileData',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
+  },
+  '/members/:handle/profileDownload': {
+    get: {
+      controller: 'MemberController',
+      method: 'downloadProfile',
+      auth: 'jwt',
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
     }
   },
   '/members/:handle/traits': {
@@ -217,6 +241,14 @@ module.exports = {
       method: 'verifyMemberSkills',
       auth: 'jwt',
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
+  },
+  '/members/:handle/skills/:skillid': {
+    get: {
+      controller: 'MemberController',
+      method: 'getMemberSkill',
+      auth: 'jwt',
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
     }
   }
 }

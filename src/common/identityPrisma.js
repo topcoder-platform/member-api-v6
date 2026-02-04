@@ -1,8 +1,20 @@
 const config = require('config')
 const errors = require('./errors')
-const { PrismaClient: IdentityPrismaClient } = require('../../prisma/generated/identity-client')
+const { PrismaClient: IdentityExternalPrismaClient } = require('@topcoder/tc-identity-service/packages/identity-prisma-client')
 
 let identityClient
+
+const clientOptions = {
+  transactionOptions: {
+    timeout: config.MEMBER_SERVICE_PRISMA_TIMEOUT
+  },
+  log: [
+    { level: 'query', emit: 'event' },
+    { level: 'info', emit: 'event' },
+    { level: 'warn', emit: 'event' },
+    { level: 'error', emit: 'event' }
+  ]
+}
 
 function getIdentityClient () {
   if (!config.IDENTITY_DB_URL) {
@@ -10,12 +22,9 @@ function getIdentityClient () {
   }
 
   if (!identityClient) {
-    identityClient = new IdentityPrismaClient({
-      datasources: {
-        identitydb: {
-          url: config.IDENTITY_DB_URL
-        }
-      }
+    identityClient = new IdentityExternalPrismaClient({
+      ...clientOptions,
+      datasources: { db: { url: config.IDENTITY_DB_URL } }
     })
   }
 

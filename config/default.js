@@ -9,6 +9,7 @@ module.exports = {
   AUTH_SECRET: process.env.AUTH_SECRET || 'mysecret',
   VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
   IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
+  RESOURCES_DB_URL: process.env.RESOURCES_DB_URL,
   VANILLA_DB_URL: process.env.VANILLA_DB_URL,
 
   // used to get M2M token
@@ -122,10 +123,19 @@ module.exports = {
   MAMBO_DOMAIN_URL: process.env.MAMBO_DOMAIN_URL,
   MAMBO_DEFAULT_SITE: process.env.MAMBO_DEFAULT_SITE,
 
+  // Learning Paths API
+  LEARNING_PATHS_API_URL: process.env.LEARNING_PATHS_API_URL || 'https://api.topcoder-dev.com/v5/learning-paths',
+
+  // Gamification API
+  GAMIFICATION_API_URL: process.env.GAMIFICATION_API_URL || 'https://api.topcoder-dev.com/v5/gamification',
+
   HASHING_KEYS: {
     USERFLOW: process.env.USERFLOW_PRIVATE_KEY
   },
   MEMBER_SERVICE_PRISMA_TIMEOUT: process.env.MEMBER_SERVICE_PRISMA_TIMEOUT ? parseInt(process.env.MEMBER_SERVICE_PRISMA_TIMEOUT, 10) : 10000,
+
+  // Finance database connection string
+  FINANCE_DATABASE_URL: process.env.FINANCE_DATABASE_URL,
 
   HUBSPOT_API_KEY: process.env.HUBSPOT_API_KEY,
   HUBSPOT_BASE_URL: process.env.HUBSPOT_BASE_URL,
