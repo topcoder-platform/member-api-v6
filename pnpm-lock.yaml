@@ -30,8 +30,8 @@ importers:
         specifier: topcoder-platform/resource-api-v6.git#master
         version: topcoder-challenge-recources-api@https://codeload.github.com/topcoder-platform/resource-api-v6/tar.gz/c15912780c8c49fe65e03e22235db7b1e2aecdae(prisma@6.19.2(typescript@5.9.3))(typescript@5.9.3)
       '@topcoder/standardized-skills-api':
-        specifier: topcoder-platform/standardized-skills-api.git#develop
-        version: standardized-skills-api@https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/309881b5a37e7634bd949e6725d2a13c6e7fcf7b(mysql2@3.16.2)(typescript@5.9.3)
+        specifier: topcoder-platform/standardized-skills-api.git#master
+        version: standardized-skills-api@https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/f8c3f292d7f5117f00e24967b8b3e8edd3405fcf(mysql2@3.16.2)(typescript@5.9.3)
       '@topcoder/tc-finance-api':
         specifier: topcoder-platform/tc-finance-api.git#dev
         version: tc-payments-api@https://codeload.github.com/topcoder-platform/tc-finance-api/tar.gz/51e60ab5670dc4cf95c060dae67de4e71cb995b8(prisma@6.19.2(typescript@5.9.3))(typescript@5.9.3)
@@ -5035,8 +5035,8 @@ packages:
     engines: {node: '>=4'}
     hasBin: true
 
-  standardized-skills-api@https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/309881b5a37e7634bd949e6725d2a13c6e7fcf7b:
-    resolution: {tarball: https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/309881b5a37e7634bd949e6725d2a13c6e7fcf7b}
+  standardized-skills-api@https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/f8c3f292d7f5117f00e24967b8b3e8edd3405fcf:
+    resolution: {tarball: https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/f8c3f292d7f5117f00e24967b8b3e8edd3405fcf}
     version: 1.0.0
     engines: {node: '>=22.0.0'}
 
@@ -11906,7 +11906,7 @@ snapshots:
       - eslint-import-resolver-webpack
       - supports-color
 
-  standardized-skills-api@https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/309881b5a37e7634bd949e6725d2a13c6e7fcf7b(mysql2@3.16.2)(typescript@5.9.3):
+  standardized-skills-api@https://codeload.github.com/topcoder-platform/standardized-skills-api/tar.gz/f8c3f292d7f5117f00e24967b8b3e8edd3405fcf(mysql2@3.16.2)(typescript@5.9.3):
     dependencies:
       '@nestjs/common': 11.1.12(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.2.2)(rxjs@7.8.2)
       '@nestjs/config': 4.0.2(@nestjs/common@11.1.12(class-transformer@0.5.1)(class-validator@0.14.3)(reflect-metadata@0.2.2)(rxjs@7.8.2))(rxjs@7.8.2)

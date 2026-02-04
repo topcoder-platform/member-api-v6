@@ -36,7 +36,7 @@
     "@topcoder/engagements-api-v6": "topcoder-platform/engagements-api-v6.git#master",
     "@topcoder/learning-paths-api": "github:topcoder-platform/learning-paths-api#master",
     "@topcoder/resource-api-v6": "topcoder-platform/resource-api-v6.git#master",
-    "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#develop",
+    "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#master",
     "@topcoder/tc-finance-api": "topcoder-platform/tc-finance-api.git#dev",
     "@topcoder/tc-identity-service": "topcoder-platform/identity-api-v6.git#develop",
     "aws-sdk": "^2.466.0",
