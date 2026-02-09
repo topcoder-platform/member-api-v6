@@ -140,8 +140,8 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
       traits: {
         traitId: 'personalization',
         data: _.map(traitData.personalization, t => ({
-        [t.key]: t.value
-      }))
+          [t.key]: t.value
+        }))
       }
     })
   }
@@ -286,6 +286,21 @@ async function validateWorkAssociatedSkills (skillIds) {
 }
 
 /**
+ * Remove a field if it's provided as an empty/blank string.
+ * @param {Object} item object containing data fields
+ * @param {String} key field name
+ */
+function omitBlankStringField (item, key) {
+  if (!Object.prototype.hasOwnProperty.call(item, key)) {
+    return
+  }
+
+  if (_.isString(item[key]) && _.trim(item[key]) === '') {
+    delete item[key]
+  }
+}
+
+/**
  * Build prisma data for creating/updating traits
  * @param {Object} data query data
  * @param {Number} operatorId operator user id
@@ -342,12 +357,20 @@ function buildTraitPrismaData (data, operatorId, result) {
             if (t.timePeriodTo && !t.endDate) {
               t.endDate = new Date(t.timePeriodTo)
             }
+            // industry is optional; treat blank values as omitted
+            omitBlankStringField(t, 'industry')
+            omitBlankStringField(t, 'otherIndustry')
+            if (t.industry !== 'Other') {
+              delete t.otherIndustry
+            }
             // Remove unknown keys that Prisma model does not accept
             delete t.company
             delete t.timePeriodFrom
             delete t.timePeriodTo
             return t
           })
+          // Keep downstream response/event payloads aligned with normalized DB payload
+          item.traits.data = payload
         }
 
         _.forEach(payload, t => {
