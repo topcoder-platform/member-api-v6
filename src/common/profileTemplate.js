@@ -79,6 +79,12 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 20
   },
+  statusBarSeparator: {
+    height: 1,
+    backgroundColor: '#AAAAAA',
+    marginTop: 10,
+    marginBottom: 20
+  },
   statusBarText: {
     color: '#FFFFFF',
     fontSize: 10,
@@ -174,7 +180,9 @@ const styles = StyleSheet.create({
   },
   itemSkills: {
     fontSize: 10,
-    marginTop: 2,
+    marginTop: 4,
+    marginBottom: 6,
+    lineHeight: 1.4,
     color: '#000000'
   },
   bulletPoint: {
@@ -190,10 +198,18 @@ const styles = StyleSheet.create({
     ol: { paddingLeft: 15, marginTop: 3, marginBottom: 3 },
     li: { marginBottom: 2 }
   },
-  // Certifications
+  // Certifications & Courses
   certificationItem: {
     fontSize: 10,
-    marginBottom: 3,
+    marginBottom: 8,
+    lineHeight: 1.5,
+    color: '#000000'
+  },
+  courseItem: {
+    fontSize: 10,
+    marginTop: 10,
+    marginBottom: 8,
+    lineHeight: 1.5,
     color: '#000000'
   },
   certificationLabel: {
@@ -337,15 +353,17 @@ function buildProfileTemplate (pdfData) {
         { style: styles.handleInfo },
         `Topcoder Handle: ${member.handle}${member.createdAt ? ` | Member Since ${new Date(member.createdAt).getFullYear()}` : ''}`
       ),
-      member.statusBarText ? React.createElement(
-        View,
-        { style: styles.statusBar },
-        React.createElement(
-          Text,
-          { style: styles.statusBarText },
-          member.statusBarText
-        )
-      ) : null
+      member.statusBarText
+        ? React.createElement(
+            View,
+            { style: styles.statusBar },
+            React.createElement(
+              Text,
+              { style: styles.statusBarText },
+              member.statusBarText
+            )
+          )
+        : React.createElement(View, { style: styles.statusBarSeparator })
     )
   )
 
@@ -567,7 +585,7 @@ function buildProfileTemplate (pdfData) {
       certContent.push(
         React.createElement(
           Text,
-          { key: 'courses', style: [styles.certificationItem, { marginTop: 5 }] },
+          { key: 'courses', style: styles.courseItem },
           React.createElement(Text, { style: styles.certificationLabel }, 'Courses: '),
           coursesText
         )
