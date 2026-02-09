@@ -107,7 +107,7 @@ function buildMemberSkills (skillList) {
       ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])
     }
 
-    if (first.skill && first.skill.skillEvents) {
+    if (first.skill && first.skill.skillEvents?.length) {
       const events = _.orderBy(first.skill.skillEvents || [], 'createdAt', 'desc')
       const grouped = _.groupBy(events, 'sourceType.name')
       ret.lastUsedDate = events[0].createdAt
