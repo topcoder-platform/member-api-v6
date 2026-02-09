@@ -77,13 +77,13 @@ const styles = StyleSheet.create({
   statusBar: {
     backgroundColor: '#000000',
     padding: 8,
-    marginBottom: 20
+    marginBottom: 10
   },
   statusBarSeparator: {
     height: 1,
     backgroundColor: '#AAAAAA',
     marginTop: 10,
-    marginBottom: 20
+    marginBottom: 10
   },
   statusBarText: {
     color: '#FFFFFF',
