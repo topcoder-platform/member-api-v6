@@ -1783,7 +1783,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
           const groups = {}
           for (const challengeId of challengeIds) {
             const challenge = challengeMap.get(challengeId)
-            const roleName = roleMap.get(challengeId) || (challenge.taskIsTask ? 'Task' : 'Unknown')
+            const roleName = roleMap.get(challengeId) || (challenge?.taskIsTask ? 'Task' : 'Unknown')
             if (challenge) {
               if (!groups[roleName]) groups[roleName] = []
               groups[roleName].push(challenge)
