@@ -202,13 +202,12 @@ const styles = StyleSheet.create({
   // Certifications & Courses
   certificationItem: {
     fontSize: 10,
-    marginBottom: 4,
+    marginBottom: 8,
     lineHeight: 1.5,
     color: '#000000'
   },
   courseItem: {
     fontSize: 10,
-    marginTop: 10,
     marginBottom: 8,
     lineHeight: 1.5,
     color: '#000000'
