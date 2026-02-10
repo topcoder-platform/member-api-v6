@@ -1785,7 +1785,13 @@ async function getMemberSkill (currentUser, handle, skillId) {
             }
           })
         ]).then(([resources, dbChallenges]) => {
-          const roleMap = new Map(resources.map(r => [r.challengeId, r.resourceRole.name]))
+          const roleMap = new Map()
+          resources.forEach(resource => {
+            if (!roleMap.has(resource.challengeId)) {
+              roleMap.set(resource.challengeId, new Set())
+            }
+            roleMap.get(resource.challengeId).add(resource.resourceRole.name)
+          })
           const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
           const winnerSet = new Set(
             dbChallenges
@@ -1797,13 +1803,20 @@ async function getMemberSkill (currentUser, handle, skillId) {
           const groups = {}
           for (const challengeId of challengeIds) {
             const challenge = challengeMap.get(challengeId)
-            const baseRoleName = roleMap.get(challengeId) || (challenge?.taskIsTask ? 'Task' : 'Unknown')
-            const roleName = baseRoleName === 'Submitter' && winnerSet.has(challengeId)
-              ? 'Winner'
-              : baseRoleName
             if (challenge) {
-              if (!groups[roleName]) groups[roleName] = []
-              groups[roleName].push(challenge)
+              const roles = roleMap.get(challengeId)
+              const roleNames = roles && roles.size
+                ? Array.from(roles).map(role => (
+                  role === 'Submitter' && winnerSet.has(challengeId)
+                    ? 'Winner'
+                    : role
+                ))
+                : [challenge?.taskIsTask ? 'Task' : 'Unknown']
+
+              roleNames.forEach(roleName => {
+                if (!groups[roleName]) groups[roleName] = []
+                groups[roleName].push(challenge)
+              })
             }
           }
 
