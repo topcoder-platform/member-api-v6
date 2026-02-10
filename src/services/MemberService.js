@@ -1735,6 +1735,9 @@ async function getMemberSkill (currentUser, handle, skillId) {
             select: {
               createdAt: true,
               sourceId: true,
+              skillEventType : {
+                select: { name: true }
+              },
               sourceType: {
                 select: { name: true }
               }
@@ -1756,62 +1759,30 @@ async function getMemberSkill (currentUser, handle, skillId) {
   if (skill.activity) {
     const fetchPromises = []
 
-    // Prepare challenge fetch – group by resource role, last 3 per role by endDate
+    // Prepare challenge fetch
     const challengeSources = _.get(skill, 'activity.challenge.sources', [])
     if (challengeSources.length > 0) {
-      const challengeIds = challengeSources
-
+      const challengeIds = _.uniqBy(challengeSources, 'sourceId').map(s => s.sourceId)
+      const roleMap = new Map()
+      challengeSources.forEach(source => {
+        if (!roleMap.has(source.sourceId)) {
+          roleMap.set(source.sourceId, new Set())
+        }
+        roleMap.get(source.sourceId).add(source.skillEventType.name);
+      })
+      
       fetchPromises.push(
-        Promise.all([
-          resourcesPrisma.resource.findMany({
-            where: {
-              memberId: String(member.userId),
-              challengeId: { in: challengeIds }
-            },
-            select: { challengeId: true, resourceRole: { select: { name: true } } }
-          }),
-          // Get challenge details (including endDate for ordering) from challenges DB
-          challengesPrisma.Challenge.findMany({
-            where: { id: { in: challengeIds } },
-            select: {
-              id: true,
-              name: true,
-              endDate: true,
-              taskIsTask: true,
-              winners: {
-                where: { userId: helper.bigIntToNumber(member.userId) },
-                select: { userId: true }
-              }
-            }
-          })
-        ]).then(([resources, dbChallenges]) => {
-          const roleMap = new Map()
-          resources.forEach(resource => {
-            if (!roleMap.has(resource.challengeId)) {
-              roleMap.set(resource.challengeId, new Set())
-            }
-            roleMap.get(resource.challengeId).add(resource.resourceRole.name)
-          })
+        challengesPrisma.Challenge.findMany({
+          where: { id: { in: challengeIds.slice(0, 3) } },
+          select: { id: true, name: true }
+        }).then(dbChallenges => {
           const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
-          const winnerSet = new Set(
-            dbChallenges
-              .filter(c => c.winners && c.winners.length > 0)
-              .map(c => c.id)
-          )
-
           // Group challenges by role
           const groups = {}
           for (const challengeId of challengeIds) {
             const challenge = challengeMap.get(challengeId)
             if (challenge) {
-              const roles = roleMap.get(challengeId)
-              const roleNames = roles && roles.size
-                ? Array.from(roles).map(role => (
-                  role === 'Submitter' && winnerSet.has(challengeId)
-                    ? 'Winner'
-                    : role
-                ))
-                : [challenge?.taskIsTask ? 'Task' : 'Unknown']
+              const roleNames = roleMap.get(challengeId)
 
               roleNames.forEach(roleName => {
                 if (!groups[roleName]) groups[roleName] = []
@@ -1819,7 +1790,6 @@ async function getMemberSkill (currentUser, handle, skillId) {
               })
             }
           }
-
           // For each role: sort by endDate desc, keep last 3, include total count
           skill.activity.challenge = Object.fromEntries(
             Object.entries(groups).map(([role, challenges]) => {
@@ -1843,7 +1813,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
     // Prepare certification fetch
     const certificationSources = _.get(skill, 'activity.certification.sources', [])
     if (certificationSources.length > 0) {
-      const certificationIds = certificationSources.filter(Boolean)
+      const certificationIds = _.uniqBy(certificationSources, 'sourceId').map(s => s.sourceId).filter(Boolean)
       if (certificationIds.length > 0) {
         fetchPromises.push(
           academyPrisma.CertificationEnrollments.findMany({
@@ -1877,7 +1847,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
     // Prepare course fetch
     const courseSources = _.get(skill, 'activity.course.sources', [])
     if (courseSources.length > 0) {
-      const courseIds = courseSources.filter(Boolean)
+      const courseIds = _.uniqBy(courseSources, 'sourceId').map(s => s.sourceId).filter(Boolean)
       if (courseIds.length > 0) {
         fetchPromises.push(
           academyPrisma.FccCertificationProgresses.findMany({
@@ -1910,7 +1880,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
     // Prepare engagement fetch
     const engagementSources = _.get(skill, 'activity.engagement.sources', [])
     if (engagementSources.length > 0) {
-      const engagementIds = engagementSources.filter(Boolean)
+      const engagementIds = _.uniqBy(engagementSources, 'sourceId').map(s => s.sourceId).filter(Boolean)
       if (engagementIds.length > 0) {
         fetchPromises.push(
           engagementsPrisma.EngagementAssignment.findMany({
