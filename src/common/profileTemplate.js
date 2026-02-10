@@ -192,8 +192,9 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
     color: '#000000'
   },
-  // Work description HTML list alignment (ul/ol/li)
+  // Work description HTML: tighten paragraph spacing so typed (p) and pasted (br) look consistent
   descriptionListStylesheet: {
+    p: { margin: 0, marginBottom: 2 },
     ul: { paddingLeft: 15, marginTop: 3, marginBottom: 3 },
     ol: { paddingLeft: 15, marginTop: 3, marginBottom: 3 },
     li: { marginBottom: 2 }
