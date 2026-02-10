@@ -1756,22 +1756,86 @@ async function getMemberSkill (currentUser, handle, skillId) {
   if (skill.activity) {
     const fetchPromises = []
 
-    // Prepare challenge fetch
+    // Prepare challenge fetch – group by resource role, last 3 per role by endDate
     const challengeSources = _.get(skill, 'activity.challenge.sources', [])
     if (challengeSources.length > 0) {
       const challengeIds = challengeSources
+
       fetchPromises.push(
-        challengesPrisma.Challenge.findMany({
-          where: { id: { in: challengeIds.slice(0, 3) } },
-          select: { id: true, name: true }
-        }).then(dbChallenges => {
+        Promise.all([
+          resourcesPrisma.resource.findMany({
+            where: {
+              memberId: String(member.userId),
+              challengeId: { in: challengeIds }
+            },
+            select: { challengeId: true, resourceRole: { select: { name: true } } }
+          }),
+          // Get challenge details (including endDate for ordering) from challenges DB
+          challengesPrisma.Challenge.findMany({
+            where: { id: { in: challengeIds } },
+            select: {
+              id: true,
+              name: true,
+              endDate: true,
+              taskIsTask: true,
+              winners: {
+                where: { userId: helper.bigIntToNumber(member.userId) },
+                select: { userId: true }
+              }
+            }
+          })
+        ]).then(([resources, dbChallenges]) => {
+          const roleMap = new Map()
+          resources.forEach(resource => {
+            if (!roleMap.has(resource.challengeId)) {
+              roleMap.set(resource.challengeId, new Set())
+            }
+            roleMap.get(resource.challengeId).add(resource.resourceRole.name)
+          })
           const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
-          skill.activity.challenge = {
-            count: challengeIds.length,
-            lastSources: challengeIds
-              .map(id => challengeMap.get(id))
-              .filter(Boolean)
+          const winnerSet = new Set(
+            dbChallenges
+              .filter(c => c.winners && c.winners.length > 0)
+              .map(c => c.id)
+          )
+
+          // Group challenges by role
+          const groups = {}
+          for (const challengeId of challengeIds) {
+            const challenge = challengeMap.get(challengeId)
+            if (challenge) {
+              const roles = roleMap.get(challengeId)
+              const roleNames = roles && roles.size
+                ? Array.from(roles).map(role => (
+                  role === 'Submitter' && winnerSet.has(challengeId)
+                    ? 'Winner'
+                    : role
+                ))
+                : [challenge?.taskIsTask ? 'Task' : 'Unknown']
+
+              roleNames.forEach(roleName => {
+                if (!groups[roleName]) groups[roleName] = []
+                groups[roleName].push(challenge)
+              })
+            }
           }
+
+          // For each role: sort by endDate desc, keep last 3, include total count
+          skill.activity.challenge = Object.fromEntries(
+            Object.entries(groups).map(([role, challenges]) => {
+              const sorted = challenges.sort((a, b) =>
+                new Date(b.endDate || 0) - new Date(a.endDate || 0)
+              )
+              return [role, {
+                count: sorted.length,
+                lastSources: sorted.slice(0, 3).map(c => ({
+                  id: c.id,
+                  name: c.name,
+                  role
+                }))
+              }]
+            })
+          )
         })
       )
     }
