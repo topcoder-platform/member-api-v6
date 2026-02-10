@@ -1773,17 +1773,34 @@ async function getMemberSkill (currentUser, handle, skillId) {
           // Get challenge details (including endDate for ordering) from challenges DB
           challengesPrisma.Challenge.findMany({
             where: { id: { in: challengeIds } },
-            select: { id: true, name: true, endDate: true, taskIsTask: true }
+            select: {
+              id: true,
+              name: true,
+              endDate: true,
+              taskIsTask: true,
+              winners: {
+                where: { userId: helper.bigIntToNumber(member.userId) },
+                select: { userId: true }
+              }
+            }
           })
         ]).then(([resources, dbChallenges]) => {
           const roleMap = new Map(resources.map(r => [r.challengeId, r.resourceRole.name]))
           const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
+          const winnerSet = new Set(
+            dbChallenges
+              .filter(c => c.winners && c.winners.length > 0)
+              .map(c => c.id)
+          )
 
           // Group challenges by role
           const groups = {}
           for (const challengeId of challengeIds) {
             const challenge = challengeMap.get(challengeId)
-            const roleName = roleMap.get(challengeId) || (challenge?.taskIsTask ? 'Task' : 'Unknown')
+            const baseRoleName = roleMap.get(challengeId) || (challenge?.taskIsTask ? 'Task' : 'Unknown')
+            const roleName = baseRoleName === 'Submitter' && winnerSet.has(challengeId)
+              ? 'Winner'
+              : baseRoleName
             if (challenge) {
               if (!groups[roleName]) groups[roleName] = []
               groups[roleName].push(challenge)
