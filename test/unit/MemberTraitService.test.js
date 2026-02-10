@@ -214,6 +214,28 @@ describe('member trait service unit tests', () => {
       // should.equal(result[0].updatedBy, 'sub2')
     })
 
+    it('update member traits successfully when industry is blank', async () => {
+      await service.updateTraits({ isMachine: true, sub: 'sub2' }, member1.handle, [{
+        traitId: 'work',
+        categoryName: 'Work',
+        traits: {
+          traitId: 'work',
+          data: [{
+            industry: '   ',
+            companyName: 'JP Morgan 3',
+            position: 'Manager 3'
+          }]
+        }
+      }])
+
+      const traits = await service.getTraits({}, member1.handle, { traitIds: 'work' })
+      should.equal(traits.length, 1)
+      should.equal(traits[0].traitId, 'work')
+      should.equal(traits[0].traits.data.length, 1)
+      should.equal(traits[0].traits.data[0].companyName, 'JP Morgan 3')
+      should.not.equal(traits[0].traits.data[0].industry, '')
+    })
+
     it('update member traits - trait not found', async () => {
       try {
         await service.updateTraits({ isMachine: true, sub: 'sub1' }, member1.handle, [{
