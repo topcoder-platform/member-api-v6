@@ -13,6 +13,7 @@ const {
 } = require('@react-pdf/renderer')
 const { Html } = require('react-pdf-html')
 const { htmlToText } = require('./htmlUtils')
+const logger = require('./logger')
 
 // Define styles
 const styles = StyleSheet.create({
@@ -491,6 +492,7 @@ function buildProfileTemplate (pdfData) {
 
   // Topcoder Activity Section
   const hasStatsByTrack = topcoderActivity.statsByTrack && topcoderActivity.statsByTrack.length > 0
+  logger.debug(`buildProfileTemplate: topcoderActivity keys=${Object.keys(topcoderActivity || {}).join(',')} statsByTrack.length=${topcoderActivity.statsByTrack?.length ?? 0} hasStatsByTrack=${hasStatsByTrack} showSection=${!!(topcoderActivity.specialRole || topcoderActivity.achievements || hasStatsByTrack)}`)
   if (topcoderActivity.specialRole || topcoderActivity.achievements || hasStatsByTrack) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
 

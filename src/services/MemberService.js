@@ -1514,8 +1514,11 @@ const TRACK_DISPLAY_NAMES = {
 async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrisma) {
   const trackMap = {} // track enum -> { wins, submissions, challenges } or { rating, wins, competitions } for DATA_SCIENCE
 
+  logger.debug(`fetchMemberStatsByTrack: start userId=${userId}`)
+
   try {
     const numUserId = typeof userId === 'bigint' ? helper.bigIntToNumber(userId) : userId
+    logger.debug(`fetchMemberStatsByTrack: numUserId=${numUserId}`)
 
     // 1) ChallengeWinner: wins (and submissions if same table) by track
     const winners = await challengesPrisma.ChallengeWinner.findMany({
@@ -1526,6 +1529,10 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
         }
       }
     })
+    logger.debug(`fetchMemberStatsByTrack: ChallengeWinner count=${winners.length}`)
+    if (winners.length > 0) {
+      logger.debug(`fetchMemberStatsByTrack: first winner challenge.track=${JSON.stringify(winners[0].challenge?.track)}`)
+    }
 
     for (const w of winners) {
       const trackEnum = w.challenge?.track?.track
@@ -1542,11 +1549,13 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
     }
 
     // 2) Resources: registrations (distinct challenges) by track
+    const memberIdStr = String(userId)
     const resources = await resourcesPrisma.resource.findMany({
-      where: { memberId: String(userId) },
+      where: { memberId: memberIdStr },
       select: { challengeId: true }
     })
     const challengeIds = [...new Set(resources.map(r => r.challengeId).filter(Boolean))]
+    logger.debug(`fetchMemberStatsByTrack: resources count=${resources.length}, distinct challengeIds=${challengeIds.length}, memberId used="${memberIdStr}"`)
     if (challengeIds.length > 0) {
       const challenges = await challengesPrisma.Challenge.findMany({
         where: { id: { in: challengeIds } },
@@ -1578,11 +1587,16 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       }
     }
 
+    logger.debug(`fetchMemberStatsByTrack: trackMap keys=${Object.keys(trackMap).join(',') || '(none)'}, trackMap=${JSON.stringify(trackMap)}`)
+
     const statsByTrack = []
     for (const [trackEnum, counts] of Object.entries(trackMap)) {
       const trackName = TRACK_DISPLAY_NAMES[trackEnum] || trackEnum
       const hasAny = Object.values(counts).some(v => typeof v === 'number' && v > 0)
-      if (!hasAny && (counts.rating == null || counts.rating === 0)) continue
+      if (!hasAny && (counts.rating == null || counts.rating === 0)) {
+        logger.debug(`fetchMemberStatsByTrack: skip track ${trackEnum} (no positive counts)`)
+        continue
+      }
       if (trackEnum === 'DATA_SCIENCE') {
         statsByTrack.push({
           trackName,
@@ -1599,9 +1613,11 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
         })
       }
     }
+    logger.info(`fetchMemberStatsByTrack: userId=${userId} returning statsByTrack.length=${statsByTrack.length}`, statsByTrack.length > 0 ? { statsByTrack } : {})
     return statsByTrack
   } catch (err) {
     logger.warn(`fetchMemberStatsByTrack failed for user ${userId}: ${err.message}`)
+    logger.debug(`fetchMemberStatsByTrack: error stack`, err.stack)
     return []
   }
 }
@@ -1707,6 +1723,7 @@ async function aggregatePDFData (currentUser, handle) {
   let statsByTrack = []
   try {
     statsByTrack = await fetchMemberStatsByTrack(userId, challengesPrisma, resourcesPrisma)
+    logger.info(`aggregatePDFData: handle="${handle}" userId=${userId} statsByTrack.length=${statsByTrack.length} (will set topcoderActivity.statsByTrack)`)
   } catch (err) {
     logger.warn(`aggregatePDFData: statsByTrack failed for ${handle}: ${err.message}`)
   }
