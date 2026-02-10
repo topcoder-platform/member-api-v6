@@ -490,8 +490,26 @@ function buildProfileTemplate (pdfData) {
   }
 
   // Topcoder Activity Section
-  if (topcoderActivity.specialRole || topcoderActivity.achievements) {
+  const hasStatsByTrack = topcoderActivity.statsByTrack && topcoderActivity.statsByTrack.length > 0
+  if (topcoderActivity.specialRole || topcoderActivity.achievements || hasStatsByTrack) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
+
+    // Member stats by track first (Development: wins, submissions, challenges; Competitive Programming: rating, wins, competitions)
+    if (hasStatsByTrack) {
+      topcoderActivity.statsByTrack.forEach((stat, index) => {
+        const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
+        const line = isCompetitiveProgramming
+          ? `${stat.trackName}: ${stat.rating ?? 0} rating, ${stat.wins ?? 0} wins, ${stat.competitions ?? 0} competitions`
+          : `${stat.trackName}:  ${stat.wins ?? 0} wins, ${stat.submissions ?? 0} submissions, ${stat.challenges ?? 0} challenges`
+        activityContent.push(
+          React.createElement(
+            Text,
+            { key: `stats-track-${index}`, style: styles.activityItem },
+            React.createElement(Text, { style: styles.activityLabel }, line)
+          )
+        )
+      })
+    }
 
     if (topcoderActivity.specialRole) {
       activityContent.push(

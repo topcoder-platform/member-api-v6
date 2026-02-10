@@ -1495,6 +1495,117 @@ async function getMemberRoles (userId) {
   }
 }
 
+/** Track enum to display name (for standard tracks: wins, submissions, challenges) */
+const TRACK_DISPLAY_NAMES = {
+  DEVELOPMENT: 'Development',
+  DESIGN: 'Design',
+  DATA_SCIENCE: 'Competitive Programming',
+  QUALITY_ASSURANCE: 'Quality Assurance'
+}
+
+/**
+ * Fetch member stats by challenge track for PDF: wins and submissions from ChallengeWinner,
+ * registrations (challenges count) from resources schema, grouped by track.
+ * @param {Number} userId member userId
+ * @param {Object} challengesPrisma challenges Prisma client
+ * @param {Object} resourcesPrisma resources Prisma client
+ * @returns {Promise<Array<{ trackName: string, wins: number, submissions: number, challenges: number, rating?: number, competitions?: number }>>}
+ */
+async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrisma) {
+  const trackMap = {} // track enum -> { wins, submissions, challenges } or { rating, wins, competitions } for DATA_SCIENCE
+
+  try {
+    const numUserId = typeof userId === 'bigint' ? helper.bigIntToNumber(userId) : userId
+
+    // 1) ChallengeWinner: wins (and submissions if same table) by track
+    const winners = await challengesPrisma.ChallengeWinner.findMany({
+      where: { userId: numUserId },
+      include: {
+        challenge: {
+          include: { track: true }
+        }
+      }
+    })
+
+    for (const w of winners) {
+      const trackEnum = w.challenge?.track?.track
+      if (!trackEnum) continue
+      if (!trackMap[trackEnum]) {
+        const isDataScience = trackEnum === 'DATA_SCIENCE'
+        trackMap[trackEnum] = isDataScience
+          ? { wins: 0, competitions: 0, rating: undefined }
+          : { wins: 0, submissions: 0, challenges: 0 }
+      }
+      const row = trackMap[trackEnum]
+      if (row.wins !== undefined) row.wins += 1
+      if (row.submissions !== undefined) row.submissions += 1
+    }
+
+    // 2) Resources: registrations (distinct challenges) by track
+    const resources = await resourcesPrisma.resource.findMany({
+      where: { memberId: String(userId) },
+      select: { challengeId: true }
+    })
+    const challengeIds = [...new Set(resources.map(r => r.challengeId).filter(Boolean))]
+    if (challengeIds.length > 0) {
+      const challenges = await challengesPrisma.Challenge.findMany({
+        where: { id: { in: challengeIds } },
+        select: { id: true, trackId: true },
+        include: { track: true }
+      })
+      const challengeIdToTrack = {}
+      for (const c of challenges) {
+        const trackEnum = c.track?.track
+        if (trackEnum) challengeIdToTrack[c.id] = trackEnum
+      }
+      const challengesPerTrack = {}
+      for (const cid of challengeIds) {
+        const trackEnum = challengeIdToTrack[cid]
+        if (!trackEnum) continue
+        if (!challengesPerTrack[trackEnum]) challengesPerTrack[trackEnum] = 0
+        challengesPerTrack[trackEnum] += 1
+      }
+      for (const [trackEnum, count] of Object.entries(challengesPerTrack)) {
+        if (!trackMap[trackEnum]) {
+          const isDataScience = trackEnum === 'DATA_SCIENCE'
+          trackMap[trackEnum] = isDataScience
+            ? { wins: 0, competitions: count, rating: undefined }
+            : { wins: 0, submissions: 0, challenges: count }
+        } else {
+          if (trackMap[trackEnum].challenges !== undefined) trackMap[trackEnum].challenges = count
+          if (trackMap[trackEnum].competitions !== undefined) trackMap[trackEnum].competitions = count
+        }
+      }
+    }
+
+    const statsByTrack = []
+    for (const [trackEnum, counts] of Object.entries(trackMap)) {
+      const trackName = TRACK_DISPLAY_NAMES[trackEnum] || trackEnum
+      const hasAny = Object.values(counts).some(v => typeof v === 'number' && v > 0)
+      if (!hasAny && (counts.rating == null || counts.rating === 0)) continue
+      if (trackEnum === 'DATA_SCIENCE') {
+        statsByTrack.push({
+          trackName,
+          rating: counts.rating ?? 0,
+          wins: counts.wins ?? 0,
+          competitions: counts.competitions ?? 0
+        })
+      } else {
+        statsByTrack.push({
+          trackName,
+          wins: counts.wins ?? 0,
+          submissions: counts.submissions ?? 0,
+          challenges: counts.challenges ?? 0
+        })
+      }
+    }
+    return statsByTrack
+  } catch (err) {
+    logger.warn(`fetchMemberStatsByTrack failed for user ${userId}: ${err.message}`)
+    return []
+  }
+}
+
 /**
  * Aggregate all data needed for PDF generation
  * @param {Object} currentUser the user who performs operation
@@ -1592,6 +1703,14 @@ async function aggregatePDFData (currentUser, handle) {
   // Fetch gamification achievements
   const achievements = await fetchGamificationAchievements(userId)
 
+  // Fetch member stats by track (wins, submissions, challenges from ChallengeWinner + resources)
+  let statsByTrack = []
+  try {
+    statsByTrack = await fetchMemberStatsByTrack(userId, challengesPrisma, resourcesPrisma)
+  } catch (err) {
+    logger.warn(`aggregatePDFData: statsByTrack failed for ${handle}: ${err.message}`)
+  }
+
   // Fetch certifications and courses
   const { certifications, courses } = await fetchCertificationsAndCourses(userId)
 
@@ -1661,7 +1780,8 @@ async function aggregatePDFData (currentUser, handle) {
     // Topcoder activity
     topcoderActivity: {
       specialRole: specialRoles.length > 0 ? `Topcoder Special Role: ${specialRoles.join(', ')}` : null,
-      achievements: achievements
+      achievements: achievements,
+      statsByTrack
     },
     // Certifications and courses
     certifications,
