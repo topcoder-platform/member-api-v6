@@ -1773,7 +1773,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
       
       fetchPromises.push(
         challengesPrisma.Challenge.findMany({
-          where: { id: { in: challengeIds.slice(0, 3) } },
+          where: { id: { in: challengeIds } },
           select: { id: true, name: true }
         }).then(dbChallenges => {
           const challengeMap = new Map(dbChallenges.map(c => [c.id, c]))
