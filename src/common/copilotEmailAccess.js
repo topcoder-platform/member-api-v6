@@ -4,6 +4,7 @@ const logger = require('./logger')
 const prismaManager = require('./prisma')
 
 const resourcesPrisma = prismaManager.getResourcesClient()
+const COPILOT_RESOURCE_ROLE_NAME_LOWER = 'copilot'
 
 function hasCopilotRole (currentUser) {
   if (!currentUser || !currentUser.roles) {
@@ -61,7 +62,10 @@ async function getCopilotAccessibleMemberIdSet (currentUser, memberUserIds) {
 
   try {
     const copilotResources = await resourcesPrisma.resource.findMany({
-      where: { memberId: copilotUserId },
+      where: {
+        memberId: copilotUserId,
+        resourceRole: { nameLower: COPILOT_RESOURCE_ROLE_NAME_LOWER }
+      },
       select: { challengeId: true }
     })
     const challengeIds = _.uniq(
