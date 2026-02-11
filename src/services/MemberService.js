@@ -1559,7 +1559,6 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
     if (challengeIds.length > 0) {
       const challenges = await challengesPrisma.Challenge.findMany({
         where: { id: { in: challengeIds } },
-        select: { id: true, trackId: true },
         include: { track: true }
       })
       const challengeIdToTrack = {}
