@@ -1552,7 +1552,12 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
     // 2) Resources: registrations (distinct challenges) by track
     const memberIdStr = String(userId)
     const resources = await resourcesPrisma.resource.findMany({
-      where: { memberId: memberIdStr },
+      where: {
+        memberId: memberIdStr,
+        resourceRole: {
+          nameLower: 'submitter'
+        }
+      },
       select: { challengeId: true }
     })
     const challengeIds = [...new Set(resources.map(r => r.challengeId).filter(Boolean))]
