@@ -13,6 +13,7 @@ const errors = require('../common/errors')
 const constants = require('../../app-constants')
 const mailchimp = require('../common/mailchimp')
 const hubspot = require('../common/hubspot')
+const copilotEmailAccess = require('../common/copilotEmailAccess')
 const memberTraitService = require('./MemberTraitService')
 const mime = require('mime-types')
 const fileType = require('file-type')
@@ -328,7 +329,20 @@ async function getMember (currentUser, handle, query) {
     selectFields.push('identityVerified')
   }
   // clean member fields according to current user
-  return cleanMember(currentUser, member, selectFields)
+  const response = cleanMember(currentUser, member, selectFields)
+
+  // Copilots can only see member email when they share at least one challenge resource.
+  if (response.email !== undefined) {
+    const canAccessMemberEmail = await copilotEmailAccess.canCopilotAccessMemberEmail(
+      currentUser,
+      member.userId
+    )
+    if (!canAccessMemberEmail) {
+      delete response.email
+    }
+  }
+
+  return response
 }
 
 getMember.schema = {
