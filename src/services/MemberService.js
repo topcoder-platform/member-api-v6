@@ -32,6 +32,7 @@ const academyPrisma = prismaManager.getAcademyClient()
 const resourcesPrisma = prismaManager.getResourcesClient()
 const engagementsPrisma = prismaManager.getEngagementsClient()
 const profilePDFService = require('./ProfilePDFService')
+const StatisticsService = require('./StatisticsService')
 const request = require('request')
 const cityTimezones = require('city-timezones')
 const moment = require('moment-timezone')
@@ -1725,6 +1726,28 @@ async function aggregatePDFData (currentUser, handle) {
     logger.info(`aggregatePDFData: handle="${handle}" userId=${userId} statsByTrack.length=${statsByTrack.length} (will set topcoderActivity.statsByTrack)`)
   } catch (err) {
     logger.warn(`aggregatePDFData: statsByTrack failed for ${handle}: ${err.message}`)
+  }
+
+  // Merge Competitive Programming rating from stats endpoint (same source as GET /members/:handle/stats)
+  try {
+    const statsResult = await StatisticsService.getMemberStats(currentUser, handle, {})
+    const statsResponse = Array.isArray(statsResult) && statsResult.length > 0 ? statsResult[0] : null
+    if (statsResponse && statsResponse.DATA_SCIENCE) {
+      const ds = statsResponse.DATA_SCIENCE
+      const rating = (ds.SRM && ds.SRM.rank && ds.SRM.rank.rating != null)
+        ? ds.SRM.rank.rating
+        : (ds.MARATHON_MATCH && ds.MARATHON_MATCH.rank && ds.MARATHON_MATCH.rank.rating != null)
+          ? ds.MARATHON_MATCH.rank.rating
+          : 0
+      const cpEntry = statsByTrack.find(e => e.trackName === 'Competitive Programming')
+      if (cpEntry) {
+        cpEntry.rating = rating
+      } else if (rating > 0) {
+        statsByTrack.push({ trackName: 'Competitive Programming', rating, wins: 0, competitions: 0 })
+      }
+    }
+  } catch (err) {
+    logger.warn(`aggregatePDFData: getMemberStats for rating failed for ${handle}: ${err.message}`)
   }
 
   // Fetch certifications and courses
