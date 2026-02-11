@@ -1762,13 +1762,14 @@ async function getMemberSkill (currentUser, handle, skillId) {
     // Prepare challenge fetch
     const challengeSources = _.get(skill, 'activity.challenge.sources', [])
     if (challengeSources.length > 0) {
+      const winMap = {challenge_2nd_place: 'challenge_win', challenge_3rd_place: 'challenge_win'};
       const challengeIds = _.uniqBy(challengeSources, 'sourceId').map(s => s.sourceId)
       const roleMap = new Map()
       challengeSources.forEach(source => {
         if (!roleMap.has(source.sourceId)) {
           roleMap.set(source.sourceId, new Set())
         }
-        roleMap.get(source.sourceId).add(source.skillEventType.name);
+        roleMap.get(source.sourceId).add(winMap[source.skillEventType.name] ?? source.skillEventType.name);
       })
       
       fetchPromises.push(
