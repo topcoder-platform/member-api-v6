@@ -143,11 +143,14 @@ const styles = StyleSheet.create({
   // Topcoder Activity
   activityItem: {
     fontSize: 10,
-    marginBottom: 5,
+    marginBottom: 2,
     color: '#000000'
   },
   activityLabel: {
     fontWeight: 'bold'
+  },
+  activityValue: {
+    fontWeight: 'normal'
   },
   // Education/Experience items
   itemTitle: {
@@ -499,14 +502,15 @@ function buildProfileTemplate (pdfData) {
     if (hasStatsByTrack) {
       topcoderActivity.statsByTrack.forEach((stat, index) => {
         const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
-        const line = isCompetitiveProgramming
-          ? `${stat.trackName}: ${stat.rating ?? 0} rating, ${stat.wins ?? 0} wins, ${stat.competitions ?? 0} competitions`
-          : `${stat.trackName}:  ${stat.wins ?? 0} wins, ${stat.submissions ?? 0} submissions, ${stat.challenges ?? 0} challenges`
+        const valueText = isCompetitiveProgramming
+          ? `${stat.rating ?? 0} rating, ${stat.wins ?? 0} wins, ${stat.competitions ?? 0} competitions`
+          : `${stat.wins ?? 0} wins, ${stat.submissions ?? 0} submissions, ${stat.challenges ?? 0} challenges`
         activityContent.push(
           React.createElement(
             Text,
             { key: `stats-track-${index}`, style: styles.activityItem },
-            React.createElement(Text, { style: styles.activityLabel }, line)
+            React.createElement(Text, { style: styles.activityLabel }, `${stat.trackName}: `),
+            React.createElement(Text, { style: styles.activityValue }, valueText)
           )
         )
       })
