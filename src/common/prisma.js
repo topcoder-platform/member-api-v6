@@ -1,3 +1,4 @@
+const { PrismaPg } = require("@prisma/adapter-pg");
 // Use the package-scoped generated clients to avoid cross-package overrides in the monorepo
 const {
   PrismaClient: MembersPrismaClient,
@@ -22,8 +23,18 @@ const {
 const {
   PrismaClient: EngagementsPrismaClient,
 } = require("@topcoder/engagements-api-v6/packages/engagements-prisma-client");
-const { PrismaPg } = require("@prisma/adapter-pg");
-const { Pool } = require("pg");
+
+const extractSchemaFromUrl = (dbUrl) => {
+  if (!dbUrl) {
+    return null;
+  }
+  try {
+    const url = new URL(dbUrl);
+    return url.searchParams.get("schema");
+  } catch (error) {
+    return null;
+  }
+};
 
 const skillsDbUrl = process.env.SKILLS_DB_URL;
 const challengesDbUrl = process.env.CHALLENGES_DB_URL;
@@ -42,6 +53,17 @@ const clientOptions = {
     { level: "warn", emit: "event" },
     { level: "error", emit: "event" },
   ],
+};
+
+const createPgAdapter = (dbUrl) => {
+  const schema = extractSchemaFromUrl(dbUrl);
+  const args = [{ connectionString: dbUrl }];
+
+  if (schema) {
+    args.push({ schema });
+  }
+
+  return new PrismaPg(...args);
 };
 
 let membersClient;
@@ -97,7 +119,6 @@ const getAcademyClient = () => {
 };
 
 let engagementsClient;
-let engagementsPool;
 const getEngagementsClient = () => {
   if (!engagementsClient) {
     if (!engagementsDbUrl) {
@@ -105,13 +126,10 @@ const getEngagementsClient = () => {
         "ENGAGEMENTS_DB_URL must be set for engagements Prisma client",
       );
     }
-    if (!engagementsPool) {
-      engagementsPool = new Pool({ connectionString: engagementsDbUrl });
-    }
-    const adapter = new PrismaPg(engagementsPool);
+
     engagementsClient = new EngagementsPrismaClient({
       ...clientOptions,
-      adapter,
+      adapter: createPgAdapter(engagementsDbUrl),
     });
   }
   return engagementsClient;

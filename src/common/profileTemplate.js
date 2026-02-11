@@ -209,7 +209,6 @@ const styles = StyleSheet.create({
   },
   courseItem: {
     fontSize: 10,
-    marginTop: 10,
     marginBottom: 8,
     lineHeight: 1.5,
     color: '#000000'
