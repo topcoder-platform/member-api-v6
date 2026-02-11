@@ -142,11 +142,14 @@ const styles = StyleSheet.create({
   // Topcoder Activity
   activityItem: {
     fontSize: 10,
-    marginBottom: 5,
+    marginBottom: 2,
     color: '#000000'
   },
   activityLabel: {
     fontWeight: 'bold'
+  },
+  activityValue: {
+    fontWeight: 'normal'
   },
   // Education/Experience items
   itemTitle: {
@@ -202,7 +205,7 @@ const styles = StyleSheet.create({
   // Certifications & Courses
   certificationItem: {
     fontSize: 10,
-    marginBottom: 8,
+    marginBottom: 2,
     lineHeight: 1.5,
     color: '#000000'
   },
@@ -489,8 +492,32 @@ function buildProfileTemplate (pdfData) {
   }
 
   // Topcoder Activity Section
-  if (topcoderActivity.specialRole || topcoderActivity.achievements) {
+  const hasStatsByTrack = topcoderActivity.statsByTrack && topcoderActivity.statsByTrack.length > 0
+  if (topcoderActivity.specialRole || topcoderActivity.achievements || hasStatsByTrack) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
+
+    // Member stats by track first (Development: wins, submissions, challenges; Competitive Programming: rating, wins, competitions)
+    if (hasStatsByTrack) {
+      const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
+        const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
+        const valueText = isCompetitiveProgramming
+          ? `${stat.rating ?? 0} rating, ${stat.wins ?? 0} wins, ${stat.competitions ?? 0} competitions`
+          : `${stat.wins ?? 0} wins, ${stat.submissions ?? 0} submissions, ${stat.challenges ?? 0} challenges`
+        return React.createElement(
+          Text,
+          { key: `stats-track-${index}`, style: styles.activityItem },
+          React.createElement(Text, { style: styles.activityLabel }, `${stat.trackName}: `),
+          React.createElement(Text, { style: styles.activityValue }, valueText)
+        )
+      })
+      activityContent.push(
+        React.createElement(
+          View,
+          { key: 'stats-by-track-wrapper', style: { marginBottom: 15 } },
+          ...statsItems
+        )
+      )
+    }
 
     if (topcoderActivity.specialRole) {
       activityContent.push(
