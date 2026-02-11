@@ -500,20 +500,25 @@ function buildProfileTemplate (pdfData) {
 
     // Member stats by track first (Development: wins, submissions, challenges; Competitive Programming: rating, wins, competitions)
     if (hasStatsByTrack) {
-      topcoderActivity.statsByTrack.forEach((stat, index) => {
+      const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
         const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
         const valueText = isCompetitiveProgramming
           ? `${stat.rating ?? 0} rating, ${stat.wins ?? 0} wins, ${stat.competitions ?? 0} competitions`
           : `${stat.wins ?? 0} wins, ${stat.submissions ?? 0} submissions, ${stat.challenges ?? 0} challenges`
-        activityContent.push(
-          React.createElement(
-            Text,
-            { key: `stats-track-${index}`, style: styles.activityItem },
-            React.createElement(Text, { style: styles.activityLabel }, `${stat.trackName}: `),
-            React.createElement(Text, { style: styles.activityValue }, valueText)
-          )
+        return React.createElement(
+          Text,
+          { key: `stats-track-${index}`, style: styles.activityItem },
+          React.createElement(Text, { style: styles.activityLabel }, `${stat.trackName}: `),
+          React.createElement(Text, { style: styles.activityValue }, valueText)
         )
       })
+      activityContent.push(
+        React.createElement(
+          View,
+          { key: 'stats-by-track-wrapper', style: { marginBottom: 20 } },
+          ...statsItems
+        )
+      )
     }
 
     if (topcoderActivity.specialRole) {
