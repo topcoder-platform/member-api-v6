@@ -67,10 +67,7 @@ workflows:
           branches:
             only:
             - develop
-            - PM-3532
-            - pm-2539
-            - PS-511
-            - PS-513-Hotfix
+            - pm-3734
             
     # Production builds are exectuted only on tagged commits to the
     # master branch.

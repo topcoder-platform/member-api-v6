@@ -111,8 +111,9 @@ function buildMemberSkills (skillList) {
       const events = _.orderBy(first.skill.skillEvents || [], 'createdAt', 'desc')
       const grouped = _.groupBy(events, 'sourceType.name')
       ret.lastUsedDate = events[0].createdAt
+      
       ret.activity = _.mapValues(grouped, (v, k) => ({
-        sources: _.uniqBy(v, 'sourceId').map(s => s.sourceId)
+        sources: v,
       }))
     }
 

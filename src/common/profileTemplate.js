@@ -77,7 +77,13 @@ const styles = StyleSheet.create({
   statusBar: {
     backgroundColor: '#000000',
     padding: 8,
-    marginBottom: 20
+    marginBottom: 10
+  },
+  statusBarSeparator: {
+    height: 1,
+    backgroundColor: '#AAAAAA',
+    marginTop: 10,
+    marginBottom: 10
   },
   statusBarText: {
     color: '#FFFFFF',
@@ -136,11 +142,14 @@ const styles = StyleSheet.create({
   // Topcoder Activity
   activityItem: {
     fontSize: 10,
-    marginBottom: 5,
+    marginBottom: 2,
     color: '#000000'
   },
   activityLabel: {
     fontWeight: 'bold'
+  },
+  activityValue: {
+    fontWeight: 'normal'
   },
   // Education/Experience items
   itemTitle: {
@@ -174,7 +183,9 @@ const styles = StyleSheet.create({
   },
   itemSkills: {
     fontSize: 10,
-    marginTop: 2,
+    marginTop: 4,
+    marginBottom: 6,
+    lineHeight: 1.4,
     color: '#000000'
   },
   bulletPoint: {
@@ -184,16 +195,24 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
     color: '#000000'
   },
-  // Work description HTML list alignment (ul/ol/li)
+  // Work description HTML: tighten paragraph spacing so typed (p) and pasted (br) look consistent
   descriptionListStylesheet: {
+    p: { margin: 0, marginBottom: 2 },
     ul: { paddingLeft: 15, marginTop: 3, marginBottom: 3 },
     ol: { paddingLeft: 15, marginTop: 3, marginBottom: 3 },
     li: { marginBottom: 2 }
   },
-  // Certifications
+  // Certifications & Courses
   certificationItem: {
     fontSize: 10,
-    marginBottom: 3,
+    marginBottom: 2,
+    lineHeight: 1.5,
+    color: '#000000'
+  },
+  courseItem: {
+    fontSize: 10,
+    marginBottom: 8,
+    lineHeight: 1.5,
     color: '#000000'
   },
   certificationLabel: {
@@ -337,15 +356,17 @@ function buildProfileTemplate (pdfData) {
         { style: styles.handleInfo },
         `Topcoder Handle: ${member.handle}${member.createdAt ? ` | Member Since ${new Date(member.createdAt).getFullYear()}` : ''}`
       ),
-      member.statusBarText ? React.createElement(
-        View,
-        { style: styles.statusBar },
-        React.createElement(
-          Text,
-          { style: styles.statusBarText },
-          member.statusBarText
-        )
-      ) : null
+      member.statusBarText
+        ? React.createElement(
+            View,
+            { style: styles.statusBar },
+            React.createElement(
+              Text,
+              { style: styles.statusBarText },
+              member.statusBarText
+            )
+          )
+        : React.createElement(View, { style: styles.statusBarSeparator })
     )
   )
 
@@ -471,8 +492,32 @@ function buildProfileTemplate (pdfData) {
   }
 
   // Topcoder Activity Section
-  if (topcoderActivity.specialRole || topcoderActivity.achievements) {
+  const hasStatsByTrack = topcoderActivity.statsByTrack && topcoderActivity.statsByTrack.length > 0
+  if (topcoderActivity.specialRole || topcoderActivity.achievements || hasStatsByTrack) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
+
+    // Member stats by track first (Development: wins, submissions, challenges; Competitive Programming: rating, wins, competitions)
+    if (hasStatsByTrack) {
+      const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
+        const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
+        const valueText = isCompetitiveProgramming
+          ? `${stat.rating ?? 0} rating, ${stat.wins ?? 0} wins, ${stat.competitions ?? 0} competitions`
+          : `${stat.wins ?? 0} wins, ${stat.submissions ?? 0} submissions, ${stat.challenges ?? 0} challenges`
+        return React.createElement(
+          Text,
+          { key: `stats-track-${index}`, style: styles.activityItem },
+          React.createElement(Text, { style: styles.activityLabel }, `${stat.trackName}: `),
+          React.createElement(Text, { style: styles.activityValue }, valueText)
+        )
+      })
+      activityContent.push(
+        React.createElement(
+          View,
+          { key: 'stats-by-track-wrapper', style: { marginBottom: 15 } },
+          ...statsItems
+        )
+      )
+    }
 
     if (topcoderActivity.specialRole) {
       activityContent.push(
@@ -567,7 +612,7 @@ function buildProfileTemplate (pdfData) {
       certContent.push(
         React.createElement(
           Text,
-          { key: 'courses', style: [styles.certificationItem, { marginTop: 5 }] },
+          { key: 'courses', style: styles.courseItem },
           React.createElement(Text, { style: styles.certificationLabel }, 'Courses: '),
           coursesText
         )
