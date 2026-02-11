@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
   // Certifications & Courses
   certificationItem: {
     fontSize: 10,
-    marginBottom: 8,
+    marginBottom: 2,
     lineHeight: 1.5,
     color: '#000000'
   },
@@ -515,7 +515,7 @@ function buildProfileTemplate (pdfData) {
       activityContent.push(
         React.createElement(
           View,
-          { key: 'stats-by-track-wrapper', style: { marginBottom: 20 } },
+          { key: 'stats-by-track-wrapper', style: { marginBottom: 15 } },
           ...statsItems
         )
       )
