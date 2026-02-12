@@ -496,7 +496,6 @@ function buildProfileTemplate (pdfData) {
   if (topcoderActivity.specialRole || topcoderActivity.achievements || hasStatsByTrack) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
 
-    // Member stats by track (wins, submissions, challenges; singular when count is 1)
     if (hasStatsByTrack) {
       const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
         const w = stat.wins ?? 0
