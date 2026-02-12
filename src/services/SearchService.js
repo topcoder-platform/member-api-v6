@@ -128,8 +128,8 @@ function omitMemberAttributes (currentUser, query, allowedValues) {
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     fields = _.without(fields, ...config.MEMBER_SECURE_FIELDS)
   }
-  // If the current user does not have an autocompleterole, remove the communication fields
-  if (!currentUser || (!currentUser.isMachine && !helper.hasAutocompleteRole(currentUser))) {
+  // If the current user does not have sensitive data role (Admin or Talent Manager), remove the communication fields
+  if (!currentUser || (!currentUser.isMachine && !helper.hasSensitiveDataRole(currentUser))) {
     fields = _.without(fields, ...config.COMMUNICATION_SECURE_FIELDS)
   }
   return fields

@@ -99,19 +99,19 @@ function omitMemberAttributes (currentUser, mb) {
   let res = _.omit(mb, INTERNAL_MEMBER_FIELDS)
   // remove identifiable info fields if user is not admin, not M2M and not member himself
   const canManageMember = helper.canManageMember(currentUser, mb)
-  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
-  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
+  const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle && mb.handleLower &&
     currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
-  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
-  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeIdentityVerified = isM2M || hasSensitiveDataRole || isSelf
+  const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
 
   if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
     res = helper.secureMemberAddressData(res)
     res = helper.truncateLastName(res)
   }
-  if (!canManageMember && !hasAutocompleteRole) {
+  if (!canManageMember && !hasSensitiveDataRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
     if (res.phones) {
       delete res.phones
@@ -124,6 +124,11 @@ function omitMemberAttributes (currentUser, mb) {
 
   if (!canSeeRecentActivity && res.recentActivity !== undefined) {
     delete res.recentActivity
+  }
+
+  // Remove availableForGigs if user doesn't have permission
+  if (!canManageMember && !hasSensitiveDataRole && res.availableForGigs !== undefined) {
+    delete res.availableForGigs
   }
 
   return res
@@ -253,16 +258,16 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
  */
 async function getMember (currentUser, handle, query) {
   // Check if user has permission to see phones
-  // Phones are visible to: self, admin, M2M, or users with autocomplete roles (Talent Manager, etc.)
-  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
-  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  // Phones are visible to: self, users with sensitive data roles (Talent Manager, admin) and M2M
+  const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
+  const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
 
-  const canSeePhones = isAdminOrM2M || hasAutocompleteRole || isSelf
-  const canSeeRecentActivity = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeePhones = isM2M || hasSensitiveDataRole || isSelf
+  const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
   // Identity verified field has same access control as phones
-  const canSeeIdentityVerified = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canSeeIdentityVerified = isM2M || hasSensitiveDataRole || isSelf
   const allowedFields = canSeePhones ? [...MEMBER_FIELDS, 'phones'] : MEMBER_FIELDS
 
   const threeMonthsAgo = new Date()
