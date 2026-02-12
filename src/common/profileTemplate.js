@@ -496,13 +496,13 @@ function buildProfileTemplate (pdfData) {
   if (topcoderActivity.specialRole || topcoderActivity.achievements || hasStatsByTrack) {
     const activityContent = [createSectionHeader('TOPCODER ACTIVITY')]
 
-    // Member stats by track first (Development: wins, submissions, challenges; Competitive Programming: rating, wins, competitions)
+    // Member stats by track (wins, submissions, challenges; singular when count is 1)
     if (hasStatsByTrack) {
       const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
-        const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
-        const valueText = isCompetitiveProgramming
-          ? `${stat.rating ?? 0} rating, ${stat.wins ?? 0} wins, ${stat.competitions ?? 0} competitions`
-          : `${stat.wins ?? 0} wins, ${stat.submissions ?? 0} submissions, ${stat.challenges ?? 0} challenges`
+        const w = stat.wins ?? 0
+        const s = stat.submissions ?? 0
+        const c = stat.challenges ?? 0
+        const valueText = `${w} ${w === 1 ? 'win' : 'wins'}, ${s} ${s === 1 ? 'submission' : 'submissions'}, ${c} ${c === 1 ? 'challenge' : 'challenges'}`
         return React.createElement(
           Text,
           { key: `stats-track-${index}`, style: styles.activityItem },

@@ -33,7 +33,6 @@ const academyPrisma = prismaManager.getAcademyClient()
 const resourcesPrisma = prismaManager.getResourcesClient()
 const engagementsPrisma = prismaManager.getEngagementsClient()
 const profilePDFService = require('./ProfilePDFService')
-const StatisticsService = require('./StatisticsService')
 const request = require('request')
 const cityTimezones = require('city-timezones')
 const moment = require('moment-timezone')
@@ -1515,11 +1514,11 @@ async function getMemberRoles (userId) {
   }
 }
 
-/** Track enum to display name (for standard tracks: wins, submissions, challenges) */
+/** Track enum to display name (wins, submissions, challenges) */
 const TRACK_DISPLAY_NAMES = {
   DEVELOPMENT: 'Development',
   DESIGN: 'Design',
-  DATA_SCIENCE: 'Competitive Programming',
+  DATA_SCIENCE: 'Data Science',
   QUALITY_ASSURANCE: 'Quality Assurance'
 }
 
@@ -1529,17 +1528,16 @@ const TRACK_DISPLAY_NAMES = {
  * @param {Number} userId member userId
  * @param {Object} challengesPrisma challenges Prisma client
  * @param {Object} resourcesPrisma resources Prisma client
- * @returns {Promise<Array<{ trackName: string, wins: number, submissions: number, challenges: number, rating?: number, competitions?: number }>>}
+ * @returns {Promise<Array<{ trackName: string, wins: number, submissions: number, challenges: number }>>}
  */
 async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrisma) {
-  const trackMap = {} // track enum -> { wins, submissions, challenges } or { rating, wins, competitions } for DATA_SCIENCE
+  const trackMap = {} // track enum -> { wins, submissions, challenges }
 
   try {
     const numUserId = typeof userId === 'bigint' ? helper.bigIntToNumber(userId) : userId
 
-    // 1) ChallengeWinner: wins (and submissions if same table) by track
     const winners = await challengesPrisma.ChallengeWinner.findMany({
-      where: { userId: numUserId },
+      where: { userId: numUserId, type: 'PLACEMENT' },
       include: {
         challenge: {
           include: { track: true }
@@ -1551,14 +1549,11 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       const trackEnum = w.challenge?.track?.track
       if (!trackEnum) continue
       if (!trackMap[trackEnum]) {
-        const isDataScience = trackEnum === 'DATA_SCIENCE'
-        trackMap[trackEnum] = isDataScience
-          ? { wins: 0, competitions: 0, rating: undefined }
-          : { wins: 0, submissions: 0, challenges: 0 }
+        trackMap[trackEnum] = { wins: 0, submissions: 0, challenges: 0 }
       }
       const row = trackMap[trackEnum]
-      if (row.wins !== undefined) row.wins += 1
-      if (row.submissions !== undefined) row.submissions += 1
+      row.wins += 1
+      row.submissions += 1
     }
 
     // 2) Resources: registrations (distinct challenges) by track
@@ -1592,13 +1587,9 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       }
       for (const [trackEnum, count] of Object.entries(challengesPerTrack)) {
         if (!trackMap[trackEnum]) {
-          const isDataScience = trackEnum === 'DATA_SCIENCE'
-          trackMap[trackEnum] = isDataScience
-            ? { wins: 0, competitions: count, rating: undefined }
-            : { wins: 0, submissions: 0, challenges: count }
+          trackMap[trackEnum] = { wins: 0, submissions: 0, challenges: count }
         } else {
-          if (trackMap[trackEnum].challenges !== undefined) trackMap[trackEnum].challenges = count
-          if (trackMap[trackEnum].competitions !== undefined) trackMap[trackEnum].competitions = count
+          trackMap[trackEnum].challenges = count
         }
       }
     }
@@ -1607,22 +1598,13 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
     for (const [trackEnum, counts] of Object.entries(trackMap)) {
       const trackName = TRACK_DISPLAY_NAMES[trackEnum] || trackEnum
       const hasAny = Object.values(counts).some(v => typeof v === 'number' && v > 0)
-      if (!hasAny && (counts.rating == null || counts.rating === 0)) continue
-      if (trackEnum === 'DATA_SCIENCE') {
-        statsByTrack.push({
-          trackName,
-          rating: counts.rating ?? 0,
-          wins: counts.wins ?? 0,
-          competitions: counts.competitions ?? 0
-        })
-      } else {
-        statsByTrack.push({
-          trackName,
-          wins: counts.wins ?? 0,
-          submissions: counts.submissions ?? 0,
-          challenges: counts.challenges ?? 0
-        })
-      }
+      if (!hasAny) continue
+      statsByTrack.push({
+        trackName,
+        wins: counts.wins ?? 0,
+        submissions: counts.submissions ?? 0,
+        challenges: counts.challenges ?? 0
+      })
     }
     return statsByTrack
   } catch (err) {
@@ -1734,28 +1716,6 @@ async function aggregatePDFData (currentUser, handle) {
     statsByTrack = await fetchMemberStatsByTrack(userId, challengesPrisma, resourcesPrisma)
   } catch (err) {
     logger.warn(`aggregatePDFData: statsByTrack failed for ${handle}: ${err.message}`)
-  }
-
-  // Merge Competitive Programming rating from stats endpoint (same source as GET /members/:handle/stats)
-  try {
-    const statsResult = await StatisticsService.getMemberStats(currentUser, handle, {})
-    const statsResponse = Array.isArray(statsResult) && statsResult.length > 0 ? statsResult[0] : null
-    if (statsResponse && statsResponse.DATA_SCIENCE) {
-      const ds = statsResponse.DATA_SCIENCE
-      const rating = (ds.SRM && ds.SRM.rank && ds.SRM.rank.rating != null)
-        ? ds.SRM.rank.rating
-        : (ds.MARATHON_MATCH && ds.MARATHON_MATCH.rank && ds.MARATHON_MATCH.rank.rating != null)
-          ? ds.MARATHON_MATCH.rank.rating
-          : 0
-      const cpEntry = statsByTrack.find(e => e.trackName === 'Competitive Programming')
-      if (cpEntry) {
-        cpEntry.rating = rating
-      } else if (rating > 0) {
-        statsByTrack.push({ trackName: 'Competitive Programming', rating, wins: 0, competitions: 0 })
-      }
-    }
-  } catch (err) {
-    logger.warn(`aggregatePDFData: getMemberStats for rating failed for ${handle}: ${err.message}`)
   }
 
   // Fetch certifications and courses
