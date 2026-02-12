@@ -2,7 +2,7 @@
  * App constants
  */
 const ADMIN_ROLES = ['administrator', 'admin']
-const PROFILE_DOWNLOAD_ROLES = ['project manager', 'Talent Manager']
+const SENSITIVE_DATA_ROLES = [...ADMIN_ROLES, 'Talent Manager']
 const SEARCH_BY_EMAIL_ROLES = ADMIN_ROLES.concat('tgadmin', 'copilot', 'Project Manager', 'Talent Manager')
 const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilot', 'Connect Account Manager', 'Connect Admin', 'Account Executive', 'Talent Manager', 'Project Manager']
 
@@ -36,7 +36,7 @@ const PHONE_REGEX = /^\+[1-9]\d{1,14}$/
 
 module.exports = {
   ADMIN_ROLES,
-  PROFILE_DOWNLOAD_ROLES,
+  SENSITIVE_DATA_ROLES,
   SEARCH_BY_EMAIL_ROLES,
   AUTOCOMPLETE_ROLES,
   EVENT_ORIGINATOR,
