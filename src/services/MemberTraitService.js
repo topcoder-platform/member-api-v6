@@ -224,6 +224,16 @@ async function getTraits (currentUser, handle, query) {
   if (traitIds) {
     result = _.filter(result, (item) => _.includes(traitIds, item.traitId))
   }
+  // links in personalization are only for the profile owner (self)
+  if (!isSelf) {
+    _.forEach(result, (item) => {
+      if (item.traitId === 'personalization' && item.traits && item.traits.data) {
+        _.forEach(item.traits.data, (dataEntry) => {
+          delete dataEntry.links
+        })
+      }
+    })
+  }
   // convert date time for traits data
   _.filter(result, (item) => _.forEach(item.traits.data, function (value) {
     if (value.hasOwnProperty('birthDate')) {
