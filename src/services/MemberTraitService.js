@@ -203,13 +203,13 @@ async function getTraits (currentUser, handle, query) {
   const traitIds = helper.parseCommaSeparatedString(query.traitIds, TRAIT_IDS) || TRAIT_IDS
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
 
-  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
-  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
+  const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
 
   // can read private personalisation info on a member
-  const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canReadPrivate = isM2M || hasSensitiveDataRole || isSelf
 
   const personalizationFilter = canReadPrivate
     ? {}
