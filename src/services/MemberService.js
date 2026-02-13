@@ -1536,8 +1536,11 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
   try {
     const numUserId = typeof userId === 'bigint' ? helper.bigIntToNumber(userId) : userId
 
-    const winners = await challengesPrisma.ChallengeWinner.findMany({
-      where: { userId: numUserId, type: 'PLACEMENT' },
+    const winnerRows = await challengesPrisma.ChallengeWinner.findMany({
+      where: {
+        userId: numUserId,
+        type: { in: ['PLACEMENT', 'PASSED_REVIEW'] }
+      },
       include: {
         challenge: {
           include: { track: true }
@@ -1545,15 +1548,15 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       }
     })
 
-    for (const w of winners) {
+    for (const w of winnerRows) {
       const trackEnum = w.challenge?.track?.track
       if (!trackEnum) continue
       if (!trackMap[trackEnum]) {
         trackMap[trackEnum] = { wins: 0, submissions: 0, challenges: 0 }
       }
       const row = trackMap[trackEnum]
-      row.wins += 1
-      row.submissions += 1
+      if (w.type === 'PLACEMENT') row.wins += 1
+      if (w.type === 'PASSED_REVIEW') row.submissions += 1
     }
 
     // 2) Resources: registrations (distinct challenges) by track
