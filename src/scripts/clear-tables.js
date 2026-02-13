@@ -9,22 +9,10 @@ async function main () {
   await prisma.memberFinancial.deleteMany()
   // delete stats
   console.log('Clearing member stats data')
-  await prisma.memberCopilotStats.deleteMany()
-  await prisma.memberMarathonStats.deleteMany()
-  await prisma.memberDesignStatsItem.deleteMany()
-  await prisma.memberDesignStats.deleteMany()
-  await prisma.memberDevelopStatsItem.deleteMany()
-  await prisma.memberDevelopStats.deleteMany()
-  await prisma.memberSrmChallengeDetail.deleteMany()
-  await prisma.memberSrmDivisionDetail.deleteMany()
-  await prisma.memberSrmStats.deleteMany()
   await prisma.memberStats.deleteMany()
-  await prisma.memberDataScienceStats.deleteMany()
   // delete stats history
   console.log('Clearing member stats history data')
-  await prisma.memberDataScienceHistoryStats.deleteMany()
-  await prisma.memberDevelopHistoryStats.deleteMany()
-  await prisma.memberHistoryStats.deleteMany()
+  await prisma.memberStatsHistory.deleteMany()
   // delete traits
   console.log('Clearing member traits data')
   await prisma.memberTraitBasicInfo.deleteMany()
@@ -53,10 +41,6 @@ async function main () {
   await skillsPrisma.skill.deleteMany()
   await skillsPrisma.skillCategory.deleteMany()
   await prisma.displayMode.deleteMany()
-
-  // delete distribution
-  console.log('Clearing rating distribution data')
-  await prisma.distributionStats.deleteMany()
 
   console.log('All done')
 }

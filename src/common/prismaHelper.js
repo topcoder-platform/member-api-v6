@@ -45,6 +45,88 @@ const auditFields = [
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
 ]
 
+const unifiedTrackMap = {
+  DEVELOP: 'DEVELOP',
+  DESIGN: 'DESIGN',
+  DATA_SCIENCE: 'DATA_SCIENCE',
+  COPILOT: 'COPILOT'
+}
+
+const unifiedTypeMap = {
+  CHALLENGE: 'Challenge',
+  FIRST2FINISH: 'First2Finish',
+  TASK: 'Task',
+  SRM: 'SRM',
+  MARATHON_MATCH: 'MARATHON_MATCH'
+}
+
+function getUnifiedTrackName (trackId) {
+  const normalized = String(trackId || '').toUpperCase().trim()
+  if (unifiedTrackMap[normalized]) {
+    return unifiedTrackMap[normalized]
+  }
+  if (normalized.includes('DATA') && normalized.includes('SCIENCE')) {
+    return 'DATA_SCIENCE'
+  }
+  if (normalized.includes('DEVELOP') || normalized === 'DEV') {
+    return 'DEVELOP'
+  }
+  if (normalized.includes('DESIGN') || normalized === 'DES') {
+    return 'DESIGN'
+  }
+  if (normalized.includes('COPILOT')) {
+    return 'COPILOT'
+  }
+  return normalized
+}
+
+function getUnifiedTypeName (typeId) {
+  const normalized = String(typeId || '').toUpperCase().trim()
+  if (unifiedTypeMap[normalized]) {
+    return unifiedTypeMap[normalized]
+  }
+  if (normalized.includes('MARATHON')) {
+    return 'MARATHON_MATCH'
+  }
+  if (normalized.includes('FIRST') || normalized.includes('F2F')) {
+    return 'First2Finish'
+  }
+  if (normalized.includes('TASK')) {
+    return 'Task'
+  }
+  if (normalized.includes('SRM')) {
+    return 'SRM'
+  }
+  if (normalized.includes('CHALLENGE')) {
+    return 'Challenge'
+  }
+  return typeId
+}
+
+function toUnixTime (value) {
+  return value ? value.getTime() : null
+}
+
+function toNumber (value) {
+  if (_.isNil(value)) {
+    return 0
+  }
+  return helper.bigIntToNumber(value)
+}
+
+function mergeTrackCounters (trackItem, stat) {
+  trackItem.challenges = toNumber(trackItem.challenges) + toNumber(stat.challenges)
+  trackItem.wins = toNumber(trackItem.wins) + toNumber(stat.wins)
+  const submissionDate = toUnixTime(stat.mostRecentSubmission)
+  const eventDate = toUnixTime(stat.mostRecentEventDate)
+  if (submissionDate && (!trackItem.mostRecentSubmission || submissionDate > trackItem.mostRecentSubmission)) {
+    trackItem.mostRecentSubmission = submissionDate
+  }
+  if (eventDate && (!trackItem.mostRecentEventDate || eventDate > trackItem.mostRecentEventDate)) {
+    trackItem.mostRecentEventDate = eventDate
+  }
+}
+
 /**
  * Convert member db data to response data
  * @param {Object} member member data from db
@@ -107,13 +189,13 @@ function buildMemberSkills (skillList) {
       ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])
     }
 
-    if (first.skill && first.skill.skillEvents?.length) {
+    if (first.skill && first.skill.skillEvents && first.skill.skillEvents.length) {
       const events = _.orderBy(first.skill.skillEvents || [], 'createdAt', 'desc')
       const grouped = _.groupBy(events, 'sourceType.name')
       ret.lastUsedDate = events[0].createdAt
-      
-      ret.activity = _.mapValues(grouped, (v, k) => ({
-        sources: v,
+
+      ret.activity = _.mapValues(grouped, (v) => ({
+        sources: v
       }))
     }
 
@@ -301,73 +383,224 @@ function buildStatsResponse (member, statsData, fields) {
 }
 
 /**
- * Convert prisma data to response structure for member stats history
+ * Convert db data from unified memberStats table to response structure
  * @param {Object} member member data
- * @param {Object} historyStats stats history
- * @param {Array} fields fields to return in response
- * @returns response
+ * @param {Array|Object} statsData stats data from db
+ * @param {Array} fields fields return in response
+ * @returns Member stats response
  */
-function buildStatsHistoryResponse (member, historyStats, fields) {
+function buildUnifiedStatsResponse (member, statsData, fields) {
+  const rows = _.isArray(statsData) ? statsData : [statsData]
+  const validRows = _.filter(rows, row => !_.isNil(row))
   const item = {
     userId: helper.bigIntToNumber(member.userId),
-    groupId: helper.bigIntToNumber(historyStats.groupId),
     handle: member.handle,
-    handleLower: member.handleLower
+    handleLower: member.handleLower,
+    challenges: _.sumBy(validRows, row => toNumber(row.challenges)),
+    wins: _.sumBy(validRows, row => toNumber(row.wins))
   }
-  // collect develop data
-  if (historyStats.develop && historyStats.develop.length > 0) {
-    item.DEVELOP = { subTracks: [] }
-    // group by subTrackId
-    const subTrackGroupData = _.groupBy(historyStats.develop, 'subTrackId')
-    // for each sub track, build history data
-    _.forEach(subTrackGroupData, (trackHistory, subTrackId) => {
-      const subTrackItem = {
-        id: subTrackId,
-        name: trackHistory[0].subTrack
+  if (member.maxRating) {
+    item.maxRating = _.pick(member.maxRating, ['rating', 'track', 'subTrack', 'ratingColor'])
+  }
+
+  _.forEach(validRows, (row) => {
+    const trackName = getUnifiedTrackName(row.trackId)
+    const typeName = getUnifiedTypeName(row.typeId)
+    if (trackName === 'DEVELOP') {
+      if (!item.DEVELOP) {
+        item.DEVELOP = {
+          challenges: 0,
+          wins: 0,
+          mostRecentSubmission: null,
+          mostRecentEventDate: null,
+          subTracks: []
+        }
       }
-      subTrackItem.history = _.map(trackHistory, h => ({
-        ..._.pick(h, ['challengeName', 'newRating']),
-        challengeId: helper.bigIntToNumber(h.challengeId),
-        ratingDate: h.ratingDate ? h.ratingDate.getTime() : null
-      }))
+      mergeTrackCounters(item.DEVELOP, row)
+      const subTrackItem = {
+        id: typeName,
+        name: typeName,
+        challenges: toNumber(row.challenges),
+        wins: toNumber(row.wins),
+        mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
+        mostRecentEventDate: toUnixTime(row.mostRecentEventDate)
+      }
+      const rank = {}
+      if (!_.isNil(row.rating)) {
+        rank.rating = row.rating
+      }
+      if (!_.isNil(row.globalRank)) {
+        rank.overallRank = row.globalRank
+      }
+      if (!_.isNil(row.countryRank)) {
+        rank.overallCountryRank = row.countryRank
+      }
+      if (!_.isNil(row.schoolRank)) {
+        rank.overallSchoolRank = row.schoolRank
+      }
+      if (!_.isNil(row.volatility)) {
+        rank.volatility = row.volatility
+      }
+      if (!_.isNil(row.maxRating)) {
+        rank.maxRating = row.maxRating
+      }
+      if (!_.isNil(row.minRating)) {
+        rank.minRating = row.minRating
+      }
+      if (!_.isEmpty(rank)) {
+        subTrackItem.rank = rank
+      }
       item.DEVELOP.subTracks.push(subTrackItem)
-    })
-  }
-  // collect data sciencedata
-  if (historyStats.dataScience && historyStats.dataScience.length > 0) {
-    item.DATA_SCIENCE = {}
-    const srmHistory = _.filter(historyStats.dataScience, t => t.subTrack === 'SRM')
-    const marathonHistory = _.filter(historyStats.dataScience, t => t.subTrack === 'MARATHON_MATCH')
-    if (srmHistory.length > 0) {
-      item.DATA_SCIENCE.SRM = {}
-      item.DATA_SCIENCE.SRM.history = _.map(srmHistory, h => ({
-        ..._.pick(h, ['challengeName', 'rating', 'placement', 'percentile']),
-        challengeId: helper.bigIntToNumber(h.challengeId),
-        date: h.date ? h.date.getTime() : null
-      }))
+    } else if (trackName === 'DESIGN') {
+      if (!item.DESIGN) {
+        item.DESIGN = {
+          challenges: 0,
+          wins: 0,
+          mostRecentSubmission: null,
+          mostRecentEventDate: null,
+          subTracks: []
+        }
+      }
+      mergeTrackCounters(item.DESIGN, row)
+      item.DESIGN.subTracks.push({
+        id: typeName,
+        name: typeName,
+        challenges: toNumber(row.challenges),
+        wins: toNumber(row.wins),
+        mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
+        mostRecentEventDate: toUnixTime(row.mostRecentEventDate)
+      })
+    } else if (trackName === 'DATA_SCIENCE') {
+      if (!item.DATA_SCIENCE) {
+        item.DATA_SCIENCE = {
+          challenges: 0,
+          wins: 0,
+          mostRecentSubmission: null,
+          mostRecentEventDate: null
+        }
+      }
+      mergeTrackCounters(item.DATA_SCIENCE, row)
+      if (typeName === 'SRM') {
+        const srmItem = {
+          challenges: toNumber(row.challenges),
+          wins: toNumber(row.wins),
+          mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
+          mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
+          rank: _.omitBy({
+            rating: row.rating,
+            rank: row.globalRank,
+            countryRank: row.countryRank,
+            schoolRank: row.schoolRank,
+            volatility: row.volatility,
+            maximumRating: row.maxRating,
+            minimumRating: row.minRating
+          }, _.isNil)
+        }
+        item.DATA_SCIENCE.SRM = srmItem
+      } else if (typeName === 'MARATHON_MATCH') {
+        const marathonItem = {
+          challenges: toNumber(row.challenges),
+          wins: toNumber(row.wins),
+          mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
+          mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
+          rank: _.omitBy({
+            rating: row.rating,
+            rank: row.globalRank,
+            countryRank: row.countryRank,
+            schoolRank: row.schoolRank,
+            volatility: row.volatility,
+            maximumRating: row.maxRating,
+            minimumRating: row.minRating,
+            avgRank: row.avgRank,
+            avgNumSubmissions: row.avgNumSubmissions,
+            bestRank: row.bestRank,
+            topFiveFinishes: row.topFiveFinishes,
+            topTenFinishes: row.topTenFinishes
+          }, _.isNil)
+        }
+        item.DATA_SCIENCE.MARATHON_MATCH = marathonItem
+      }
+    } else if (trackName === 'COPILOT') {
+      item.COPILOT = _.omitBy({
+        challenges: toNumber(row.challenges),
+        wins: toNumber(row.wins),
+        mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
+        mostRecentEventDate: toUnixTime(row.mostRecentEventDate)
+      }, _.isNil)
     }
-    if (marathonHistory.length > 0) {
-      item.DATA_SCIENCE.MARATHON_MATCH = {}
-      item.DATA_SCIENCE.MARATHON_MATCH.history = _.map(marathonHistory, h => ({
-        ..._.pick(h, ['challengeName', 'rating', 'placement', 'percentile']),
-        challengeId: helper.bigIntToNumber(h.challengeId),
-        date: h.date ? h.date.getTime() : null
-      }))
-    }
-  }
+  })
+
   return fields ? _.pick(item, fields) : item
 }
 
-// include parameters used to get all member stats
-const statsIncludeParams = {
-  design: { include: { items: true } },
-  develop: { include: { items: true } },
-  dataScience: { include: {
-    srm: { include: { challengeDetails: true, divisions: true } },
-    marathon: true
-  } },
-  copilot: true
+/**
+ * Convert prisma data from unified memberStatsHistory table
+ * @param {Object} member member data
+ * @param {Array|Object} historyStats stats history
+ * @param {Array} fields fields to return in response
+ * @returns response
+ */
+function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
+  const rows = _.isArray(historyStats) ? historyStats : [historyStats]
+  const validRows = _.filter(rows, row => !_.isNil(row))
+  const first = _.head(validRows) || {}
+  const item = {
+    userId: helper.bigIntToNumber(member.userId),
+    groupId: helper.bigIntToNumber(first.groupId),
+    handle: member.handle,
+    handleLower: member.handleLower
+  }
+
+  const groupedByTrackType = _.groupBy(validRows, row => `${getUnifiedTrackName(row.trackId)}::${getUnifiedTypeName(row.typeId)}`)
+  _.forEach(groupedByTrackType, (trackHistory, key) => {
+    const [trackName, typeName] = key.split('::')
+    if (trackName === 'DEVELOP') {
+      if (!item.DEVELOP) {
+        item.DEVELOP = { subTracks: [] }
+      }
+      item.DEVELOP.subTracks.push({
+        id: typeName,
+        name: typeName,
+        history: _.map(trackHistory, h => _.omitBy({
+          challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
+          ratingDate: h.eventDate ? h.eventDate.getTime() : null,
+          oldRating: h.oldRating,
+          newRating: h.newRating,
+          oldGlobalRank: h.oldGlobalRank,
+          newGlobalRank: h.newGlobalRank,
+          oldCountryRank: h.oldCountryRank,
+          newCountryRank: h.newCountryRank,
+          oldSchoolRank: h.oldSchoolRank,
+          newSchoolRank: h.newSchoolRank
+        }, _.isNil))
+      })
+    } else if (trackName === 'DATA_SCIENCE') {
+      if (!item.DATA_SCIENCE) {
+        item.DATA_SCIENCE = {}
+      }
+      if (!item.DATA_SCIENCE[typeName]) {
+        item.DATA_SCIENCE[typeName] = {}
+      }
+      item.DATA_SCIENCE[typeName].history = _.map(trackHistory, h => _.omitBy({
+        challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
+        date: h.eventDate ? h.eventDate.getTime() : null,
+        oldRating: h.oldRating,
+        newRating: h.newRating,
+        oldGlobalRank: h.oldGlobalRank,
+        newGlobalRank: h.newGlobalRank,
+        oldCountryRank: h.oldCountryRank,
+        newCountryRank: h.newCountryRank,
+        oldSchoolRank: h.oldSchoolRank,
+        newSchoolRank: h.newSchoolRank
+      }, _.isNil))
+    }
+  })
+
+  return fields ? _.pick(item, fields) : item
 }
+
+// include parameters used to get unified member stats
+const unifiedStatsIncludeParams = {}
 
 // include parameters used to get all member skills
 // Standardized skills schema: userSkill has singular level and display mode
@@ -802,9 +1035,10 @@ module.exports = {
   convertMember,
   buildMemberSkills,
   buildStatsResponse,
+  buildUnifiedStatsResponse,
   buildSearchMemberFilter,
-  buildStatsHistoryResponse,
-  statsIncludeParams,
+  buildUnifiedStatsHistoryResponse,
+  unifiedStatsIncludeParams,
   skillsIncludeParams,
   convertDate,
   updateOrCreateModel,

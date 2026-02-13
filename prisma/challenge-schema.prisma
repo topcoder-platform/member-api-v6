@@ -1,0 +1,28 @@
+generator challengeClient {
+  provider = "prisma-client-js"
+  output   = "./generated/challenge-client"
+}
+
+datasource challengedb {
+  provider = "postgresql"
+  url      = env("CHALLENGE_DB_URL")
+}
+
+model ChallengeTrack {
+  id           String @id
+  name         String
+  abbreviation String
+}
+
+model ChallengeType {
+  id           String  @id
+  name         String
+  abbreviation String
+  isTask       Boolean
+}
+
+model Challenge {
+  id      String @id
+  trackId String
+  typeId  String
+}

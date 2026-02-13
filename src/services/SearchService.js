@@ -425,17 +425,17 @@ async function addStats (results) {
   // get member stats
   const memberStatsList = await prisma.memberStats.findMany({
     where: { userId: { in: userIds } },
-    // include all tracks
-    include: prismaHelper.statsIncludeParams
+    include: prismaHelper.unifiedStatsIncludeParams
   })
   // merge overall members and stats
-  const mbrsSkillsStatsKeys = _.keyBy(memberStatsList, 'userId')
+  const mbrsSkillsStatsKeys = _.groupBy(memberStatsList, item => helper.bigIntToNumber(item.userId))
   const resultsWithStats = _.map(results, item => {
     item.numberOfChallengesWon = 0
     item.numberOfChallengesPlaced = 0
-    if (mbrsSkillsStatsKeys[item.userId]) {
+    const userStatsRows = mbrsSkillsStatsKeys[helper.bigIntToNumber(item.userId)] || []
+    if (userStatsRows.length > 0) {
       item.stats = []
-      const statsData = prismaHelper.buildStatsResponse(item, mbrsSkillsStatsKeys[item.userId], MEMBER_STATS_FIELDS)
+      const statsData = prismaHelper.buildUnifiedStatsResponse(item, userStatsRows, MEMBER_STATS_FIELDS)
       if (statsData.wins > item.numberOfChallengesWon) {
         item.numberOfChallengesWon = statsData.wins
       }

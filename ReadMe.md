@@ -21,9 +21,11 @@ After that, please set db URL environment variables:
 ```bash
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
 export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
+export CHALLENGE_DB_URL="postgresql://johndoe:mypassword@localhost:5432/challengedb?schema=challenges"
 ```
 
 These variables are important since they're required by Prisma clients.
+`CHALLENGE_DB_URL` should target the same PostgreSQL instance/database used by `challenge-api-v6`.
 
 If you want to do anything with database, these variables are necessary.
 
@@ -35,6 +37,7 @@ Before running db scripts, please make sure you have setup db and config db url 
 # set db url values
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
 export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
+export CHALLENGE_DB_URL="postgresql://johndoe:mypassword@localhost:5432/challengedb?schema=challenges"
 
 # install dependencies
 npm install
@@ -79,6 +82,8 @@ The following parameters can be set in config files or in env variables:
 - PORT: the server port, default is 3000
 - AUTH_SECRET: The authorization secret used during token verification.
 - VALID_ISSUERS: The valid issuer of tokens.
+- IDENTITY_DB_URL: PostgreSQL connection string for Identity schema reads.
+- CHALLENGE_DB_URL: PostgreSQL connection string for challenge schema reads (format: `postgresql://user:password@host:port/database?schema=challenges`, and should point to the same database used by challenge-api-v6).
 - VANILLA_DB_URL: MySQL connection string for the Vanilla forums database.
 - AUTH0_URL: AUTH0 URL, used to get M2M token
 - AUTH0_PROXY_SERVER_URL: AUTH0 proxy server URL, used to get M2M token

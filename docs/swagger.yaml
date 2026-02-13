@@ -1368,7 +1368,14 @@ paths:
       tags:
         - Statistics
       description: >
-        Retrieve member statistics, optionally filtered by group.
+        Retrieve member statistics, optionally filtered by group, challenge track, and challenge type.
+        
+        Filtering behavior:
+          - `trackId` only: returns all statistics for that track across all types.
+          - `typeId` only: returns all statistics for that type across all tracks.
+          - `trackId` + `typeId`: returns statistics for the specific track-type combination.
+          - Neither `trackId` nor `typeId`: returns all statistics.
+          - For non-rated tracks/types (for example, Design or First2Finish), rating and rank fields are `null`.
         
         Authorization:
           - Public: Anonymous callers receive only public statistics.
@@ -1384,6 +1391,16 @@ paths:
           required: false
           type: string
           description: comma separated group ids (returns public stats if group ids is not provided)
+        - name: trackId
+          in: query
+          required: false
+          type: string
+          description: Filter statistics by challenge track ID (e.g., "DATA_SCIENCE", "DEVELOP", "DESIGN", "QA")
+        - name: typeId
+          in: query
+          required: false
+          type: string
+          description: Filter statistics by challenge type ID (e.g., "CH" for Challenge, "F2F" for First2Finish, "TSK" for Task)
         - name: fields
           in: query
           required: false
@@ -1540,6 +1557,14 @@ paths:
         - Statistics
       description: >
         Get member history statistics, by default only returns the public Topcoder history statistics.
+        Results can be filtered by challenge track and challenge type for more granular historical views.
+        
+        Filtering behavior:
+          - `trackId` only: returns all history statistics for that track across all types.
+          - `typeId` only: returns all history statistics for that type across all tracks.
+          - `trackId` + `typeId`: returns history statistics for the specific track-type combination.
+          - Neither `trackId` nor `typeId`: returns all history statistics.
+          - For non-rated tracks/types (for example, Design or First2Finish), rating and rank fields are `null`.
         
         Authorization:
           - Public: Anonymous callers receive only public history statistics.
@@ -1555,6 +1580,16 @@ paths:
           required: false
           type: string
           description: comma separated group ids (returns members public history statistics if groupIds is not provided)
+        - name: trackId
+          in: query
+          required: false
+          type: string
+          description: Filter history statistics by challenge track ID (e.g., "DATA_SCIENCE", "DEVELOP", "DESIGN", "QA")
+        - name: typeId
+          in: query
+          required: false
+          type: string
+          description: Filter history statistics by challenge type ID (e.g., "CH" for Challenge, "F2F" for First2Finish, "TSK" for Task)
         - name: fields
           in: query
           required: false
