@@ -498,10 +498,10 @@ function buildProfileTemplate (pdfData) {
 
     if (hasStatsByTrack) {
       const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
-        const w = stat.wins ?? 0
-        const s = stat.submissions ?? 0
-        const c = stat.challenges ?? 0
-        const valueText = `${w} ${w === 1 ? 'win' : 'wins'}, ${s} ${s === 1 ? 'submission' : 'submissions'}, ${c} ${c === 1 ? 'challenge' : 'challenges'}`
+        const wins = stat.wins ?? 0
+        const submissions = stat.submissions ?? 0
+        const challenges = stat.challenges ?? 0
+        const valueText = `${wins} ${wins === 1 ? 'win' : 'wins'}, ${submissions} ${submissions === 1 ? 'submission' : 'submissions'}, ${challenges} ${challenges === 1 ? 'challenge' : 'challenges'}`
         return React.createElement(
           Text,
           { key: `stats-track-${index}`, style: styles.activityItem },
