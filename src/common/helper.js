@@ -150,22 +150,17 @@ function hasAutocompleteRole (authUser) {
 }
 
 /**
- * Check if the user has a role which can download profile
+ * Check if the user has a role that grants access to sensitive member data
  * @param {Object} authUser the user
- * @returns {Boolean} whether the user has PM role
+ * @returns {Boolean} whether the user has any "sensitive data" roles
  */
-function hasProfileDownloadableRole (authUser) {
+function hasSensitiveDataRole (authUser) {
   if (!authUser || !authUser.roles) {
     return false
   }
-  for (let i = 0; i < authUser.roles.length; i += 1) {
-    for (let j = 0; j < constants.PROFILE_DOWNLOAD_ROLES.length; j += 1) {
-      if (authUser.roles[i].toLowerCase() === constants.PROFILE_DOWNLOAD_ROLES[j].toLowerCase()) {
-        return true
-      }
-    }
-  }
-  return false
+
+  const allowedRolesLower = constants.SENSITIVE_DATA_ROLES.map(r => r.toLowerCase())
+  return authUser.roles.some(r => allowedRolesLower.includes(r.toLowerCase()))
 }
 
 /**
@@ -372,12 +367,8 @@ function canDownloadProfile (currentUser, member) {
   if (currentUser.isMachine) {
     return true
   }
-  // Admin can download
-  if (hasAdminRole(currentUser)) {
-    return true
-  }
-  // PM can download
-  if (hasProfileDownloadableRole(currentUser)) {
+  // Admin or Talent Manager can download
+  if (hasSensitiveDataRole(currentUser)) {
     return true
   }
   // Member can download their own profile
@@ -647,7 +638,7 @@ module.exports = {
   hasAdminRole,
   hasAutocompleteRole,
   hasSearchByEmailRole,
-  hasProfileDownloadableRole,
+  hasSensitiveDataRole,
   getMemberByHandle,
   uploadPhotoToS3,
   postBusEvent,

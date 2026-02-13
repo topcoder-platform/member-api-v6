@@ -89,6 +89,22 @@ describe('member service unit tests', () => {
       // should.not.exist(result.addresses)
     })
 
+    it('get member should not expose email for regular users when communication fields are misconfigured', async () => {
+      const originalCommunicationSecureFields = [...config.COMMUNICATION_SECURE_FIELDS]
+      config.COMMUNICATION_SECURE_FIELDS = ['loginCount', 'lastLoginDate']
+
+      try {
+        const result = await service.getMember({ handle: 'test', roles: ['role'] }, member1.handle, {
+          fields: 'userId,firstName,lastName,email,loginCount,lastLoginDate'
+        })
+        should.equal(result.userId, member1.userId)
+        should.equal(result.firstName, member1.firstName)
+        should.not.exist(result.email)
+      } finally {
+        config.COMMUNICATION_SECURE_FIELDS = originalCommunicationSecureFields
+      }
+    })
+
     it('get member - not found', async () => {
       try {
         await service.getMember({ isMachine: true }, 'other', {})

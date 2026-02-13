@@ -2,6 +2,18 @@
  * The configuration file.
  */
 
+const communicationSecureFields = (
+  process.env.COMMUNICATION_SECURE_FIELDS
+    ? process.env.COMMUNICATION_SECURE_FIELDS.split(',')
+    : ['email', 'loginCount', 'lastLoginDate']
+)
+  .map(field => field.trim())
+  .filter(field => field.length > 0)
+
+if (!communicationSecureFields.includes('email')) {
+  communicationSecureFields.unshift('email')
+}
+
 module.exports = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'debug',
   PORT: process.env.PORT || 3000,
@@ -76,9 +88,7 @@ module.exports = {
 
   // Member identifiable info fields, copilots, admins, or M2M can get these fields
   // Anyone in the constants.AUTOCOMPLETE_ROLES will have access to these fields
-  COMMUNICATION_SECURE_FIELDS: process.env.COMMUNICATION_SECURE_FIELDS
-    ? process.env.COMMUNICATION_SECURE_FIELDS.split(',')
-    : ['email', 'loginCount', 'lastLoginDate'],
+  COMMUNICATION_SECURE_FIELDS: communicationSecureFields,
 
   // Member identifiable info traits that are public, anyone can get these fields
   MEMBER_PUBLIC_TRAITS: process.env.MEMBER_PUBLIC_TRAITS

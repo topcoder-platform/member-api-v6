@@ -10,6 +10,7 @@ const config = require('config')
 const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
+const copilotEmailAccess = require('../common/copilotEmailAccess')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const prisma = prismaManager.getClient()
@@ -127,11 +128,39 @@ function omitMemberAttributes (currentUser, query, allowedValues) {
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     fields = _.without(fields, ...config.MEMBER_SECURE_FIELDS)
   }
-  // If the current user does not have an autocompleterole, remove the communication fields
-  if (!currentUser || (!currentUser.isMachine && !helper.hasAutocompleteRole(currentUser))) {
+  // If the current user does not have sensitive data role (Admin or Talent Manager), remove the communication fields
+  if (!currentUser || (!currentUser.isMachine && !helper.hasSensitiveDataRole(currentUser))) {
     fields = _.without(fields, ...config.COMMUNICATION_SECURE_FIELDS)
   }
   return fields
+}
+
+function prepareFieldsForCopilotEmailFiltering (currentUser, requestedFields) {
+  const shouldLimitCopilotEmailAccess = copilotEmailAccess.shouldLimitCopilotEmailAccess(currentUser)
+  const includesEmail = _.includes(requestedFields, 'email')
+  const includesUserId = _.includes(requestedFields, 'userId')
+  const shouldAddUserIdForFiltering = shouldLimitCopilotEmailAccess && includesEmail && !includesUserId
+
+  return {
+    fieldsForQuery: shouldAddUserIdForFiltering
+      ? [...requestedFields, 'userId']
+      : requestedFields,
+    removeUserIdAfterFiltering: shouldAddUserIdForFiltering
+  }
+}
+
+async function applyCopilotEmailFiltering (currentUser, records, removeUserIdAfterFiltering) {
+  if (!Array.isArray(records) || records.length === 0) {
+    return records
+  }
+
+  await copilotEmailAccess.stripUnauthorizedCopilotEmails(currentUser, records)
+
+  if (removeUserIdAfterFiltering) {
+    return _.map(records, record => _.omit(record, 'userId'))
+  }
+
+  return records
 }
 
 function parseCsvLine (line) {
@@ -279,7 +308,25 @@ function normalizeBulkIdentifiers (rawIdentifiers) {
  * @returns {Object} the search result
  */
 async function searchMembers (currentUser, query) {
-  const fields = omitMemberAttributes(currentUser, query, MEMBER_FIELDS)
+  const requestedFields = omitMemberAttributes(currentUser, query, MEMBER_FIELDS)
+  const preparedFields = prepareFieldsForCopilotEmailFiltering(currentUser, requestedFields)
+  const shouldLimitCopilotEmailAccess = copilotEmailAccess.shouldLimitCopilotEmailAccess(currentUser)
+  const isEmailLookup = query.email != null && query.email.length > 0
+
+  let fieldsForQuery = [...preparedFields.fieldsForQuery]
+  let removeUserIdAfterFiltering = preparedFields.removeUserIdAfterFiltering
+  let removeEmailAfterFiltering = false
+
+  if (shouldLimitCopilotEmailAccess && isEmailLookup) {
+    if (!_.includes(fieldsForQuery, 'email')) {
+      fieldsForQuery.push('email')
+      removeEmailAfterFiltering = true
+    }
+    if (!_.includes(fieldsForQuery, 'userId')) {
+      fieldsForQuery.push('userId')
+      removeUserIdAfterFiltering = true
+    }
+  }
 
   const logContext = _.omitBy({
     handle: query.handle,
@@ -321,13 +368,30 @@ async function searchMembers (currentUser, query) {
     restrictStatus: !(canBypassStatusRestriction || isExplicitMemberLookup)
   })
   logger.debug(`searchMembers: prisma filter ${stringifyForLog(prismaFilter)}`)
-  const searchData = await fillMembers(prismaFilter, query, fields)
+  const searchData = await fillMembers(prismaFilter, query, fieldsForQuery)
 
   // secure address data
   const canManageMember = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
   if (!canManageMember) {
     searchData.result = _.map(searchData.result, res => helper.secureMemberAddressData(res))
     searchData.result = _.map(searchData.result, res => helper.truncateLastName(res))
+  }
+
+  searchData.result = await applyCopilotEmailFiltering(
+    currentUser,
+    searchData.result,
+    removeUserIdAfterFiltering
+  )
+
+  if (shouldLimitCopilotEmailAccess && isEmailLookup) {
+    searchData.result = searchData.result.filter(result => (
+      result.email !== undefined && result.email !== null
+    ))
+    searchData.total = searchData.result.length
+  }
+
+  if (removeEmailAfterFiltering) {
+    searchData.result = _.map(searchData.result, result => _.omit(result, 'email'))
   }
 
   logger.debug(`searchMembers: returning total=${searchData.total} resultCount=${_.size(searchData.result)} page=${searchData.page} perPage=${searchData.perPage}`)
@@ -711,14 +775,18 @@ const searchMembersBySkills = async (currentUser, query) => {
     // NOTE, we remove stats only because it's too much data at the current time for the talent search app
     // We can add stats back in at some point in the future if we want to expand the information shown on the
     // talent search app.
-    const fields = omitMemberAttributes(currentUser, query, _.without(MEMBER_FIELDS, 'stats'))
+    const requestedFields = omitMemberAttributes(currentUser, query, _.without(MEMBER_FIELDS, 'stats'))
+    const {
+      fieldsForQuery,
+      removeUserIdAfterFiltering
+    } = prepareFieldsForCopilotEmailFiltering(currentUser, requestedFields)
     // build search member filter. Make sure member has every skill id in skillIds
     const memberIds = await searchMemberIdWithSkillIds(skillIds)
     const prismaFilter = {
       where: { userId: { in: memberIds } }
     }
     // build result
-    let response = await fillMembers(prismaFilter, query, fields, true)
+    let response = await fillMembers(prismaFilter, query, fieldsForQuery, true)
 
     // secure address data
     const canManageMember = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
@@ -726,6 +794,12 @@ const searchMembersBySkills = async (currentUser, query) => {
       response.result = _.map(response.result, res => helper.secureMemberAddressData(res))
       response.result = _.map(response.result, res => helper.truncateLastName(res))
     }
+
+    response.result = await applyCopilotEmailFiltering(
+      currentUser,
+      response.result,
+      removeUserIdAfterFiltering
+    )
 
     return response
   } catch (e) {
@@ -823,6 +897,8 @@ async function bulkSearch (currentUser, data) {
         }
       })
 
+    await copilotEmailAccess.stripUnauthorizedCopilotEmails(currentUser, members)
+
     const membersByHandle = new Map()
     const membersByEmail = new Map()
     for (const member of members) {
@@ -885,7 +961,11 @@ bulkSearch.schema = {
  * @returns {Object} the autocomplete result
  */
 async function autocomplete (currentUser, query) {
-  const fields = omitMemberAttributes(currentUser, query, MEMBER_AUTOCOMPLETE_FIELDS)
+  const requestedFields = omitMemberAttributes(currentUser, query, MEMBER_AUTOCOMPLETE_FIELDS)
+  const {
+    fieldsForQuery,
+    removeUserIdAfterFiltering
+  } = prepareFieldsForCopilotEmailFiltering(currentUser, requestedFields)
 
   if (!query.term || query.term.length === 0) {
     return { total: 0, page: query.page, perPage: query.perPage, result: [] }
@@ -902,7 +982,7 @@ async function autocomplete (currentUser, query) {
     return { total: 0, page: query.page, perPage: query.perPage, result: [] }
   }
   const selectFields = {}
-  _.forEach(fields, f => {
+  _.forEach(fieldsForQuery, f => {
     selectFields[f] = true
   })
 
@@ -914,12 +994,14 @@ async function autocomplete (currentUser, query) {
     orderBy: { handle: query.sortOrder }
   })
   records = _.map(records, item => {
-    const t = _.pick(item, fields)
+    const t = _.pick(item, fieldsForQuery)
     if (t.userId) {
       t.userId = helper.bigIntToNumber(t.userId)
     }
     return t
   })
+
+  records = await applyCopilotEmailFiltering(currentUser, records, removeUserIdAfterFiltering)
 
   return { total, page: query.page, perPage: query.perPage, result: records }
 }
