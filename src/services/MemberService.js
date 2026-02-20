@@ -392,7 +392,6 @@ async function getProfileCompleteness (currentUser, handle, query) {
   data.skills = false
   data.gigAvailability = false
   data.bio = false
-  data.profilePicture = false
   data.workHistory = false
   data.education = false
   data.location = false
@@ -465,13 +464,6 @@ async function getProfileCompleteness (currentUser, handle, query) {
     data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
   } else {
     showToast.push('skills')
-  }
-
-  if (member.photoURL) {
-    completeItems += 1
-    data.profilePicture = true
-  } else {
-    showToast.push('profilePicture')
   }
 
   if (member.addresses && member.addresses.length) {
