@@ -15,6 +15,23 @@ const TRANSACTION_TIMEOUT_MS = 60000
 const TRANSACTION_MAX_RETRIES = 3
 const TRANSACTION_RETRY_DELAY_MS = 1000
 const DEFAULT_RATING_COLOR = '#EF3A3A'
+const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/
+const RATING_COLORS = [{
+  color: '#9D9FA0',
+  limit: 900
+}, {
+  color: '#69C329',
+  limit: 1200
+}, {
+  color: '#616BD5',
+  limit: 1500
+}, {
+  color: '#FCD617',
+  limit: 2200
+}, {
+  color: '#EF3A3A',
+  limit: Infinity
+}]
 const DRY_RUN = process.env.MEMBER_MIGRATION_DRY_RUN === 'true'
 const LOG_LEVELS = {
   INFO: 'INFO',
@@ -70,6 +87,43 @@ const destructiveApprovals = new Map()
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
+}
+
+/**
+ * Return Topcoder rating color from numeric rating.
+ * @param {Number|String} rating rating value from import source
+ * @returns {String} resolved rating color
+ */
+function getRatingColorFromRating (rating) {
+  const numericRating = Number(rating)
+  if (!Number.isFinite(numericRating)) {
+    return DEFAULT_RATING_COLOR
+  }
+
+  let i = 0
+  while (i < RATING_COLORS.length && RATING_COLORS[i].limit <= numericRating) {
+    i += 1
+  }
+
+  return (RATING_COLORS[i] && RATING_COLORS[i].color) || DEFAULT_RATING_COLOR
+}
+
+/**
+ * Resolve maxRating.ratingColor from imported payload.
+ * Preserve valid imported values, otherwise derive the color from rating.
+ * @param {Object} maxRating max rating payload
+ * @returns {String} resolved rating color
+ */
+function resolveMaxRatingColor (maxRating) {
+  const providedColor = get(maxRating, 'ratingColor')
+  if (isString(providedColor)) {
+    const normalizedColor = providedColor.trim()
+    if (HEX_COLOR_REGEX.test(normalizedColor)) {
+      return normalizedColor.toUpperCase()
+    }
+  }
+
+  return getRatingColorFromRating(get(maxRating, 'rating'))
 }
 
 function logWithLevel (level, message, context = null) {
@@ -1357,7 +1411,7 @@ async function fixMemberData (memberItem, batchItems) {
     maxRatingObj = pick(maxRatingObj, MAX_RATING_FIELDS)
     maxRatingObj.track = maxRatingObj.track ? maxRatingObj.track : 'DEV'
     maxRatingObj.subTrack = maxRatingObj.subTrack ? maxRatingObj.subTrack : 'CODE'
-    maxRatingObj.ratingColor = maxRatingObj.ratingColor ? maxRatingObj.ratingColor : DEFAULT_RATING_COLOR
+    maxRatingObj.ratingColor = resolveMaxRatingColor(maxRatingObj)
     maxRatingObj.createdBy = CREATED_BY
     if (isInteger(maxRatingObj.rating) && maxRatingObj.rating > 0) {
       memberItem.maxRating = {
@@ -2821,7 +2875,7 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
 
           const maxRatingData = compactObject({
             ...memberObj.maxRating,
-            ratingColor: memberObj.maxRating.ratingColor || DEFAULT_RATING_COLOR,
+            ratingColor: resolveMaxRatingColor(memberObj.maxRating),
             userId: memberObj.userId
           })
 
@@ -3198,7 +3252,7 @@ function fixElasticSearchMemberStatData (dataItem) {
       rating: dataItem.maxRating.rating,
       track: dataItem.maxRating.track,
       subTrack: dataItem.maxRating.subTrack,
-      ratingColor: dataItem.maxRating.ratingColor || DEFAULT_RATING_COLOR
+      ratingColor: resolveMaxRatingColor(dataItem.maxRating)
     }
   }
 
@@ -3677,5 +3731,6 @@ if (require.main === module) {
 
 module.exports = {
   fixMemberUpdateData,
-  updateMembersWithTraitsAndSkills
+  updateMembersWithTraitsAndSkills,
+  resolveMaxRatingColor
 }
