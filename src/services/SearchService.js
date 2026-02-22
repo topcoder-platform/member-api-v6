@@ -13,6 +13,7 @@ const errors = require('../common/errors')
 const copilotEmailAccess = require('../common/copilotEmailAccess')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
+const { Prisma } = prismaManager
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 
@@ -55,6 +56,7 @@ const SKILL_LEVEL_WEIGHTS = {
 }
 
 const DEFAULT_SKILL_SCORE_DEDUCTION = -0.04
+const SKILL_SCORE_MEMBER_BATCH_SIZE = 1000
 
 const BULK_IDENTIFIER_MAX_LENGTH = 256
 const BULK_EMAIL_REGEX = /^[+_A-Za-z0-9-]+(\.[+_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9]+)*(\.[A-Za-z]{2,}$)/
@@ -576,8 +578,7 @@ function skillSearchOrder (results, query) {
 }
 
 async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
-  // get the total (may be overridden for skillSearch with DB-computed scores)
-  let total = await prisma.member.count(prismaFilter)
+  let total = 0
 
   let results = []
   if (skillSearch && query.sortBy === 'skillScore') {
@@ -589,43 +590,51 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
       return { total: 0, page: query.page, perPage: query.perPage, result: [] }
     }
 
-    const candidates = await prisma.member.findMany({
-      where: {
-        userId: { in: memberIds },
-        availableForGigs: { not: false }
-      },
-      select: {
-        userId: true,
-        availableForGigs: true,
-        description: true,
-        photoURL: true,
-        lastLoginDate: true,
-        skillScoreDeduction: true
-      }
-    })
+    const scored = []
+    for (const memberIdBatch of _.chunk(memberIds, SKILL_SCORE_MEMBER_BATCH_SIZE)) {
+      const candidates = await prisma.member.findMany({
+        where: {
+          userId: { in: memberIdBatch },
+          availableForGigs: { not: false }
+        },
+        select: {
+          userId: true,
+          availableForGigs: true,
+          description: true,
+          photoURL: true,
+          lastLoginDate: true,
+          skillScoreDeduction: true
+        }
+      })
 
-    if (!candidates.length) {
-      return { total: 0, page: query.page, perPage: query.perPage, result: [] }
+      if (!candidates.length) {
+        continue
+      }
+
+      const userIdsAsNumbers = candidates.map(c => helper.bigIntToNumber(c.userId))
+      const userSkills = await skillsPrisma.userSkill.findMany({
+        where: {
+          userId: { in: userIdsAsNumbers },
+          skillId: { in: skillIds }
+        },
+        include: {
+          userSkillLevel: true
+        }
+      })
+      const skillsByUser = _.groupBy(userSkills, 'userId')
+
+      for (const candidate of candidates) {
+        scored.push({
+          userId: candidate.userId,
+          skillScore: computeSkillScoreForCandidate(candidate, skillsByUser, skillIds)
+        })
+      }
     }
 
-    const userIdsAsNumbers = candidates.map(c => helper.bigIntToNumber(c.userId))
-    const userSkills = await skillsPrisma.userSkill.findMany({
-      where: {
-        userId: { in: userIdsAsNumbers },
-        skillId: { in: skillIds }
-      },
-      include: {
-        userSkillLevel: true
-      }
-    })
-    const skillsByUser = _.groupBy(userSkills, 'userId')
-
-    const scored = candidates.map(candidate => ({
-      userId: candidate.userId,
-      skillScore: computeSkillScoreForCandidate(candidate, skillsByUser, skillIds)
-    }))
-
     total = scored.length
+    if (!total) {
+      return { total: 0, page: query.page, perPage: query.perPage, result: [] }
+    }
     const orderedScores = _.orderBy(
       scored,
       [
@@ -659,6 +668,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
       return record
     }))
   } else {
+    total = await prisma.member.count(prismaFilter)
     if (total === 0) {
       return { total: total, page: query.page, perPage: query.perPage, result: [] }
     }
@@ -725,36 +735,16 @@ async function searchMemberIdWithSkillIds (skillIds) {
     return []
   }
   const normalizedSkillIds = _.uniq(skillIds.map(id => String(id)))
-  const userSkills = await skillsPrisma.userSkill.findMany({
-    where: {
-      skillId: { in: normalizedSkillIds }
-    },
-    select: {
-      userId: true,
-      skillId: true
-    }
-  })
-  if (!userSkills.length) {
-    return []
-  }
-  const requiredSkills = new Set(normalizedSkillIds)
-  const groupedByUser = _.groupBy(userSkills, 'userId')
-  const matchingUserIds = []
+  const matchingRows = await skillsPrisma.$queryRaw`
+    SELECT us."user_id" AS "userId"
+    FROM "user_skill" us
+    WHERE us."skill_id" IN (${Prisma.join(normalizedSkillIds)})
+    GROUP BY us."user_id"
+    HAVING COUNT(DISTINCT us."skill_id") = ${normalizedSkillIds.length}
+    ORDER BY us."user_id" ASC
+  `
 
-  _.forEach(groupedByUser, (records, userIdKey) => {
-    const ownedSkills = new Set(records.map(r => String(r.skillId)))
-    let hasAllSkills = true
-    requiredSkills.forEach((skillId) => {
-      if (!ownedSkills.has(skillId)) {
-        hasAllSkills = false
-      }
-    })
-    if (hasAllSkills) {
-      matchingUserIds.push(BigInt(userIdKey))
-    }
-  })
-
-  return matchingUserIds
+  return matchingRows.map(row => BigInt(row.userId))
 }
 
 // TODO - use some caching approach to replace these in-memory objects
