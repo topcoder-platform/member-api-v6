@@ -138,6 +138,15 @@ module.exports = {
       scopes: [MEMBERS.READ, MEMBERS.ALL]
     }
   },
+  '/members/:handle/sendgrid-emails': {
+    get: {
+      controller: 'MemberController',
+      method: 'getMemberSendgridEmails',
+      auth: 'jwt',
+      access: constants.ADMIN_ROLES,
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
+    }
+  },
   '/members/:handle/traits': {
     get: {
       controller: 'MemberTraitController',

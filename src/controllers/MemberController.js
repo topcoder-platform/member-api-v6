@@ -114,6 +114,16 @@ async function downloadProfile (req, res) {
   pdfStream.pipe(res)
 }
 
+/**
+ * Get SendGrid emails sent to a member in the last 30 days.
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function getMemberSendgridEmails (req, res) {
+  const result = await service.getMemberSendgridEmails(req.authUser, req.params.handle)
+  res.send(result)
+}
+
 module.exports = {
   getMember,
   getProfileCompleteness,
@@ -125,5 +135,6 @@ module.exports = {
   uploadPhoto,
   deleteMember,
   confirmProfileData,
-  downloadProfile
+  downloadProfile,
+  getMemberSendgridEmails
 }

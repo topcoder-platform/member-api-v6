@@ -94,6 +94,7 @@ The following parameters can be set in config files or in env variables:
 - BUSAPI_URL: Bus API URL
 - KAFKA_ERROR_TOPIC: Kafka error topic used by bus API wrapper
 - GROUPS_API_URL: Groups API URL
+- SENDGRID_API_KEY: SendGrid API key used for member email activity lookups.
 - AMAZON.AWS_ACCESS_KEY_ID: The Amazon certificate key to use when connecting.
 - AMAZON.AWS_SECRET_ACCESS_KEY: The Amazon certificate access key to use when connecting.
 - AMAZON.AWS.SESSION_TOKEN: The user session token, used when developing locally against the TC dev AWS services

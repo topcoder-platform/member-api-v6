@@ -619,6 +619,48 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/sendgrid-emails':
+    get:
+      tags:
+        - Basic
+      description: |-
+        Get all SendGrid email activity records sent to the member's current email address in the last 30 days.
+
+        Authorization:
+          - JWT roles: Only `administrator` or `admin`.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+          description: The member handle
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              type: object
+              additionalProperties: true
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found - Member with the specified handle does not exist
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}/skills/{skillid}':
     get:
       tags:
