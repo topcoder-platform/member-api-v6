@@ -466,7 +466,16 @@ async function getProfileCompleteness (currentUser, handle, query) {
     showToast.push('skills')
   }
 
-  if (member.addresses && member.addresses.length) {
+  const hasCountry = !!(member.homeCountryCode)
+
+  const hasCity = !!(
+    member.addresses
+    && member.addresses.length
+    && member.addresses.some(a => a && a.city && a.city.trim())
+  )
+
+  // Should have city and country in at least one address
+  if (hasCity && hasCountry) {
     completeItems += 1
     data.location = true
 
