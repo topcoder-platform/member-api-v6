@@ -9,6 +9,7 @@ const chai = require('chai')
 const fs = require('fs')
 const path = require('path')
 const awsMock = require('aws-sdk-mock')
+const axios = require('axios')
 const service = require('../../src/services/MemberService')
 const testHelper = require('../testHelper')
 
@@ -140,6 +141,98 @@ describe('member service unit tests', () => {
         await service.getMember({ isMachine: true }, member1.handle, { invalid: 'email' })
       } catch (e) {
         should.equal(e.message.indexOf('"invalid" is not allowed') >= 0, true)
+        return
+      }
+      throw new Error('should not reach here')
+    })
+  })
+
+  describe('get member sendgrid emails tests', () => {
+    let originalSendgridApiKey
+    let originalAxiosGet
+
+    before(() => {
+      originalSendgridApiKey = config.SENDGRID_API_KEY
+      originalAxiosGet = axios.get
+    })
+
+    afterEach(() => {
+      config.SENDGRID_API_KEY = originalSendgridApiKey
+      axios.get = originalAxiosGet
+    })
+
+    after(() => {
+      config.SENDGRID_API_KEY = originalSendgridApiKey
+      axios.get = originalAxiosGet
+    })
+
+    it('get member sendgrid emails - forbidden for non-admin JWT user', async () => {
+      config.SENDGRID_API_KEY = 'test-sendgrid-api-key'
+      try {
+        await service.getMemberSendgridEmails({ roles: ['Topcoder User'] }, member1.handle)
+      } catch (e) {
+        should.equal(e.message, 'You are not allowed to view SendGrid email activity.')
+        return
+      }
+      throw new Error('should not reach here')
+    })
+
+    it('get member sendgrid emails successfully with pagination', async () => {
+      config.SENDGRID_API_KEY = 'test-sendgrid-api-key'
+      const calls = []
+
+      axios.get = async (url, options) => {
+        calls.push({ url, options })
+        if (calls.length === 1) {
+          return {
+            data: {
+              messages: [{ messageId: 'm1' }, { messageId: 'm2' }],
+              _metadata: {
+                next: '/v3/messages?query=cursor123'
+              }
+            }
+          }
+        }
+
+        return {
+          data: {
+            messages: [{ messageId: 'm3' }],
+            _metadata: {}
+          }
+        }
+      }
+
+      const result = await service.getMemberSendgridEmails({ roles: ['admin'] }, member1.handle)
+      should.equal(result.length, 3)
+      should.equal(calls.length, 2)
+      should.equal(calls[0].url, 'https://api.sendgrid.com/v3/messages')
+      should.equal(calls[0].options.headers.Authorization, 'Bearer test-sendgrid-api-key')
+      should.equal(calls[0].options.params.limit, 100)
+      should.equal(calls[0].options.params.query.indexOf(`to_email = "${member1.email}"`) >= 0, true)
+      should.equal(calls[1].url, 'https://api.sendgrid.com/v3/messages?query=cursor123')
+      should.equal(calls[1].options.params, undefined)
+    })
+
+    it('get member sendgrid emails allows m2m caller', async () => {
+      config.SENDGRID_API_KEY = 'test-sendgrid-api-key'
+      axios.get = async () => ({
+        data: {
+          messages: [],
+          _metadata: {}
+        }
+      })
+
+      const result = await service.getMemberSendgridEmails({ isMachine: true }, member1.handle)
+      should.equal(Array.isArray(result), true)
+      should.equal(result.length, 0)
+    })
+
+    it('get member sendgrid emails - missing api key', async () => {
+      config.SENDGRID_API_KEY = ''
+      try {
+        await service.getMemberSendgridEmails({ isMachine: true }, member1.handle)
+      } catch (e) {
+        should.equal(e.message, 'SendGrid API key is not configured.')
         return
       }
       throw new Error('should not reach here')

@@ -4,7 +4,7 @@
   "description": "TopCoder Member V6 API",
   "main": "app.js",
   "scripts": {
-    "postinstall": "prisma generate --schema=prisma/schema.prisma",
+    "postinstall": "prisma generate --schema=prisma/schema.prisma && prisma generate --schema=prisma/identity-schema.prisma && prisma generate --schema=prisma/challenge-schema.prisma",
     "start": "node app.js",
     "start:dev": "nodemon app.js",
     "lint": "standard",
@@ -14,7 +14,8 @@
     "reset-db": "prisma migrate reset",
     "test": "mocha -t 20000 test/unit/*.test.js --exit",
     "test:cov": "nyc --reporter=html --reporter=text npm test",
-    "migrate-dynamo-data": "node src/scripts/migrate-dynamo-data.js"
+    "migrate-dynamo-data": "node src/scripts/migrate-dynamo-data.js",
+    "recalculate-member-stats": "node src/scripts/recalculateMemberStats.js"
   },
   "author": "TCSCODER",
   "license": "none",
