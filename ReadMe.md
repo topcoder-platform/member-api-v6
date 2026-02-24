@@ -112,6 +112,7 @@ The following parameters can be set in config files or in env variables:
 - MEMBER_TRAIT_SECURE_FIELDS: Member traits identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - MISC_SECURE_FIELDS: Misc identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATISTICS_SECURE_FIELDS: Member Statistics identifiable info fields, only admin, M2M, or member himself can fetch these fields
+- STATS_READ_SOURCE: Controls stats read backend, `unified` (default, new tables) or `legacy` (pre-refactor tables)
 - HEALTH_CHECK_TIMEOUT: health check timeout in milliseconds
 
 Set the following environment variables used by bus API to get TC M2M token (use 'set' insted of 'export' for Windows OS):

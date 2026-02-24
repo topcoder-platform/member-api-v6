@@ -36,17 +36,12 @@ const path = require('path')
 
 require('dotenv').config()
 
-const config = require('config')
 const { getMembersClient, getChallengesClient } = require('../common/prisma')
 
 const DEFAULT_ACTOR = process.env.UPDATED_BY || process.env.CREATED_BY || 'stats-migration'
 const CREATED_BY = process.env.CREATED_BY || DEFAULT_ACTOR
 const UPDATED_BY = process.env.UPDATED_BY || DEFAULT_ACTOR
 const USER_BATCH_SIZE = 100
-const TRANSACTION_TIMEOUT_MS = Number.parseInt(
-  process.env.MEMBER_STATS_TRANSACTION_TIMEOUT || `${config.MEMBER_SERVICE_PRISMA_TIMEOUT || 60000}`,
-  10
-)
 
 function logInfo (message) {
   console.log(`[INFO] ${new Date().toISOString()} ${message}`)
@@ -407,54 +402,52 @@ async function writeStatsToDatabase (membersClient, statsRecords) {
   }
 
   try {
-    await membersClient.$transaction(async (tx) => {
-      for (const record of statsRecords) {
-        const writeData = {
-          userId: record.userId,
-          trackId: record.trackId,
-          typeId: record.typeId,
-          challenges: record.challenges,
-          wins: record.wins,
-          mostRecentEventDate: record.mostRecentEventDate,
-          mostRecentSubmission: record.mostRecentSubmission,
-          rating: record.rating,
-          avgRank: record.avgRank,
-          avgNumSubmissions: record.avgNumSubmissions,
-          bestRank: record.bestRank,
-          globalRank: record.globalRank,
-          countryRank: record.countryRank,
-          schoolRank: record.schoolRank,
-          volatility: record.volatility,
-          maxRating: record.maxRating,
-          minRating: record.minRating,
-          topFiveFinishes: record.topFiveFinishes,
-          topTenFinishes: record.topTenFinishes,
-          isPrivate: record.isPrivate
-        }
-
-        await tx.memberStats.upsert({
-          where: {
-            userId_trackId_typeId: {
-              userId: record.userId,
-              trackId: record.trackId,
-              typeId: record.typeId
-            }
-          },
-          create: {
-            ...writeData,
-            createdBy: CREATED_BY,
-            updatedBy: UPDATED_BY
-          },
-          update: {
-            ...writeData,
-            updatedBy: UPDATED_BY
-          }
-        })
+    const queries = statsRecords.map((record) => {
+      const writeData = {
+        userId: record.userId,
+        trackId: record.trackId,
+        typeId: record.typeId,
+        challenges: record.challenges,
+        wins: record.wins,
+        mostRecentEventDate: record.mostRecentEventDate,
+        mostRecentSubmission: record.mostRecentSubmission,
+        rating: record.rating,
+        avgRank: record.avgRank,
+        avgNumSubmissions: record.avgNumSubmissions,
+        bestRank: record.bestRank,
+        globalRank: record.globalRank,
+        countryRank: record.countryRank,
+        schoolRank: record.schoolRank,
+        volatility: record.volatility,
+        maxRating: record.maxRating,
+        minRating: record.minRating,
+        topFiveFinishes: record.topFiveFinishes,
+        topTenFinishes: record.topTenFinishes,
+        isPrivate: record.isPrivate
       }
-    }, {
-      timeout: TRANSACTION_TIMEOUT_MS
+
+      return membersClient.memberStats.upsert({
+        where: {
+          userId_trackId_typeId: {
+            userId: record.userId,
+            trackId: record.trackId,
+            typeId: record.typeId
+          }
+        },
+        create: {
+          ...writeData,
+          createdBy: CREATED_BY,
+          updatedBy: UPDATED_BY
+        },
+        update: {
+          ...writeData,
+          updatedBy: UPDATED_BY
+        }
+      })
     })
 
+    // Use array transactions to avoid interactive transaction timeout closures on long write loops.
+    await membersClient.$transaction(queries)
     return statsRecords.length
   } catch (error) {
     logError(`Transaction failed. Rolled back ${statsRecords.length} pending records.`, error)
