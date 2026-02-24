@@ -706,6 +706,7 @@ async function updateMember (currentUser, handle, query, data) {
       if (!phoneRegex.test(phone.number)) {
         throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
       }
+      const number = phone.number.trim()
       phone.number = number
       normalizedNumbers.push(number)
 
