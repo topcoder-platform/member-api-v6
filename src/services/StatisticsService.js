@@ -289,12 +289,14 @@ function getUniqueTrackTypePairs (records) {
 /**
  * Recompute the mostRecent marker for each affected (trackId, typeId) pair.
  * Exactly one row per pair is marked as mostRecent=true when rows exist.
+ * The latest row's newRating is aligned with the current memberStats rating when available.
  *
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId user id
  * @param {Array} records history records that determine affected pairs
+ * @param {String} operatorId operator id
  */
-async function refreshMostRecentHistoryFlags (tx, userId, records) {
+async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
   const pairs = getUniqueTrackTypePairs(records)
   for (const pair of pairs) {
     await tx.memberStatsHistory.updateMany({
@@ -305,7 +307,8 @@ async function refreshMostRecentHistoryFlags (tx, userId, records) {
         mostRecent: true
       },
       data: {
-        mostRecent: false
+        mostRecent: false,
+        updatedBy: operatorId
       }
     })
 
@@ -320,11 +323,71 @@ async function refreshMostRecentHistoryFlags (tx, userId, records) {
     })
 
     if (latest) {
+      const currentStats = await tx.memberStats.findFirst({
+        where: {
+          userId,
+          trackId: pair.trackId,
+          typeId: pair.typeId
+        },
+        select: {
+          rating: true
+        }
+      })
+
+      const latestUpdateData = {
+        mostRecent: true,
+        updatedBy: operatorId
+      }
+      if (currentStats) {
+        latestUpdateData.newRating = currentStats.rating
+      }
+
       await tx.memberStatsHistory.update({
         where: { id: latest.id },
-        data: { mostRecent: true }
+        data: latestUpdateData
       })
     }
+  }
+}
+
+/**
+ * Synchronize newRating on the most recent history row per (trackId, typeId) pair
+ * with the current value in memberStats.rating.
+ *
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId user id
+ * @param {Array} records stats records that determine affected pairs
+ * @param {String} operatorId operator id
+ */
+async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
+  const pairs = getUniqueTrackTypePairs(records)
+  for (const pair of pairs) {
+    const currentStats = await tx.memberStats.findFirst({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId
+      },
+      select: {
+        rating: true
+      }
+    })
+    if (!currentStats) {
+      continue
+    }
+
+    await tx.memberStatsHistory.updateMany({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        mostRecent: true
+      },
+      data: {
+        newRating: currentStats.rating,
+        updatedBy: operatorId
+      }
+    })
   }
 }
 
@@ -499,7 +562,7 @@ async function createHistoryStats (currentUser, handle, data) {
       }))
     })
 
-    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords)
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords, operatorId)
   })
 
   const createdRows = await prisma.memberStatsHistory.findMany({
@@ -620,7 +683,7 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
       }
     }
 
-    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords)
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords, operatorId)
   })
 
   const updatedRows = await prisma.memberStatsHistory.findMany({
@@ -803,6 +866,8 @@ async function createMemberStats (currentUser, handle, data) {
         }
       })
     }
+    await syncMostRecentHistoryRatings(tx, member.userId, unifiedRecords, operatorId)
+
     if (legacyMaxRatingData) {
       await prismaHelper.updateOrCreateModel(legacyMaxRatingData, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
     }
@@ -935,6 +1000,9 @@ async function partiallyUpdateMemberStats (currentUser, handle, data) {
           updatedBy: operatorId
         }
       })
+    }
+    if (unifiedRecords.length > 0) {
+      await syncMostRecentHistoryRatings(tx, member.userId, unifiedRecords, operatorId)
     }
 
     if (legacyMaxRatingData) {

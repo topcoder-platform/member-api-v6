@@ -26,6 +26,7 @@
  * - Rating and rank fields are written as NULL for now.
  * - mostRecentSubmission is derived from ChallengeWinner timestamps.
  * - memberStatsHistory.mostRecent is recalculated from latest eventDate per (userId, trackId, typeId).
+ * - memberStatsHistory.newRating on the mostRecent row is synchronized from memberStats.rating.
  * - The script is idempotent and safe to run multiple times.
  * - Writes use upsert on (userId, trackId, typeId).
  */
@@ -495,6 +496,9 @@ async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
     WITH ranked AS (
       SELECT
         msh."id" AS "id",
+        msh."userId" AS "userId",
+        msh."trackId" AS "trackId",
+        msh."typeId" AS "typeId",
         ROW_NUMBER() OVER (
           PARTITION BY msh."userId", msh."trackId", msh."typeId"
           ORDER BY msh."eventDate" DESC, msh."id" DESC
@@ -506,9 +510,17 @@ async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
       UPDATE "members"."memberStatsHistory" msh
       SET
         "mostRecent" = CASE WHEN ranked."rowNum" = 1 THEN true ELSE false END,
+        "newRating" = CASE
+          WHEN ranked."rowNum" = 1 AND ms."id" IS NOT NULL THEN ms."rating"
+          ELSE msh."newRating"
+        END,
         "updatedBy" = ${updatedByPlaceholder},
         "updatedAt" = CURRENT_TIMESTAMP
       FROM ranked
+      LEFT JOIN "members"."memberStats" ms
+        ON ms."userId" = ranked."userId"
+        AND ms."trackId" = ranked."trackId"
+        AND ms."typeId" = ranked."typeId"
       WHERE msh."id" = ranked."id"
       RETURNING 1
     )
