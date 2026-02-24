@@ -461,26 +461,34 @@ async function writeStatsToDatabase (membersClient, statsRecords) {
   }
 }
 
-async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds, options) {
+async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
   if (!userIds || userIds.length === 0) {
     return 0
   }
 
-  const whereClauses = ['msh."userId" = ANY($1::bigint[])']
-  const params = [userIds.map((userId) => userId.toString())]
-
-  if (options.trackId) {
-    params.push(options.trackId)
-    whereClauses.push(`msh."trackId" = $${params.length}`)
+  const normalizedUserIds = Array.from(
+    new Set(userIds.map((userId) => normalizeBigInt(userId, 'user id').toString()))
+  )
+  if (normalizedUserIds.length === 0) {
+    return 0
   }
 
-  if (options.typeId) {
-    params.push(options.typeId)
-    whereClauses.push(`msh."typeId" = $${params.length}`)
-  }
-
-  params.push(UPDATED_BY)
+  // Keep user ids inline as validated numeric literals for deterministic matching in raw SQL.
+  const whereClauses = [`msh."userId" IN (${normalizedUserIds.join(', ')})`]
+  const params = [UPDATED_BY]
   const updatedByPlaceholder = `$${params.length}`
+
+  const totalRows = await membersClient.$queryRawUnsafe(
+    `
+    SELECT COUNT(*)::int AS "rowCount"
+    FROM "members"."memberStatsHistory" msh
+    WHERE ${whereClauses.join(' AND ')}
+    `
+  )
+  const rowCount = totalRows && totalRows[0] ? toInt(totalRows[0].rowCount) : 0
+  if (rowCount === 0) {
+    return 0
+  }
 
   const rows = await membersClient.$queryRawUnsafe(
     `
@@ -593,7 +601,7 @@ async function main () {
       }
 
       if (!options.csvOnly) {
-        const updatedRows = await refreshHistoryMostRecentFlagsForUsers(membersClient, batchUserIds, options)
+        const updatedRows = await refreshHistoryMostRecentFlagsForUsers(membersClient, batchUserIds)
         updatedHistoryFlags += updatedRows
         if (updatedRows > 0) {
           logInfo(`Recomputed memberStatsHistory.mostRecent on ${updatedRows} row(s) for users ${batchStart + 1}-${processedUsers}`)
