@@ -691,6 +691,11 @@ async function updateMember (currentUser, handle, query, data) {
     if (!Array.isArray(data.phones)) {
       throw new errors.BadRequestError('phones must be an array')
     }
+
+    const existingNumbers = new Set((member.phones || []).map(p => (p.number || '').trim()))
+    const normalizedNumbers = []
+    const seen = new Set()
+
     for (const phone of data.phones) {
       if (!phone.type || typeof phone.type !== 'string') {
         throw new errors.BadRequestError('Each phone must have a type (string)')
@@ -700,6 +705,17 @@ async function updateMember (currentUser, handle, query, data) {
       }
       if (!phoneRegex.test(phone.number)) {
         throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
+      }
+      phone.number = number
+      normalizedNumbers.push(number)
+
+      if (seen.has(number)) {
+        throw new errors.BadRequestError(`Duplicate phone number "${number}" is not allowed.`)
+      }
+      seen.add(number)
+
+      if (existingNumbers.has(number)) {
+        throw new errors.BadRequestError(`Phone number "${number}" is already added for this member.`)
       }
     }
   }
