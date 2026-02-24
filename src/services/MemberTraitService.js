@@ -230,6 +230,11 @@ async function getTraits (currentUser, handle, query) {
       if (item.traitId === 'personalization' && item.traits && item.traits.data) {
         _.forEach(item.traits.data, (dataEntry) => {
           delete dataEntry.links
+          if (Array.isArray(dataEntry.personalization)) {
+            _.forEach(dataEntry.personalization, (each) => {
+              delete each.links
+            })
+          }
         })
       }
     })
