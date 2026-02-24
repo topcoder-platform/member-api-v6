@@ -8980,6 +8980,7 @@ export namespace Prisma {
     trackId: string | null
     typeId: string | null
     challengeId: string | null
+    mostRecent: boolean | null
     oldRating: number | null
     newRating: number | null
     oldGlobalRank: number | null
@@ -9001,6 +9002,7 @@ export namespace Prisma {
     trackId: string | null
     typeId: string | null
     challengeId: string | null
+    mostRecent: boolean | null
     oldRating: number | null
     newRating: number | null
     oldGlobalRank: number | null
@@ -9022,6 +9024,7 @@ export namespace Prisma {
     trackId: number
     typeId: number
     challengeId: number
+    mostRecent: number
     oldRating: number
     newRating: number
     oldGlobalRank: number
@@ -9071,6 +9074,7 @@ export namespace Prisma {
     trackId?: true
     typeId?: true
     challengeId?: true
+    mostRecent?: true
     oldRating?: true
     newRating?: true
     oldGlobalRank?: true
@@ -9092,6 +9096,7 @@ export namespace Prisma {
     trackId?: true
     typeId?: true
     challengeId?: true
+    mostRecent?: true
     oldRating?: true
     newRating?: true
     oldGlobalRank?: true
@@ -9113,6 +9118,7 @@ export namespace Prisma {
     trackId?: true
     typeId?: true
     challengeId?: true
+    mostRecent?: true
     oldRating?: true
     newRating?: true
     oldGlobalRank?: true
@@ -9221,6 +9227,7 @@ export namespace Prisma {
     trackId: string
     typeId: string
     challengeId: string
+    mostRecent: boolean
     oldRating: number | null
     newRating: number | null
     oldGlobalRank: number | null
@@ -9261,6 +9268,7 @@ export namespace Prisma {
     trackId?: boolean
     typeId?: boolean
     challengeId?: boolean
+    mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
     oldGlobalRank?: boolean
@@ -9283,6 +9291,7 @@ export namespace Prisma {
     trackId?: boolean
     typeId?: boolean
     challengeId?: boolean
+    mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
     oldGlobalRank?: boolean
@@ -9305,6 +9314,7 @@ export namespace Prisma {
     trackId?: boolean
     typeId?: boolean
     challengeId?: boolean
+    mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
     oldGlobalRank?: boolean
@@ -9327,6 +9337,7 @@ export namespace Prisma {
     trackId?: boolean
     typeId?: boolean
     challengeId?: boolean
+    mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
     oldGlobalRank?: boolean
@@ -9342,7 +9353,7 @@ export namespace Prisma {
     updatedBy?: boolean
   }
 
-  export type memberStatsHistoryOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "userId" | "trackId" | "typeId" | "challengeId" | "oldRating" | "newRating" | "oldGlobalRank" | "newGlobalRank" | "oldCountryRank" | "newCountryRank" | "oldSchoolRank" | "newSchoolRank" | "eventDate" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberStatsHistory"]>
+  export type memberStatsHistoryOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "userId" | "trackId" | "typeId" | "challengeId" | "mostRecent" | "oldRating" | "newRating" | "oldGlobalRank" | "newGlobalRank" | "oldCountryRank" | "newCountryRank" | "oldSchoolRank" | "newSchoolRank" | "eventDate" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberStatsHistory"]>
   export type memberStatsHistoryInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     member?: boolean | memberDefaultArgs<ExtArgs>
   }
@@ -9364,6 +9375,7 @@ export namespace Prisma {
       trackId: string
       typeId: string
       challengeId: string
+      mostRecent: boolean
       oldRating: number | null
       newRating: number | null
       oldGlobalRank: number | null
@@ -9806,6 +9818,7 @@ export namespace Prisma {
     readonly trackId: FieldRef<"memberStatsHistory", 'String'>
     readonly typeId: FieldRef<"memberStatsHistory", 'String'>
     readonly challengeId: FieldRef<"memberStatsHistory", 'String'>
+    readonly mostRecent: FieldRef<"memberStatsHistory", 'Boolean'>
     readonly oldRating: FieldRef<"memberStatsHistory", 'Int'>
     readonly newRating: FieldRef<"memberStatsHistory", 'Int'>
     readonly oldGlobalRank: FieldRef<"memberStatsHistory", 'Int'>
@@ -24834,6 +24847,7 @@ export namespace Prisma {
     trackId: 'trackId',
     typeId: 'typeId',
     challengeId: 'challengeId',
+    mostRecent: 'mostRecent',
     oldRating: 'oldRating',
     newRating: 'newRating',
     oldGlobalRank: 'oldGlobalRank',
@@ -25833,6 +25847,7 @@ export namespace Prisma {
     trackId?: StringFilter<"memberStatsHistory"> | string
     typeId?: StringFilter<"memberStatsHistory"> | string
     challengeId?: StringFilter<"memberStatsHistory"> | string
+    mostRecent?: BoolFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
@@ -25855,6 +25870,7 @@ export namespace Prisma {
     trackId?: SortOrder
     typeId?: SortOrder
     challengeId?: SortOrder
+    mostRecent?: SortOrder
     oldRating?: SortOrderInput | SortOrder
     newRating?: SortOrderInput | SortOrder
     oldGlobalRank?: SortOrderInput | SortOrder
@@ -25880,6 +25896,7 @@ export namespace Prisma {
     trackId?: StringFilter<"memberStatsHistory"> | string
     typeId?: StringFilter<"memberStatsHistory"> | string
     challengeId?: StringFilter<"memberStatsHistory"> | string
+    mostRecent?: BoolFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
@@ -25902,6 +25919,7 @@ export namespace Prisma {
     trackId?: SortOrder
     typeId?: SortOrder
     challengeId?: SortOrder
+    mostRecent?: SortOrder
     oldRating?: SortOrderInput | SortOrder
     newRating?: SortOrderInput | SortOrder
     oldGlobalRank?: SortOrderInput | SortOrder
@@ -25931,6 +25949,7 @@ export namespace Prisma {
     trackId?: StringWithAggregatesFilter<"memberStatsHistory"> | string
     typeId?: StringWithAggregatesFilter<"memberStatsHistory"> | string
     challengeId?: StringWithAggregatesFilter<"memberStatsHistory"> | string
+    mostRecent?: BoolWithAggregatesFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
@@ -27684,6 +27703,7 @@ export namespace Prisma {
     trackId: string
     typeId: string
     challengeId: string
+    mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
     oldGlobalRank?: number | null
@@ -27706,6 +27726,7 @@ export namespace Prisma {
     trackId: string
     typeId: string
     challengeId: string
+    mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
     oldGlobalRank?: number | null
@@ -27726,6 +27747,7 @@ export namespace Prisma {
     trackId?: StringFieldUpdateOperationsInput | string
     typeId?: StringFieldUpdateOperationsInput | string
     challengeId?: StringFieldUpdateOperationsInput | string
+    mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -27748,6 +27770,7 @@ export namespace Prisma {
     trackId?: StringFieldUpdateOperationsInput | string
     typeId?: StringFieldUpdateOperationsInput | string
     challengeId?: StringFieldUpdateOperationsInput | string
+    mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -27769,6 +27792,7 @@ export namespace Prisma {
     trackId: string
     typeId: string
     challengeId: string
+    mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
     oldGlobalRank?: number | null
@@ -27789,6 +27813,7 @@ export namespace Prisma {
     trackId?: StringFieldUpdateOperationsInput | string
     typeId?: StringFieldUpdateOperationsInput | string
     challengeId?: StringFieldUpdateOperationsInput | string
+    mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -27810,6 +27835,7 @@ export namespace Prisma {
     trackId?: StringFieldUpdateOperationsInput | string
     typeId?: StringFieldUpdateOperationsInput | string
     challengeId?: StringFieldUpdateOperationsInput | string
+    mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -29827,12 +29853,18 @@ export namespace Prisma {
     _max?: NestedEnumFinancialStatusFilter<$PrismaModel>
   }
 
+  export type BoolFilter<$PrismaModel = never> = {
+    equals?: boolean | BooleanFieldRefInput<$PrismaModel>
+    not?: NestedBoolFilter<$PrismaModel> | boolean
+  }
+
   export type memberStatsHistoryCountOrderByAggregateInput = {
     id?: SortOrder
     userId?: SortOrder
     trackId?: SortOrder
     typeId?: SortOrder
     challengeId?: SortOrder
+    mostRecent?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
     oldGlobalRank?: SortOrder
@@ -29867,6 +29899,7 @@ export namespace Prisma {
     trackId?: SortOrder
     typeId?: SortOrder
     challengeId?: SortOrder
+    mostRecent?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
     oldGlobalRank?: SortOrder
@@ -29888,6 +29921,7 @@ export namespace Prisma {
     trackId?: SortOrder
     typeId?: SortOrder
     challengeId?: SortOrder
+    mostRecent?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
     oldGlobalRank?: SortOrder
@@ -29916,9 +29950,12 @@ export namespace Prisma {
     newSchoolRank?: SortOrder
   }
 
-  export type BoolFilter<$PrismaModel = never> = {
+  export type BoolWithAggregatesFilter<$PrismaModel = never> = {
     equals?: boolean | BooleanFieldRefInput<$PrismaModel>
-    not?: NestedBoolFilter<$PrismaModel> | boolean
+    not?: NestedBoolWithAggregatesFilter<$PrismaModel> | boolean
+    _count?: NestedIntFilter<$PrismaModel>
+    _min?: NestedBoolFilter<$PrismaModel>
+    _max?: NestedBoolFilter<$PrismaModel>
   }
 
   export type memberStatsUserIdTrackIdTypeIdCompoundUniqueInput = {
@@ -30047,14 +30084,6 @@ export namespace Prisma {
     minRating?: SortOrder
     topFiveFinishes?: SortOrder
     topTenFinishes?: SortOrder
-  }
-
-  export type BoolWithAggregatesFilter<$PrismaModel = never> = {
-    equals?: boolean | BooleanFieldRefInput<$PrismaModel>
-    not?: NestedBoolWithAggregatesFilter<$PrismaModel> | boolean
-    _count?: NestedIntFilter<$PrismaModel>
-    _min?: NestedBoolFilter<$PrismaModel>
-    _max?: NestedBoolFilter<$PrismaModel>
   }
 
   export type MemberTraitDeviceListRelationFilter = {
@@ -31180,6 +31209,10 @@ export namespace Prisma {
     connect?: memberWhereUniqueInput
   }
 
+  export type BoolFieldUpdateOperationsInput = {
+    set?: boolean
+  }
+
   export type memberUpdateOneRequiredWithoutMemberStatsHistoryNestedInput = {
     create?: XOR<memberCreateWithoutMemberStatsHistoryInput, memberUncheckedCreateWithoutMemberStatsHistoryInput>
     connectOrCreate?: memberCreateOrConnectWithoutMemberStatsHistoryInput
@@ -31192,10 +31225,6 @@ export namespace Prisma {
     create?: XOR<memberCreateWithoutMemberStatsInput, memberUncheckedCreateWithoutMemberStatsInput>
     connectOrCreate?: memberCreateOrConnectWithoutMemberStatsInput
     connect?: memberWhereUniqueInput
-  }
-
-  export type BoolFieldUpdateOperationsInput = {
-    set?: boolean
   }
 
   export type memberUpdateOneRequiredWithoutMemberStatsNestedInput = {
@@ -32437,6 +32466,7 @@ export namespace Prisma {
     trackId: string
     typeId: string
     challengeId: string
+    mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
     oldGlobalRank?: number | null
@@ -32457,6 +32487,7 @@ export namespace Prisma {
     trackId: string
     typeId: string
     challengeId: string
+    mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
     oldGlobalRank?: number | null
@@ -32727,6 +32758,7 @@ export namespace Prisma {
     trackId?: StringFilter<"memberStatsHistory"> | string
     typeId?: StringFilter<"memberStatsHistory"> | string
     challengeId?: StringFilter<"memberStatsHistory"> | string
+    mostRecent?: BoolFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
@@ -35825,6 +35857,7 @@ export namespace Prisma {
     trackId: string
     typeId: string
     challengeId: string
+    mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
     oldGlobalRank?: number | null
@@ -35998,6 +36031,7 @@ export namespace Prisma {
     trackId?: StringFieldUpdateOperationsInput | string
     typeId?: StringFieldUpdateOperationsInput | string
     challengeId?: StringFieldUpdateOperationsInput | string
+    mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -36018,6 +36052,7 @@ export namespace Prisma {
     trackId?: StringFieldUpdateOperationsInput | string
     typeId?: StringFieldUpdateOperationsInput | string
     challengeId?: StringFieldUpdateOperationsInput | string
+    mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -36038,6 +36073,7 @@ export namespace Prisma {
     trackId?: StringFieldUpdateOperationsInput | string
     typeId?: StringFieldUpdateOperationsInput | string
     challengeId?: StringFieldUpdateOperationsInput | string
+    mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null

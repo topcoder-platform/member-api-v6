@@ -279,6 +279,55 @@ function buildUnifiedHistoryRecordsFromPayload (payload) {
   return _.values(_.keyBy(records, record => `${record.trackId}::${record.typeId}::${record.challengeId}`))
 }
 
+function getUniqueTrackTypePairs (records) {
+  return _.values(_.keyBy(_.map(records, record => ({
+    trackId: record.trackId,
+    typeId: record.typeId
+  })), pair => `${pair.trackId}::${pair.typeId}`))
+}
+
+/**
+ * Recompute the mostRecent marker for each affected (trackId, typeId) pair.
+ * Exactly one row per pair is marked as mostRecent=true when rows exist.
+ *
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId user id
+ * @param {Array} records history records that determine affected pairs
+ */
+async function refreshMostRecentHistoryFlags (tx, userId, records) {
+  const pairs = getUniqueTrackTypePairs(records)
+  for (const pair of pairs) {
+    await tx.memberStatsHistory.updateMany({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        mostRecent: true
+      },
+      data: {
+        mostRecent: false
+      }
+    })
+
+    const latest = await tx.memberStatsHistory.findFirst({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId
+      },
+      orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
+      select: { id: true }
+    })
+
+    if (latest) {
+      await tx.memberStatsHistory.update({
+        where: { id: latest.id },
+        data: { mostRecent: true }
+      })
+    }
+  }
+}
+
 /**
  * Get distribution statistics.
  * @param {Object} query the query parameters
@@ -368,7 +417,7 @@ async function getHistoryStats (currentUser, handle, query) {
 
   const historyRows = await prisma.memberStatsHistory.findMany({
     where,
-    orderBy: { eventDate: 'desc' }
+    orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
   const overallStat = []
@@ -449,6 +498,8 @@ async function createHistoryStats (currentUser, handle, data) {
         updatedBy: operatorId
       }))
     })
+
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords)
   })
 
   const createdRows = await prisma.memberStatsHistory.findMany({
@@ -460,7 +511,7 @@ async function createHistoryStats (currentUser, handle, data) {
         challengeId: record.challengeId
       }))
     },
-    orderBy: { eventDate: 'desc' }
+    orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
   const scopedRows = _.map(createdRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
@@ -479,6 +530,7 @@ createHistoryStats.schema = {
     trackId: Joi.string(),
     typeId: Joi.string(),
     challengeId: Joi.alternatives().try(Joi.string(), Joi.number()),
+    mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
     oldGlobalRank: Joi.number(),
@@ -494,6 +546,7 @@ createHistoryStats.schema = {
       trackId: Joi.string(),
       typeId: Joi.string(),
       challengeId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+      mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
       oldGlobalRank: Joi.number(),
@@ -566,6 +619,8 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
         })
       }
     }
+
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords)
   })
 
   const updatedRows = await prisma.memberStatsHistory.findMany({
@@ -577,7 +632,7 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
         challengeId: record.challengeId
       }))
     },
-    orderBy: { eventDate: 'desc' }
+    orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
   const scopedRows = _.map(updatedRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
@@ -596,6 +651,7 @@ partiallyUpdateHistoryStats.schema = {
     trackId: Joi.string(),
     typeId: Joi.string(),
     challengeId: Joi.alternatives().try(Joi.string(), Joi.number()),
+    mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
     oldGlobalRank: Joi.number(),
@@ -611,6 +667,7 @@ partiallyUpdateHistoryStats.schema = {
       trackId: Joi.string(),
       typeId: Joi.string(),
       challengeId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+      mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
       oldGlobalRank: Joi.number(),

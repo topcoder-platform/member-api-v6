@@ -2856,6 +2856,9 @@ definitions:
                         description: >-
                           ISO-8601 formatted date times
                           (YYYY-MM-DDTHH:mm:ss.sssZ)
+                      mostRecent:
+                        type: boolean
+                        description: True if this is the latest history row for the same user, track, and type.
                       newRating:
                         type: number
                         format: int64
@@ -2879,6 +2882,9 @@ definitions:
                       type: string
                       format: date-time
                       description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+                    mostRecent:
+                      type: boolean
+                      description: True if this is the latest history row for the same user, track, and type.
                     rating:
                       type: number
                       format: double
@@ -2905,6 +2911,9 @@ definitions:
                       type: string
                       format: date-time
                       description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+                    mostRecent:
+                      type: boolean
+                      description: True if this is the latest history row for the same user, track, and type.
                     rating:
                       type: number
                       format: double
