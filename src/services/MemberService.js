@@ -104,12 +104,18 @@ function omitMemberAttributes (currentUser, mb) {
     currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
   const canSeeIdentityVerified = isM2M || hasSensitiveDataRole || isSelf
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
+  const canSeeFullAddress = canManageMember || hasSensitiveDataRole
 
-  if (!canManageMember) {
+  if (!canManageMember ) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
-    res = helper.secureMemberAddressData(res)
     res = helper.truncateLastName(res)
   }
+
+  // Show full address to admins and TMs
+  if (!canSeeFullAddress) {
+    res = helper.secureMemberAddressData(res)
+  }
+
   if (!canManageMember && !hasSensitiveDataRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
     if (res.phones) {
