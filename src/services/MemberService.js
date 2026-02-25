@@ -712,7 +712,6 @@ async function updateMember (currentUser, handle, query, data) {
       }
       const number = phone.number.trim()
       phone.number = number
-      normalizedNumbers.push(number)
 
       // only block duplicates within the payload
       if (seen.has(number)) {
