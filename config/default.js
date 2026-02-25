@@ -120,6 +120,8 @@ module.exports = {
   STATISTICS_SECURE_FIELDS: process.env.STATISTICS_SECURE_FIELDS
     ? process.env.STATISTICS_SECURE_FIELDS.split(',')
     : ['createdBy', 'updatedBy'],
+  // Select stats read source: 'unified' (new tables) or 'legacy' (pre-refactor tables)
+  STATS_READ_SOURCE: process.env.STATS_READ_SOURCE || 'unified',
 
   // Public group id
   PUBLIC_GROUP_ID: process.env.PUBLIC_GROUP_ID || '10',

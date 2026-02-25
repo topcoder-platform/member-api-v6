@@ -564,6 +564,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
         history: _.map(trackHistory, h => _.omitBy({
           challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
           ratingDate: h.eventDate ? h.eventDate.getTime() : null,
+          mostRecent: !!h.mostRecent,
           oldRating: h.oldRating,
           newRating: h.newRating,
           oldGlobalRank: h.oldGlobalRank,
@@ -584,6 +585,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
       item.DATA_SCIENCE[typeName].history = _.map(trackHistory, h => _.omitBy({
         challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
         date: h.eventDate ? h.eventDate.getTime() : null,
+        mostRecent: !!h.mostRecent,
         oldRating: h.oldRating,
         newRating: h.newRating,
         oldGlobalRank: h.oldGlobalRank,

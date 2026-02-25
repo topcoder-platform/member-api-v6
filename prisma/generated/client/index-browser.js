@@ -214,6 +214,7 @@ exports.Prisma.MemberStatsHistoryScalarFieldEnum = {
   trackId: 'trackId',
   typeId: 'typeId',
   challengeId: 'challengeId',
+  mostRecent: 'mostRecent',
   oldRating: 'oldRating',
   newRating: 'newRating',
   oldGlobalRank: 'oldGlobalRank',

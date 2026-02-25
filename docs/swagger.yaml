@@ -2856,9 +2856,16 @@ definitions:
                         description: >-
                           ISO-8601 formatted date times
                           (YYYY-MM-DDTHH:mm:ss.sssZ)
+                      mostRecent:
+                        type: boolean
+                        description: True if this is the latest history row for the same user, track, and type.
+                      oldRating:
+                        type: number
+                        format: int64
                       newRating:
                         type: number
                         format: int64
+                        description: For mostRecent=true rows, this equals the current member stats rating for the same track/type.
       DATA_SCIENCE:
         type: object
         properties:
@@ -2879,15 +2886,34 @@ definitions:
                       type: string
                       format: date-time
                       description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
-                    rating:
-                      type: number
-                      format: double
-                    placement:
+                    mostRecent:
+                      type: boolean
+                      description: True if this is the latest history row for the same user, track, and type.
+                    oldRating:
                       type: number
                       format: int64
-                    percentile:
+                    newRating:
                       type: number
-                      format: double
+                      format: int64
+                      description: For mostRecent=true rows, this equals the current member stats rating for the same track/type.
+                    oldGlobalRank:
+                      type: number
+                      format: int64
+                    newGlobalRank:
+                      type: number
+                      format: int64
+                    oldCountryRank:
+                      type: number
+                      format: int64
+                    newCountryRank:
+                      type: number
+                      format: int64
+                    oldSchoolRank:
+                      type: number
+                      format: int64
+                    newSchoolRank:
+                      type: number
+                      format: int64
           MARATHON_MATCH:
             type: object
             properties:
@@ -2905,15 +2931,34 @@ definitions:
                       type: string
                       format: date-time
                       description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
-                    rating:
-                      type: number
-                      format: double
-                    placement:
+                    mostRecent:
+                      type: boolean
+                      description: True if this is the latest history row for the same user, track, and type.
+                    oldRating:
                       type: number
                       format: int64
-                    percentile:
+                    newRating:
                       type: number
-                      format: double
+                      format: int64
+                      description: For mostRecent=true rows, this equals the current member stats rating for the same track/type.
+                    oldGlobalRank:
+                      type: number
+                      format: int64
+                    newGlobalRank:
+                      type: number
+                      format: int64
+                    oldCountryRank:
+                      type: number
+                      format: int64
+                    newCountryRank:
+                      type: number
+                      format: int64
+                    oldSchoolRank:
+                      type: number
+                      format: int64
+                    newSchoolRank:
+                      type: number
+                      format: int64
       updatedAt:
         type: string
         format: date-time

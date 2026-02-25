@@ -166,6 +166,7 @@ model memberStatsHistory {
   trackId        String
   typeId         String
   challengeId    String
+  mostRecent     Boolean  @default(false)
   oldRating      Int?
   newRating      Int?
   oldGlobalRank  Int?
@@ -185,6 +186,7 @@ model memberStatsHistory {
 
   @@index([userId])
   @@index([userId, trackId, typeId])
+  @@index([userId, trackId, typeId, mostRecent])
   @@index([challengeId])
   @@index([eventDate])
   @@schema("members")
