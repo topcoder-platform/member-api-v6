@@ -30,8 +30,8 @@
     "standard": "^12.0.1"
   },
   "dependencies": {
-    "@prisma/client": "^6.10.1",
     "@prisma/adapter-pg": "^7.0.1",
+    "@prisma/client": "^6.10.1",
     "@react-pdf/renderer": "^3.4.4",
     "@topcoder/challenge-api-v6": "github:topcoder-platform/challenge-api-v6#master",
     "@topcoder/engagements-api-v6": "topcoder-platform/engagements-api-v6.git#master",
@@ -48,6 +48,7 @@
     "config": "^3.0.1",
     "cors": "^2.7.1",
     "country-calling-code": "^0.0.3",
+    "dotenv": "^17.3.1",
     "express": "^4.15.4",
     "express-fileupload": "^1.1.4",
     "express-interceptor": "^1.2.0",

@@ -25,6 +25,8 @@
  * Notes:
  * - Rating and rank fields are written as NULL for now.
  * - mostRecentSubmission is derived from ChallengeWinner timestamps.
+ * - memberStatsHistory.mostRecent is recalculated from latest eventDate per (userId, trackId, typeId).
+ * - memberStatsHistory.newRating on the mostRecent row is synchronized from memberStats.rating.
  * - The script is idempotent and safe to run multiple times.
  * - Writes use upsert on (userId, trackId, typeId).
  */
@@ -34,17 +36,12 @@ const path = require('path')
 
 require('dotenv').config()
 
-const config = require('config')
-const { Prisma, getMembersClient, getChallengesClient } = require('../common/prisma')
+const { getMembersClient, getChallengesClient } = require('../common/prisma')
 
 const DEFAULT_ACTOR = process.env.UPDATED_BY || process.env.CREATED_BY || 'stats-migration'
 const CREATED_BY = process.env.CREATED_BY || DEFAULT_ACTOR
 const UPDATED_BY = process.env.UPDATED_BY || DEFAULT_ACTOR
 const USER_BATCH_SIZE = 100
-const TRANSACTION_TIMEOUT_MS = Number.parseInt(
-  process.env.MEMBER_STATS_TRANSACTION_TIMEOUT || `${config.MEMBER_SERVICE_PRISMA_TIMEOUT || 60000}`,
-  10
-)
 
 function logInfo (message) {
   console.log(`[INFO] ${new Date().toISOString()} ${message}`)
@@ -289,25 +286,34 @@ function toInt (value) {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : 0
 }
 
-function buildFilterClauses (options, includeUserFilter) {
+function buildFilterQuery (options, includeUserFilter) {
   const clauses = [
-    Prisma.sql`c."trackId" IS NOT NULL`,
-    Prisma.sql`c."typeId" IS NOT NULL`
+    'c."trackId" IS NOT NULL',
+    'c."typeId" IS NOT NULL'
   ]
+  const params = []
+
+  function addEqualsClause (column, value) {
+    params.push(value)
+    clauses.push(`${column} = $${params.length}`)
+  }
 
   if (includeUserFilter !== null && includeUserFilter !== undefined) {
-    clauses.push(Prisma.sql`cw."userId" = ${includeUserFilter}`)
+    addEqualsClause('cw."userId"', includeUserFilter)
   }
 
   if (options.trackId) {
-    clauses.push(Prisma.sql`c."trackId" = ${options.trackId}`)
+    addEqualsClause('c."trackId"', options.trackId)
   }
 
   if (options.typeId) {
-    clauses.push(Prisma.sql`c."typeId" = ${options.typeId}`)
+    addEqualsClause('c."typeId"', options.typeId)
   }
 
-  return clauses
+  return {
+    whereSql: clauses.join(' AND '),
+    params
+  }
 }
 
 async function getUserIds (challengesClient, options) {
@@ -317,15 +323,18 @@ async function getUserIds (challengesClient, options) {
   if (explicitUserIds.length > 0) {
     userIds = explicitUserIds.map((userId) => normalizeBigInt(userId, 'user id'))
   } else {
-    const whereClauses = buildFilterClauses(options, null)
+    const { whereSql, params } = buildFilterQuery(options, null)
 
-    const rows = await challengesClient.$queryRaw`
+    const rows = await challengesClient.$queryRawUnsafe(
+      `
       SELECT DISTINCT cw."userId" AS "userId"
       FROM "ChallengeWinner" cw
       INNER JOIN "Challenge" c ON c.id = cw."challengeId"
-      WHERE ${Prisma.join(whereClauses, Prisma.sql` AND `)}
+      WHERE ${whereSql}
       ORDER BY cw."userId" ASC
-    `
+      `,
+      ...params
+    )
 
     userIds = rows.map((row) => normalizeBigInt(row.userId, 'user id'))
   }
@@ -342,9 +351,10 @@ async function getUserIds (challengesClient, options) {
 }
 
 async function aggregateStatsForUser (challengesClient, userId, options) {
-  const whereClauses = buildFilterClauses(options, userId)
+  const { whereSql, params } = buildFilterQuery(options, userId)
 
-  const rows = await challengesClient.$queryRaw`
+  const rows = await challengesClient.$queryRawUnsafe(
+    `
     SELECT
       cw."userId" AS "userId",
       c."trackId" AS "trackId",
@@ -355,10 +365,12 @@ async function aggregateStatsForUser (challengesClient, userId, options) {
       MAX(cw."createdAt") AS "mostRecentSubmission"
     FROM "ChallengeWinner" cw
     INNER JOIN "Challenge" c ON c.id = cw."challengeId"
-    WHERE ${Prisma.join(whereClauses, Prisma.sql` AND `)}
+    WHERE ${whereSql}
     GROUP BY cw."userId", c."trackId", c."typeId"
     ORDER BY c."trackId" ASC, c."typeId" ASC
-  `
+    `,
+    ...params
+  )
 
   return rows.map((row) => ({
     userId: normalizeBigInt(row.userId, 'user id'),
@@ -390,59 +402,127 @@ async function writeStatsToDatabase (membersClient, statsRecords) {
   }
 
   try {
-    await membersClient.$transaction(async (tx) => {
-      for (const record of statsRecords) {
-        const writeData = {
-          userId: record.userId,
-          trackId: record.trackId,
-          typeId: record.typeId,
-          challenges: record.challenges,
-          wins: record.wins,
-          mostRecentEventDate: record.mostRecentEventDate,
-          mostRecentSubmission: record.mostRecentSubmission,
-          rating: record.rating,
-          avgRank: record.avgRank,
-          avgNumSubmissions: record.avgNumSubmissions,
-          bestRank: record.bestRank,
-          globalRank: record.globalRank,
-          countryRank: record.countryRank,
-          schoolRank: record.schoolRank,
-          volatility: record.volatility,
-          maxRating: record.maxRating,
-          minRating: record.minRating,
-          topFiveFinishes: record.topFiveFinishes,
-          topTenFinishes: record.topTenFinishes,
-          isPrivate: record.isPrivate
-        }
-
-        await tx.memberStats.upsert({
-          where: {
-            userId_trackId_typeId: {
-              userId: record.userId,
-              trackId: record.trackId,
-              typeId: record.typeId
-            }
-          },
-          create: {
-            ...writeData,
-            createdBy: CREATED_BY,
-            updatedBy: UPDATED_BY
-          },
-          update: {
-            ...writeData,
-            updatedBy: UPDATED_BY
-          }
-        })
+    const queries = statsRecords.map((record) => {
+      const writeData = {
+        userId: record.userId,
+        trackId: record.trackId,
+        typeId: record.typeId,
+        challenges: record.challenges,
+        wins: record.wins,
+        mostRecentEventDate: record.mostRecentEventDate,
+        mostRecentSubmission: record.mostRecentSubmission,
+        rating: record.rating,
+        avgRank: record.avgRank,
+        avgNumSubmissions: record.avgNumSubmissions,
+        bestRank: record.bestRank,
+        globalRank: record.globalRank,
+        countryRank: record.countryRank,
+        schoolRank: record.schoolRank,
+        volatility: record.volatility,
+        maxRating: record.maxRating,
+        minRating: record.minRating,
+        topFiveFinishes: record.topFiveFinishes,
+        topTenFinishes: record.topTenFinishes,
+        isPrivate: record.isPrivate
       }
-    }, {
-      timeout: TRANSACTION_TIMEOUT_MS
+
+      return membersClient.memberStats.upsert({
+        where: {
+          userId_trackId_typeId: {
+            userId: record.userId,
+            trackId: record.trackId,
+            typeId: record.typeId
+          }
+        },
+        create: {
+          ...writeData,
+          createdBy: CREATED_BY,
+          updatedBy: UPDATED_BY
+        },
+        update: {
+          ...writeData,
+          updatedBy: UPDATED_BY
+        }
+      })
     })
 
+    // Use array transactions to avoid interactive transaction timeout closures on long write loops.
+    await membersClient.$transaction(queries)
     return statsRecords.length
   } catch (error) {
     logError(`Transaction failed. Rolled back ${statsRecords.length} pending records.`, error)
     throw error
   }
+}
+
+async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
+  if (!userIds || userIds.length === 0) {
+    return 0
+  }
+
+  const normalizedUserIds = Array.from(
+    new Set(userIds.map((userId) => normalizeBigInt(userId, 'user id').toString()))
+  )
+  if (normalizedUserIds.length === 0) {
+    return 0
+  }
+
+  // Keep user ids inline as validated numeric literals for deterministic matching in raw SQL.
+  const whereClauses = [`msh."userId" IN (${normalizedUserIds.join(', ')})`]
+  const params = [UPDATED_BY]
+  const updatedByPlaceholder = `$${params.length}`
+
+  const totalRows = await membersClient.$queryRawUnsafe(
+    `
+    SELECT COUNT(*)::int AS "rowCount"
+    FROM "members"."memberStatsHistory" msh
+    WHERE ${whereClauses.join(' AND ')}
+    `
+  )
+  const rowCount = totalRows && totalRows[0] ? toInt(totalRows[0].rowCount) : 0
+  if (rowCount === 0) {
+    return 0
+  }
+
+  const rows = await membersClient.$queryRawUnsafe(
+    `
+    WITH ranked AS (
+      SELECT
+        msh."id" AS "id",
+        msh."userId" AS "userId",
+        msh."trackId" AS "trackId",
+        msh."typeId" AS "typeId",
+        ROW_NUMBER() OVER (
+          PARTITION BY msh."userId", msh."trackId", msh."typeId"
+          ORDER BY msh."eventDate" DESC, msh."id" DESC
+        ) AS "rowNum"
+      FROM "members"."memberStatsHistory" msh
+      WHERE ${whereClauses.join(' AND ')}
+    ),
+    updated AS (
+      UPDATE "members"."memberStatsHistory" msh
+      SET
+        "mostRecent" = CASE WHEN ranked."rowNum" = 1 THEN true ELSE false END,
+        "newRating" = CASE
+          WHEN ranked."rowNum" = 1 AND ms."id" IS NOT NULL THEN ms."rating"
+          ELSE msh."newRating"
+        END,
+        "updatedBy" = ${updatedByPlaceholder},
+        "updatedAt" = CURRENT_TIMESTAMP
+      FROM ranked
+      LEFT JOIN "members"."memberStats" ms
+        ON ms."userId" = ranked."userId"
+        AND ms."trackId" = ranked."trackId"
+        AND ms."typeId" = ranked."typeId"
+      WHERE msh."id" = ranked."id"
+      RETURNING 1
+    )
+    SELECT COUNT(*)::int AS "updatedRows" FROM updated
+    `,
+    ...params
+  )
+
+  return rows && rows[0] ? toInt(rows[0].updatedRows) : 0
 }
 
 async function main () {
@@ -467,6 +547,7 @@ async function main () {
   let csvWriter
   let processedUsers = 0
   let writtenStats = 0
+  let updatedHistoryFlags = 0
 
   try {
     logInfo(`Starting recalculateMemberStats in ${options.csvOnly ? 'CSV-only' : 'write'} mode`)
@@ -523,13 +604,21 @@ async function main () {
         writtenStats += written
         logInfo(`Created/updated ${written} memberStats rows for users ${batchStart + 1}-${processedUsers}`)
       }
+
+      if (!options.csvOnly) {
+        const updatedRows = await refreshHistoryMostRecentFlagsForUsers(membersClient, batchUserIds)
+        updatedHistoryFlags += updatedRows
+        if (updatedRows > 0) {
+          logInfo(`Recomputed memberStatsHistory.mostRecent on ${updatedRows} row(s) for users ${batchStart + 1}-${processedUsers}`)
+        }
+      }
     }
 
     if (csvWriter) {
       await csvWriter.end()
     }
 
-    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records`)
+    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, recomputed ${updatedHistoryFlags} history mostRecent flags`)
   } finally {
     await Promise.allSettled([
       membersClient.$disconnect(),
@@ -550,6 +639,7 @@ module.exports = {
   getUserIds,
   aggregateStatsForUser,
   writeStatsToDatabase,
+  refreshHistoryMostRecentFlagsForUsers,
   toCsvValue,
   toIsoString,
   buildCsvWriter

@@ -14,6 +14,8 @@ const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 const prismaHelper = require('../common/prismaHelper')
 
+const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', 'updatedAt',
+  'createdBy', 'updatedBy']
 const DISTRIBUTION_FIELDS_NO_DATE = ['track', 'subTrack', 'distribution']
 
 const HISTORY_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'DEVELOP', 'DATA_SCIENCE',
@@ -38,7 +40,14 @@ const TYPE_NAMES = {
   MARATHON_MATCH: 'MARATHON_MATCH'
 }
 
+const LEGACY_STATS_READ_SOURCE = 'legacy'
+const SUPPORTED_STATS_READ_SOURCES = ['unified', LEGACY_STATS_READ_SOURCE]
 const DISTRIBUTION_RANGES = _.range(0, 4000, 100)
+const configuredStatsReadSource = _.toLower(String(config.STATS_READ_SOURCE || 'unified').trim())
+if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
+  logger.warn(`Invalid STATS_READ_SOURCE='${config.STATS_READ_SOURCE}'. Falling back to 'unified'.`)
+}
+const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
 
 function toOptionalInt (value) {
   if (_.isNil(value) || value === '') {
@@ -237,6 +246,333 @@ function createEmptyDistribution () {
   return distribution
 }
 
+function toInteger (value) {
+  if (_.isNil(value)) {
+    return undefined
+  }
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed)) {
+    return undefined
+  }
+  return parsed
+}
+
+/**
+ * Convert legacy history stats data to response structure.
+ * @param {Object} member member data
+ * @param {Object} historyStats stats history row with nested develop/dataScience history
+ * @param {Array} fields fields to return in response
+ * @returns response
+ */
+function buildLegacyStatsHistoryResponse (member, historyStats, fields) {
+  const item = {
+    userId: helper.bigIntToNumber(member.userId),
+    groupId: helper.bigIntToNumber(historyStats.groupId),
+    handle: member.handle,
+    handleLower: member.handleLower
+  }
+
+  if (historyStats.develop && historyStats.develop.length > 0) {
+    item.DEVELOP = { subTracks: [] }
+    const subTrackGroupData = _.groupBy(historyStats.develop, 'subTrackId')
+    _.forEach(subTrackGroupData, (trackHistory, subTrackId) => {
+      const subTrackItem = {
+        id: subTrackId,
+        name: trackHistory[0].subTrack
+      }
+      subTrackItem.history = _.map(trackHistory, h => ({
+        ..._.pick(h, ['challengeName', 'newRating']),
+        challengeId: helper.bigIntToNumber(h.challengeId),
+        ratingDate: h.ratingDate ? h.ratingDate.getTime() : null
+      }))
+      item.DEVELOP.subTracks.push(subTrackItem)
+    })
+  }
+
+  if (historyStats.dataScience && historyStats.dataScience.length > 0) {
+    item.DATA_SCIENCE = {}
+    const srmHistory = _.filter(historyStats.dataScience, t => t.subTrack === 'SRM')
+    const marathonHistory = _.filter(historyStats.dataScience, t => t.subTrack === 'MARATHON_MATCH')
+    if (srmHistory.length > 0) {
+      item.DATA_SCIENCE.SRM = {}
+      item.DATA_SCIENCE.SRM.history = _.map(srmHistory, h => ({
+        ..._.pick(h, ['challengeName', 'rating', 'placement', 'percentile']),
+        challengeId: helper.bigIntToNumber(h.challengeId),
+        date: h.date ? h.date.getTime() : null
+      }))
+    }
+    if (marathonHistory.length > 0) {
+      item.DATA_SCIENCE.MARATHON_MATCH = {}
+      item.DATA_SCIENCE.MARATHON_MATCH.history = _.map(marathonHistory, h => ({
+        ..._.pick(h, ['challengeName', 'rating', 'placement', 'percentile']),
+        challengeId: helper.bigIntToNumber(h.challengeId),
+        date: h.date ? h.date.getTime() : null
+      }))
+    }
+  }
+  return fields ? _.pick(item, fields) : item
+}
+
+/**
+ * Get distribution statistics from legacy table.
+ * @param {Object} query the query parameters
+ * @param {Array} fields selected fields
+ * @returns {Object} the distribution statistics
+ */
+async function getLegacyDistribution (query, fields) {
+  const whereConditions = []
+  if (query.track) {
+    whereConditions.push(Prisma.sql`UPPER("track") LIKE ${`%${query.track.toUpperCase()}%`}`)
+  }
+  if (query.subTrack) {
+    whereConditions.push(Prisma.sql`UPPER("subTrack") LIKE ${`%${query.subTrack.toUpperCase()}%`}`)
+  }
+
+  const whereClause = whereConditions.length > 0
+    ? Prisma.sql`WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}`
+    : Prisma.empty
+
+  const items = await prisma.$queryRaw`
+    SELECT *
+    FROM "members"."distributionStats"
+    ${whereClause}
+  `
+
+  if (!items || items.length === 0) {
+    throw new errors.NotFoundError('No member distribution statistics is found.')
+  }
+
+  const records = []
+  _.forEach(items, row => {
+    const record = _.pick(row, DISTRIBUTION_FIELDS)
+    record.distribution = createEmptyDistribution()
+    _.forEach(DISTRIBUTION_RANGES, (rangeStart) => {
+      const key = getDistributionRangeKey(rangeStart)
+      record.distribution[key] = Number(row[key] || 0)
+    })
+    records.push(record)
+  })
+
+  let result = { track: query.track, subTrack: query.subTrack, distribution: {} }
+  _.forEach(records, (record) => {
+    _.forIn(record.distribution, (value, key) => {
+      if (!result.distribution[key]) {
+        result.distribution[key] = 0
+      }
+      result.distribution[key] += Number(value)
+    })
+    if (record.createdAt && (!result.createdAt || new Date(record.createdAt) < result.createdAt)) {
+      result.createdAt = new Date(record.createdAt)
+      result.createdBy = record.createdBy
+    }
+    if (record.updatedAt && (!result.updatedAt || new Date(record.updatedAt) > result.updatedAt)) {
+      result.updatedAt = new Date(record.updatedAt)
+      result.updatedBy = record.updatedBy
+    }
+  })
+
+  if (fields) {
+    result = _.pick(result, fields)
+  }
+  return result
+}
+
+/**
+ * Load one legacy member stats aggregate row with nested legacy stats details.
+ * @param {BigInt} userId member user id
+ * @param {String|Number} groupId requested group id
+ * @returns {Object|null} member stats row in legacy shape
+ */
+async function getLegacyMemberStatsRow (userId, groupId) {
+  const isPrivate = String(groupId) !== String(config.PUBLIC_GROUP_ID)
+  const statsRows = await prisma.$queryRaw`
+    SELECT ms.*
+    FROM "members"."memberStats" ms
+    WHERE ms."userId" = ${userId}
+      AND ms."isPrivate" = ${isPrivate}
+    ORDER BY
+      CASE
+        WHEN EXISTS (SELECT 1 FROM "members"."memberDevelopStats" ds WHERE ds."memberStatsId" = ms."id")
+          OR EXISTS (SELECT 1 FROM "members"."memberDesignStats" ds WHERE ds."memberStatsId" = ms."id")
+          OR EXISTS (SELECT 1 FROM "members"."memberDataScienceStats" ds WHERE ds."memberStatsId" = ms."id")
+          OR EXISTS (SELECT 1 FROM "members"."memberCopilotStats" cs WHERE cs."memberStatsId" = ms."id")
+          THEN 0
+        ELSE 1
+      END,
+      ms."id" ASC
+    LIMIT 1
+  `
+
+  const stat = _.head(statsRows)
+  if (!stat) {
+    return null
+  }
+
+  const numericGroupId = _.toNumber(groupId)
+  if (!Number.isNaN(numericGroupId)) {
+    stat.groupId = numericGroupId
+  }
+
+  const [designRows, developRows, dataScienceRows, copilotRows] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDesignStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDevelopStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDataScienceStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberCopilotStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `
+  ])
+
+  const design = _.head(designRows)
+  if (design) {
+    const designItems = await prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDesignStatsItem"
+      WHERE "designStatsId" = ${design.id}
+      ORDER BY "subTrackId" ASC, "id" ASC
+    `
+    design.items = designItems
+  }
+  stat.design = design
+
+  const develop = _.head(developRows)
+  if (develop) {
+    const developItems = await prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDevelopStatsItem"
+      WHERE "developStatsId" = ${develop.id}
+      ORDER BY "subTrackId" ASC, "id" ASC
+    `
+    develop.items = developItems
+  }
+  stat.develop = develop
+
+  const dataScience = _.head(dataScienceRows)
+  if (dataScience) {
+    const [srmRows, marathonRows] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT *
+        FROM "members"."memberSrmStats"
+        WHERE "dataScienceStatsId" = ${dataScience.id}
+        ORDER BY "id" ASC
+        LIMIT 1
+      `,
+      prisma.$queryRaw`
+        SELECT *
+        FROM "members"."memberMarathonStats"
+        WHERE "dataScienceStatsId" = ${dataScience.id}
+        ORDER BY "id" ASC
+        LIMIT 1
+      `
+    ])
+    const srm = _.head(srmRows)
+    if (srm) {
+      const [challengeDetails, divisions] = await Promise.all([
+        prisma.$queryRaw`
+          SELECT *
+          FROM "members"."memberSrmChallengeDetail"
+          WHERE "srmStatsId" = ${srm.id}
+          ORDER BY "id" ASC
+        `,
+        prisma.$queryRaw`
+          SELECT *
+          FROM "members"."memberSrmDivisionDetail"
+          WHERE "srmStatsId" = ${srm.id}
+          ORDER BY "divisionName" ASC, "levelName" ASC, "id" ASC
+        `
+      ])
+      srm.challengeDetails = challengeDetails
+      srm.divisions = divisions
+    }
+    dataScience.srm = srm
+    dataScience.marathon = _.head(marathonRows)
+  }
+  stat.dataScience = dataScience
+  stat.copilot = _.head(copilotRows)
+
+  return stat
+}
+
+/**
+ * Load one legacy history stats aggregate row with nested history details.
+ * @param {BigInt} userId member user id
+ * @param {String|Number} groupId requested group id
+ * @returns {Object|null} history stats row in legacy shape
+ */
+async function getLegacyHistoryStatsRow (userId, groupId) {
+  const isPrivate = String(groupId) !== String(config.PUBLIC_GROUP_ID)
+  const groupIdValue = toInteger(groupId)
+
+  if (isPrivate && _.isNil(groupIdValue)) {
+    return null
+  }
+
+  const whereConditions = [
+    Prisma.sql`"userId" = ${userId}`,
+    Prisma.sql`"isPrivate" = ${isPrivate}`
+  ]
+  if (isPrivate) {
+    whereConditions.push(Prisma.sql`"groupId" = ${groupIdValue}`)
+  }
+
+  const historyRows = await prisma.$queryRaw`
+    SELECT *
+    FROM "members"."memberHistoryStats"
+    WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}
+    ORDER BY "id" ASC
+    LIMIT 1
+  `
+
+  const history = _.head(historyRows)
+  if (!history) {
+    return null
+  }
+
+  if (!isPrivate) {
+    history.groupId = _.toNumber(groupId)
+  }
+
+  const [developRows, dataScienceRows] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDevelopHistoryStats"
+      WHERE "historyStatsId" = ${history.id}
+      ORDER BY "subTrackId" ASC, "ratingDate" DESC, "id" DESC
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDataScienceHistoryStats"
+      WHERE "historyStatsId" = ${history.id}
+      ORDER BY "subTrack" ASC, "date" DESC, "id" DESC
+    `
+  ])
+
+  history.develop = developRows
+  history.dataScience = dataScienceRows
+  return history
+}
+
 function buildUnifiedHistoryRecordsFromPayload (payload) {
   const data = payload || {}
   const records = []
@@ -279,6 +615,118 @@ function buildUnifiedHistoryRecordsFromPayload (payload) {
   return _.values(_.keyBy(records, record => `${record.trackId}::${record.typeId}::${record.challengeId}`))
 }
 
+function getUniqueTrackTypePairs (records) {
+  return _.values(_.keyBy(_.map(records, record => ({
+    trackId: record.trackId,
+    typeId: record.typeId
+  })), pair => `${pair.trackId}::${pair.typeId}`))
+}
+
+/**
+ * Recompute the mostRecent marker for each affected (trackId, typeId) pair.
+ * Exactly one row per pair is marked as mostRecent=true when rows exist.
+ * The latest row's newRating is aligned with the current memberStats rating when available.
+ *
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId user id
+ * @param {Array} records history records that determine affected pairs
+ * @param {String} operatorId operator id
+ */
+async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
+  const pairs = getUniqueTrackTypePairs(records)
+  for (const pair of pairs) {
+    await tx.memberStatsHistory.updateMany({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        mostRecent: true
+      },
+      data: {
+        mostRecent: false,
+        updatedBy: operatorId
+      }
+    })
+
+    const latest = await tx.memberStatsHistory.findFirst({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId
+      },
+      orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
+      select: { id: true }
+    })
+
+    if (latest) {
+      const currentStats = await tx.memberStats.findFirst({
+        where: {
+          userId,
+          trackId: pair.trackId,
+          typeId: pair.typeId
+        },
+        select: {
+          rating: true
+        }
+      })
+
+      const latestUpdateData = {
+        mostRecent: true,
+        updatedBy: operatorId
+      }
+      if (currentStats) {
+        latestUpdateData.newRating = currentStats.rating
+      }
+
+      await tx.memberStatsHistory.update({
+        where: { id: latest.id },
+        data: latestUpdateData
+      })
+    }
+  }
+}
+
+/**
+ * Synchronize newRating on the most recent history row per (trackId, typeId) pair
+ * with the current value in memberStats.rating.
+ *
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId user id
+ * @param {Array} records stats records that determine affected pairs
+ * @param {String} operatorId operator id
+ */
+async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
+  const pairs = getUniqueTrackTypePairs(records)
+  for (const pair of pairs) {
+    const currentStats = await tx.memberStats.findFirst({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId
+      },
+      select: {
+        rating: true
+      }
+    })
+    if (!currentStats) {
+      continue
+    }
+
+    await tx.memberStatsHistory.updateMany({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        mostRecent: true
+      },
+      data: {
+        newRating: currentStats.rating,
+        updatedBy: operatorId
+      }
+    })
+  }
+}
+
 /**
  * Get distribution statistics.
  * @param {Object} query the query parameters
@@ -287,6 +735,10 @@ function buildUnifiedHistoryRecordsFromPayload (payload) {
 async function getDistribution (query) {
   // validate and parse query parameter
   const fields = helper.parseCommaSeparatedString(query.fields, DISTRIBUTION_FIELDS_NO_DATE) || DISTRIBUTION_FIELDS_NO_DATE
+  if (USE_LEGACY_STATS_READS) {
+    return getLegacyDistribution(query, fields)
+  }
+
   logger.info(`Calculating distribution on-the-fly for track='${query.track || ''}' subTrack='${query.subTrack || ''}'`)
   const trackId = resolveTrackId(query.track)
   const typeId = resolveTypeId(query.subTrack)
@@ -354,32 +806,46 @@ async function getHistoryStats (currentUser, handle, query) {
   // get member by handle
   const member = await helper.getMemberByHandle(handle)
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, query.groupIds)
-  const where = {
-    userId: member.userId
-  }
-  const trackId = resolveTrackId(query.trackId)
-  const typeId = resolveTypeId(query.typeId)
-  if (trackId) {
-    where.trackId = trackId
-  }
-  if (typeId) {
-    where.typeId = typeId
-  }
+  let result = []
 
-  const historyRows = await prisma.memberStatsHistory.findMany({
-    where,
-    orderBy: { eventDate: 'desc' }
-  })
+  if (USE_LEGACY_STATS_READS) {
+    const overallStat = []
+    for (const groupId of groupIds) {
+      const statsDb = await getLegacyHistoryStatsRow(member.userId, groupId)
+      if (!_.isNil(statsDb)) {
+        overallStat.push(statsDb)
+      }
+    }
+    result = _.map(overallStat, t => buildLegacyStatsHistoryResponse(member, t, fields))
+  } else {
+    const where = {
+      userId: member.userId
+    }
+    const trackId = resolveTrackId(query.trackId)
+    const typeId = resolveTypeId(query.typeId)
+    if (trackId) {
+      where.trackId = trackId
+    }
+    if (typeId) {
+      where.typeId = typeId
+    }
 
-  const overallStat = []
-  if (historyRows.length > 0) {
-    _.forEach(groupIds, (groupId) => {
-      const scopedRows = _.map(historyRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
-      overallStat.push(scopedRows)
+    const historyRows = await prisma.memberStatsHistory.findMany({
+      where,
+      orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
     })
+
+    const overallStat = []
+    if (historyRows.length > 0) {
+      _.forEach(groupIds, (groupId) => {
+        const scopedRows = _.map(historyRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
+        overallStat.push(scopedRows)
+      })
+    }
+
+    result = _.map(overallStat, rows => prismaHelper.buildUnifiedStatsHistoryResponse(member, rows, fields))
   }
 
-  let result = _.map(overallStat, rows => prismaHelper.buildUnifiedStatsHistoryResponse(member, rows, fields))
   if (!helper.canManageMember(currentUser, member)) {
     result = _.map(result, (item) => _.omit(item, config.STATISTICS_SECURE_FIELDS))
   }
@@ -449,6 +915,8 @@ async function createHistoryStats (currentUser, handle, data) {
         updatedBy: operatorId
       }))
     })
+
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords, operatorId)
   })
 
   const createdRows = await prisma.memberStatsHistory.findMany({
@@ -460,7 +928,7 @@ async function createHistoryStats (currentUser, handle, data) {
         challengeId: record.challengeId
       }))
     },
-    orderBy: { eventDate: 'desc' }
+    orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
   const scopedRows = _.map(createdRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
@@ -479,6 +947,7 @@ createHistoryStats.schema = {
     trackId: Joi.string(),
     typeId: Joi.string(),
     challengeId: Joi.alternatives().try(Joi.string(), Joi.number()),
+    mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
     oldGlobalRank: Joi.number(),
@@ -494,6 +963,7 @@ createHistoryStats.schema = {
       trackId: Joi.string(),
       typeId: Joi.string(),
       challengeId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+      mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
       oldGlobalRank: Joi.number(),
@@ -566,6 +1036,8 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
         })
       }
     }
+
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords, operatorId)
   })
 
   const updatedRows = await prisma.memberStatsHistory.findMany({
@@ -577,7 +1049,7 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
         challengeId: record.challengeId
       }))
     },
-    orderBy: { eventDate: 'desc' }
+    orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
   const scopedRows = _.map(updatedRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
@@ -596,6 +1068,7 @@ partiallyUpdateHistoryStats.schema = {
     trackId: Joi.string(),
     typeId: Joi.string(),
     challengeId: Joi.alternatives().try(Joi.string(), Joi.number()),
+    mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
     oldGlobalRank: Joi.number(),
@@ -611,6 +1084,7 @@ partiallyUpdateHistoryStats.schema = {
       trackId: Joi.string(),
       typeId: Joi.string(),
       challengeId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+      mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
       oldGlobalRank: Joi.number(),
@@ -639,29 +1113,38 @@ async function getMemberStats (currentUser, handle, query, throwError) {
   const member = await helper.getMemberByHandle(handle)
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, query.groupIds)
-  const trackId = resolveTrackId(query.trackId)
-  const typeId = resolveTypeId(query.typeId)
   let stats = []
-  for (const groupId of groupIds) {
-    const where = {
-      userId: member.userId,
-      isPrivate: groupId !== config.PUBLIC_GROUP_ID
+  if (USE_LEGACY_STATS_READS) {
+    for (const groupId of groupIds) {
+      const stat = await getLegacyMemberStatsRow(member.userId, groupId)
+      if (!_.isNil(stat)) {
+        stats.push(prismaHelper.buildStatsResponse(member, stat, fields))
+      }
     }
-    if (trackId) {
-      where.trackId = trackId
-    }
-    if (typeId) {
-      where.typeId = typeId
-    }
+  } else {
+    const trackId = resolveTrackId(query.trackId)
+    const typeId = resolveTypeId(query.typeId)
+    for (const groupId of groupIds) {
+      const where = {
+        userId: member.userId,
+        isPrivate: groupId !== config.PUBLIC_GROUP_ID
+      }
+      if (trackId) {
+        where.trackId = trackId
+      }
+      if (typeId) {
+        where.typeId = typeId
+      }
 
-    const unifiedStats = await prisma.memberStats.findMany({
-      where,
-      include: prismaHelper.unifiedStatsIncludeParams
-    })
+      const unifiedStats = await prisma.memberStats.findMany({
+        where,
+        include: prismaHelper.unifiedStatsIncludeParams
+      })
 
-    if (unifiedStats && unifiedStats.length > 0) {
-      const scopedStats = _.map(unifiedStats, stat => ({ ...stat, groupId: _.toNumber(groupId) }))
-      stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
+      if (unifiedStats && unifiedStats.length > 0) {
+        const scopedStats = _.map(unifiedStats, stat => ({ ...stat, groupId: _.toNumber(groupId) }))
+        stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
+      }
     }
   }
 
@@ -746,6 +1229,8 @@ async function createMemberStats (currentUser, handle, data) {
         }
       })
     }
+    await syncMostRecentHistoryRatings(tx, member.userId, unifiedRecords, operatorId)
+
     if (legacyMaxRatingData) {
       await prismaHelper.updateOrCreateModel(legacyMaxRatingData, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
     }
@@ -878,6 +1363,9 @@ async function partiallyUpdateMemberStats (currentUser, handle, data) {
           updatedBy: operatorId
         }
       })
+    }
+    if (unifiedRecords.length > 0) {
+      await syncMostRecentHistoryRatings(tx, member.userId, unifiedRecords, operatorId)
     }
 
     if (legacyMaxRatingData) {
