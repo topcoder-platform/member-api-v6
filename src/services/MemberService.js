@@ -698,8 +698,6 @@ async function updateMember (currentUser, handle, query, data) {
       throw new errors.BadRequestError('phones must be an array')
     }
 
-    const existingNumbers = new Set((member.phones || []).map(p => (p.number || '').trim()))
-    const normalizedNumbers = []
     const seen = new Set()
 
     for (const phone of data.phones) {
@@ -716,14 +714,11 @@ async function updateMember (currentUser, handle, query, data) {
       phone.number = number
       normalizedNumbers.push(number)
 
+      // only block duplicates within the payload
       if (seen.has(number)) {
         throw new errors.BadRequestError(`Duplicate phone number "${number}" is not allowed.`)
       }
       seen.add(number)
-
-      if (existingNumbers.has(number)) {
-        throw new errors.BadRequestError(`Phone number "${number}" is already added for this member.`)
-      }
     }
   }
 
