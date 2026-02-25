@@ -1101,6 +1101,63 @@ partiallyUpdateHistoryStats.schema = {
 }
 
 /**
+ * Load member statistics from unified table.
+ * @param {Object} member member row
+ * @param {Array} groupIds requested group ids
+ * @param {Object} query the query parameters
+ * @param {Array} fields fields to return in response
+ * @returns {Array} member statistics
+ */
+async function getUnifiedMemberStats (member, groupIds, query, fields) {
+  const trackId = resolveTrackId(query.trackId)
+  const typeId = resolveTypeId(query.typeId)
+  const stats = []
+
+  for (const groupId of groupIds) {
+    const where = {
+      userId: member.userId,
+      isPrivate: String(groupId) !== String(config.PUBLIC_GROUP_ID)
+    }
+    if (trackId) {
+      where.trackId = trackId
+    }
+    if (typeId) {
+      where.typeId = typeId
+    }
+
+    const unifiedStats = await prisma.memberStats.findMany({
+      where,
+      include: prismaHelper.unifiedStatsIncludeParams
+    })
+
+    if (unifiedStats && unifiedStats.length > 0) {
+      const scopedStats = _.map(unifiedStats, stat => ({ ...stat, groupId: _.toNumber(groupId) }))
+      stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
+    }
+  }
+
+  return stats
+}
+
+/**
+ * Load member statistics using legacy mapper from memberStats and nested legacy tables.
+ * @param {Object} member member row
+ * @param {Array} groupIds requested group ids
+ * @param {Array} fields fields to return in response
+ * @returns {Array} member statistics
+ */
+async function getLegacyMemberStats (member, groupIds, fields) {
+  const stats = []
+  for (const groupId of groupIds) {
+    const stat = await getLegacyMemberStatsRow(member.userId, groupId)
+    if (!_.isNil(stat)) {
+      stats.push(prismaHelper.buildStatsResponse(member, stat, fields))
+    }
+  }
+  return stats
+}
+
+/**
  * Get member statistics.
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
@@ -1113,39 +1170,15 @@ async function getMemberStats (currentUser, handle, query, throwError) {
   const member = await helper.getMemberByHandle(handle)
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, query.groupIds)
-  let stats = []
+  let stats
   if (USE_LEGACY_STATS_READS) {
-    for (const groupId of groupIds) {
-      const stat = await getLegacyMemberStatsRow(member.userId, groupId)
-      if (!_.isNil(stat)) {
-        stats.push(prismaHelper.buildStatsResponse(member, stat, fields))
-      }
+    stats = await getLegacyMemberStats(member, groupIds, fields)
+    if (stats.length === 0) {
+      logger.warn(`Legacy member stats lookup returned no rows for handle='${handle}', groupIds='${groupIds}'. Falling back to unified memberStats lookup.`)
+      stats = await getUnifiedMemberStats(member, groupIds, query, fields)
     }
   } else {
-    const trackId = resolveTrackId(query.trackId)
-    const typeId = resolveTypeId(query.typeId)
-    for (const groupId of groupIds) {
-      const where = {
-        userId: member.userId,
-        isPrivate: groupId !== config.PUBLIC_GROUP_ID
-      }
-      if (trackId) {
-        where.trackId = trackId
-      }
-      if (typeId) {
-        where.typeId = typeId
-      }
-
-      const unifiedStats = await prisma.memberStats.findMany({
-        where,
-        include: prismaHelper.unifiedStatsIncludeParams
-      })
-
-      if (unifiedStats && unifiedStats.length > 0) {
-        const scopedStats = _.map(unifiedStats, stat => ({ ...stat, groupId: _.toNumber(groupId) }))
-        stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
-      }
-    }
+    stats = await getUnifiedMemberStats(member, groupIds, query, fields)
   }
 
   if (throwError && stats.length === 0) {
