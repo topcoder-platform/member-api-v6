@@ -29,6 +29,7 @@
  * - memberStatsHistory.newRating on the mostRecent row is synchronized from memberStats.rating.
  * - The script is idempotent and safe to run multiple times.
  * - Writes use upsert on (userId, trackId, typeId).
+ * - Users missing in members.member are skipped to satisfy foreign key constraints.
  */
 
 const fs = require('fs')
@@ -286,6 +287,59 @@ function toInt (value) {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : 0
 }
 
+function isMissingMemberStatsUserFkError (error) {
+  return Boolean(
+    error &&
+    error.code === 'P2003' &&
+    error.meta &&
+    error.meta.constraint === 'memberStats_userId_fkey'
+  )
+}
+
+function buildMemberStatsUpsertQuery (membersClient, record) {
+  const writeData = {
+    userId: record.userId,
+    trackId: record.trackId,
+    typeId: record.typeId,
+    challenges: record.challenges,
+    wins: record.wins,
+    mostRecentEventDate: record.mostRecentEventDate,
+    mostRecentSubmission: record.mostRecentSubmission,
+    rating: record.rating,
+    avgRank: record.avgRank,
+    avgNumSubmissions: record.avgNumSubmissions,
+    bestRank: record.bestRank,
+    globalRank: record.globalRank,
+    countryRank: record.countryRank,
+    schoolRank: record.schoolRank,
+    volatility: record.volatility,
+    maxRating: record.maxRating,
+    minRating: record.minRating,
+    topFiveFinishes: record.topFiveFinishes,
+    topTenFinishes: record.topTenFinishes,
+    isPrivate: record.isPrivate
+  }
+
+  return membersClient.memberStats.upsert({
+    where: {
+      userId_trackId_typeId: {
+        userId: record.userId,
+        trackId: record.trackId,
+        typeId: record.typeId
+      }
+    },
+    create: {
+      ...writeData,
+      createdBy: CREATED_BY,
+      updatedBy: UPDATED_BY
+    },
+    update: {
+      ...writeData,
+      updatedBy: UPDATED_BY
+    }
+  })
+}
+
 function buildFilterQuery (options, includeUserFilter) {
   const clauses = [
     'c."trackId" IS NOT NULL',
@@ -350,6 +404,25 @@ async function getUserIds (challengesClient, options) {
   return unique
 }
 
+async function getExistingMemberUserIdSet (membersClient, userIds) {
+  if (!userIds || userIds.length === 0) {
+    return new Set()
+  }
+
+  const rows = await membersClient.member.findMany({
+    where: {
+      userId: {
+        in: userIds
+      }
+    },
+    select: {
+      userId: true
+    }
+  })
+
+  return new Set(rows.map((row) => normalizeBigInt(row.userId, 'user id').toString()))
+}
+
 async function aggregateStatsForUser (challengesClient, userId, options) {
   const { whereSql, params } = buildFilterQuery(options, userId)
 
@@ -402,54 +475,42 @@ async function writeStatsToDatabase (membersClient, statsRecords) {
   }
 
   try {
-    const queries = statsRecords.map((record) => {
-      const writeData = {
-        userId: record.userId,
-        trackId: record.trackId,
-        typeId: record.typeId,
-        challenges: record.challenges,
-        wins: record.wins,
-        mostRecentEventDate: record.mostRecentEventDate,
-        mostRecentSubmission: record.mostRecentSubmission,
-        rating: record.rating,
-        avgRank: record.avgRank,
-        avgNumSubmissions: record.avgNumSubmissions,
-        bestRank: record.bestRank,
-        globalRank: record.globalRank,
-        countryRank: record.countryRank,
-        schoolRank: record.schoolRank,
-        volatility: record.volatility,
-        maxRating: record.maxRating,
-        minRating: record.minRating,
-        topFiveFinishes: record.topFiveFinishes,
-        topTenFinishes: record.topTenFinishes,
-        isPrivate: record.isPrivate
-      }
-
-      return membersClient.memberStats.upsert({
-        where: {
-          userId_trackId_typeId: {
-            userId: record.userId,
-            trackId: record.trackId,
-            typeId: record.typeId
-          }
-        },
-        create: {
-          ...writeData,
-          createdBy: CREATED_BY,
-          updatedBy: UPDATED_BY
-        },
-        update: {
-          ...writeData,
-          updatedBy: UPDATED_BY
-        }
-      })
-    })
+    const queries = statsRecords.map((record) => buildMemberStatsUpsertQuery(membersClient, record))
 
     // Use array transactions to avoid interactive transaction timeout closures on long write loops.
     await membersClient.$transaction(queries)
     return statsRecords.length
   } catch (error) {
+    if (isMissingMemberStatsUserFkError(error)) {
+      logWarn('memberStats batch write hit missing member FK. Retrying per-record and skipping orphan user IDs.')
+
+      let written = 0
+      let skipped = 0
+      const skippedUserIds = new Set()
+
+      for (const record of statsRecords) {
+        try {
+          await buildMemberStatsUpsertQuery(membersClient, record)
+          written += 1
+        } catch (singleWriteError) {
+          if (isMissingMemberStatsUserFkError(singleWriteError)) {
+            skipped += 1
+            skippedUserIds.add(record.userId.toString())
+            continue
+          }
+          throw singleWriteError
+        }
+      }
+
+      if (skipped > 0) {
+        const skippedIdSample = Array.from(skippedUserIds).slice(0, 10)
+        const suffix = skippedUserIds.size > 10 ? ', ...' : ''
+        logWarn(`Skipped ${skipped} memberStats record(s) for ${skippedUserIds.size} missing user(s): ${skippedIdSample.join(', ')}${suffix}`)
+      }
+
+      return written
+    }
+
     logError(`Transaction failed. Rolled back ${statsRecords.length} pending records.`, error)
     throw error
   }
@@ -569,10 +630,34 @@ async function main () {
     for (let batchStart = 0; batchStart < userIds.length; batchStart += USER_BATCH_SIZE) {
       const batchUserIds = userIds.slice(batchStart, batchStart + USER_BATCH_SIZE)
       const batchStatsRecords = []
+      const existingUserIdSet = await getExistingMemberUserIdSet(membersClient, batchUserIds)
+      const existingBatchUserIds = []
+      const missingBatchUserIds = []
 
       for (const userId of batchUserIds) {
-        const stats = await aggregateStatsForUser(challengesClient, userId, options)
+        if (existingUserIdSet.has(userId.toString())) {
+          existingBatchUserIds.push(userId)
+        } else {
+          missingBatchUserIds.push(userId)
+        }
+      }
+
+      if (missingBatchUserIds.length > 0) {
+        const missingIdSample = missingBatchUserIds.slice(0, 10).map((userId) => userId.toString())
+        const suffix = missingBatchUserIds.length > 10 ? ', ...' : ''
+        logWarn(`Skipping ${missingBatchUserIds.length} user(s) missing in members.member: ${missingIdSample.join(', ')}${suffix}`)
+      }
+
+      for (const userId of batchUserIds) {
         processedUsers += 1
+        if (!existingUserIdSet.has(userId.toString())) {
+          if (processedUsers % 100 === 0 || processedUsers === userIds.length) {
+            logInfo(`Processed ${processedUsers} of ${userIds.length} users`)
+          }
+          continue
+        }
+
+        const stats = await aggregateStatsForUser(challengesClient, userId, options)
 
         if (stats.length === 0) {
           logWarn(`No challenge stats found for user ${userId.toString()}`)
@@ -606,7 +691,7 @@ async function main () {
       }
 
       if (!options.csvOnly) {
-        const updatedRows = await refreshHistoryMostRecentFlagsForUsers(membersClient, batchUserIds)
+        const updatedRows = await refreshHistoryMostRecentFlagsForUsers(membersClient, existingBatchUserIds)
         updatedHistoryFlags += updatedRows
         if (updatedRows > 0) {
           logInfo(`Recomputed memberStatsHistory.mostRecent on ${updatedRows} row(s) for users ${batchStart + 1}-${processedUsers}`)
@@ -637,6 +722,7 @@ if (require.main === module) {
 module.exports = {
   parseArgs,
   getUserIds,
+  getExistingMemberUserIdSet,
   aggregateStatsForUser,
   writeStatsToDatabase,
   refreshHistoryMostRecentFlagsForUsers,
