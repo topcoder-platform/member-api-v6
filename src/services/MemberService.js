@@ -1915,7 +1915,7 @@ async function aggregatePDFData (currentUser, handle) {
       ...(basicInfoTraits[0] || {}),
       shortBio: shortBio
     },
-    // Skills: principal (verified/not verified) + additional by category (up to PDF_SKILLS_PER_CATEGORY per category, default 5)
+    // Skills
     skills: { principal: principalSkills },
     skillsByCategory,
     // Topcoder activity
