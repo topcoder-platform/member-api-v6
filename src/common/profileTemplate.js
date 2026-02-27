@@ -284,12 +284,33 @@ function createSkillsSubsection (title, verified, notVerified) {
 }
 
 /**
+ * Create a skills block for one category (category name + list of skill names)
+ */
+function createCategorySkillsBlock (categoryName, skillNames) {
+  if (!skillNames || skillNames.length === 0) return null
+  return React.createElement(
+    View,
+    { key: `category-${categoryName}`, style: styles.skillsSubsection },
+    React.createElement(
+      Text,
+      { style: styles.skillsSubsectionTitle },
+      `${categoryName}:`
+    ),
+    React.createElement(
+      Text,
+      { style: styles.skillsList },
+      skillNames.join(', ')
+    )
+  )
+}
+
+/**
  * Build the PDF template for member profile
  * @param {Object} pdfData the aggregated PDF data
  * @returns {Object} React element tree
  */
 function buildProfileTemplate (pdfData) {
-  const { member, workExperience, education, languages, basicInfo, skills, topcoderActivity, certifications, courses } = pdfData
+  const { member, workExperience, education, languages, basicInfo, skills, skillsByCategory, topcoderActivity, certifications, courses } = pdfData
 
   const children = []
 
@@ -387,30 +408,28 @@ function buildProfileTemplate (pdfData) {
     )
   }
 
-  // Technical Skills Section
-  const hasSkills = skills.principal.verified.length > 0 || skills.principal.notVerified.length > 0 ||
-                    skills.additional.verified.length > 0 || skills.additional.notVerified.length > 0
-  if (hasSkills) {
-    const skillsContent = [
-      createSectionHeader('TECHNICAL SKILLS')
-    ]
+  const hasPrincipalSkills = skills && skills.principal && (skills.principal.verified.length > 0 || skills.principal.notVerified.length > 0)
+  const hasAdditionalByCategory = skillsByCategory && skillsByCategory.length > 0
+  if (hasPrincipalSkills || hasAdditionalByCategory) {
+    const skillsContent = [createSectionHeader('TECHNICAL SKILLS')]
 
-    const principalSubsection = createSkillsSubsection(
-      'Principal Skills:',
-      skills.principal.verified,
-      skills.principal.notVerified
-    )
-    if (principalSubsection) {
-      skillsContent.push(principalSubsection)
+    if (hasPrincipalSkills) {
+      const principalSubsection = createSkillsSubsection(
+        'Principal Skills:',
+        skills.principal.verified,
+        skills.principal.notVerified
+      )
+      if (principalSubsection) skillsContent.push(principalSubsection)
     }
 
-    const additionalSubsection = createSkillsSubsection(
-      'Additional Skills:',
-      skills.additional.verified,
-      skills.additional.notVerified
-    )
-    if (additionalSubsection) {
-      skillsContent.push(additionalSubsection)
+    if (hasAdditionalByCategory) {
+      skillsContent.push(
+        React.createElement(Text, { key: 'additional-skills-title', style: styles.skillsSubsectionTitle }, 'Additional Skills:')
+      )
+      skillsByCategory.forEach(item => {
+        const block = createCategorySkillsBlock(item.categoryName, item.skills)
+        if (block) skillsContent.push(block)
+      })
     }
 
     children.push(
