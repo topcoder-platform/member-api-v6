@@ -284,23 +284,15 @@ function createSkillsSubsection (title, verified, notVerified) {
 }
 
 /**
- * Create a skills block for one category (category name + list of skill names)
+ * Create one category line in same style as verified/not verified: bullet label + skills on same line
  */
 function createCategorySkillsBlock (categoryName, skillNames) {
   if (!skillNames || skillNames.length === 0) return null
   return React.createElement(
-    View,
-    { key: `category-${categoryName}`, style: styles.skillsSubsection },
-    React.createElement(
-      Text,
-      { style: styles.skillsSubsectionTitle },
-      `${categoryName}:`
-    ),
-    React.createElement(
-      Text,
-      { style: styles.skillsList },
-      skillNames.join(', ')
-    )
+    Text,
+    { key: `category-${categoryName}`, style: styles.skillsList },
+    React.createElement(Text, { style: styles.skillsLabel }, `• ${categoryName}: `),
+    skillNames.join(', ')
   )
 }
 
@@ -423,13 +415,17 @@ function buildProfileTemplate (pdfData) {
     }
 
     if (hasAdditionalByCategory) {
+      const additionalItems = skillsByCategory
+        .map(item => createCategorySkillsBlock(item.categoryName, item.skills))
+        .filter(Boolean)
       skillsContent.push(
-        React.createElement(Text, { key: 'additional-skills-title', style: styles.skillsSubsectionTitle }, 'Additional Skills:')
+        React.createElement(
+          View,
+          { key: 'additional-skills-subsection', style: styles.skillsSubsection },
+          React.createElement(Text, { style: styles.skillsSubsectionTitle }, 'Additional Skills:'),
+          ...additionalItems
+        )
       )
-      skillsByCategory.forEach(item => {
-        const block = createCategorySkillsBlock(item.categoryName, item.skills)
-        if (block) skillsContent.push(block)
-      })
     }
 
     children.push(
