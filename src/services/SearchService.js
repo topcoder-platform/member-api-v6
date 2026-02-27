@@ -976,13 +976,59 @@ async function autocomplete (currentUser, query) {
     selectFields[f] = true
   })
 
-  let records = await prisma.member.findMany({
-    ...prismaFilter,
-    select: selectFields,
-    skip: (query.page - 1) * query.perPage,
-    take: query.perPage,
-    orderBy: { handle: query.sortOrder }
+  const offset = (query.page - 1) * query.perPage
+  const exactMatch = await prisma.member.findFirst({
+    where: {
+      handleLower: term,
+      status: 'ACTIVE'
+    },
+    select: selectFields
   })
+
+  let records = []
+  if (!exactMatch) {
+    records = await prisma.member.findMany({
+      ...prismaFilter,
+      select: selectFields,
+      skip: offset,
+      take: query.perPage,
+      orderBy: { handle: query.sortOrder }
+    })
+  } else {
+    const nonExactFilter = {
+      ...prismaFilter,
+      where: {
+        ...prismaFilter.where,
+        handleLower: {
+          startsWith: term,
+          not: term
+        }
+      }
+    }
+
+    if (offset === 0) {
+      const remaining = query.perPage - 1
+      const nonExactRecords = remaining > 0
+        ? await prisma.member.findMany({
+          ...nonExactFilter,
+          select: selectFields,
+          skip: 0,
+          take: remaining,
+          orderBy: { handle: query.sortOrder }
+        })
+        : []
+      records = [exactMatch, ...nonExactRecords]
+    } else {
+      records = await prisma.member.findMany({
+        ...nonExactFilter,
+        select: selectFields,
+        skip: offset - 1,
+        take: query.perPage,
+        orderBy: { handle: query.sortOrder }
+      })
+    }
+  }
+
   records = _.map(records, item => {
     const t = _.pick(item, fieldsForQuery)
     if (t.userId) {
