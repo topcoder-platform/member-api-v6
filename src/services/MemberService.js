@@ -34,6 +34,7 @@ const resourcesPrisma = prismaManager.getResourcesClient()
 const engagementsPrisma = prismaManager.getEngagementsClient()
 const profilePDFService = require('./ProfilePDFService')
 const request = require('request')
+const axios = require('axios')
 const cityTimezones = require('city-timezones')
 const moment = require('moment-timezone')
 
@@ -49,6 +50,10 @@ const HANDLE_MIN_LENGTH = 3
 const HANDLE_MAX_LENGTH = 64
 const HANDLE_REGEX = /^[-A-Za-z0-9_.`{}[\]]{3,64}$/
 const HANDLE_PUNCTUATION_ONLY_REGEX = /^[-_.{}[\]]+$/
+const SENDGRID_BASE_URL = 'https://api.sendgrid.com'
+const SENDGRID_EMAIL_ACTIVITY_LOOKBACK_DAYS = 30
+const SENDGRID_EMAIL_ACTIVITY_PAGE_SIZE = 100
+const SENDGRID_EMAIL_ACTIVITY_MAX_PAGES = 50
 
 /**
  * Clean member fields according to current user.
@@ -104,12 +109,18 @@ function omitMemberAttributes (currentUser, mb) {
     currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
   const canSeeIdentityVerified = isM2M || hasSensitiveDataRole || isSelf
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
+  const canSeeFullAddress = canManageMember || hasSensitiveDataRole
 
-  if (!canManageMember) {
+  if (!canManageMember ) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
-    res = helper.secureMemberAddressData(res)
     res = helper.truncateLastName(res)
   }
+
+  // Show full address to admins and TMs
+  if (!canSeeFullAddress) {
+    res = helper.secureMemberAddressData(res)
+  }
+
   if (!canManageMember && !hasSensitiveDataRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
     if (res.phones) {
@@ -359,6 +370,113 @@ getMember.schema = {
 }
 
 /**
+ * Build query string for SendGrid email activity API.
+ * @param {String} email recipient email
+ * @param {String} startTime lower bound timestamp
+ * @param {String} endTime upper bound timestamp
+ * @returns {String} query expression for SendGrid
+ */
+function buildSendgridEmailActivityQuery (email, startTime, endTime) {
+  const escapedEmail = String(email)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+  return `to_email = "${escapedEmail}" AND last_event_time BETWEEN TIMESTAMP "${startTime}" AND TIMESTAMP "${endTime}"`
+}
+
+/**
+ * Normalize SendGrid metadata next-page URL.
+ * @param {String} nextPath next page path or absolute URL
+ * @returns {String|null} normalized absolute URL for next page
+ */
+function normalizeSendgridNextPageUrl (nextPath) {
+  if (!nextPath || typeof nextPath !== 'string') {
+    return null
+  }
+  if (nextPath.startsWith('https://') || nextPath.startsWith('http://')) {
+    return nextPath
+  }
+  if (nextPath.startsWith('/')) {
+    return `${SENDGRID_BASE_URL}${nextPath}`
+  }
+  return `${SENDGRID_BASE_URL}/${nextPath}`
+}
+
+/**
+ * Get SendGrid email activity for a member in the last 30 days.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @returns {Array} all SendGrid message activity records
+ */
+async function getMemberSendgridEmails (currentUser, handle) {
+  if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
+    throw new errors.ForbiddenError('You are not allowed to view SendGrid email activity.')
+  }
+
+  const sendgridApiKey = (config.SENDGRID_API_KEY || '').trim()
+  if (!sendgridApiKey) {
+    throw new errors.ServiceUnavailableError('SendGrid API key is not configured.')
+  }
+
+  const member = await helper.getMemberByHandle(handle)
+  if (!member.email) {
+    return []
+  }
+
+  const endTime = new Date().toISOString()
+  const startTimeDate = new Date()
+  startTimeDate.setDate(startTimeDate.getDate() - SENDGRID_EMAIL_ACTIVITY_LOOKBACK_DAYS)
+  const startTime = startTimeDate.toISOString()
+
+  const headers = {
+    Authorization: `Bearer ${sendgridApiKey}`
+  }
+  const query = buildSendgridEmailActivityQuery(member.email, startTime, endTime)
+  const messages = []
+
+  let nextUrl = `${SENDGRID_BASE_URL}/v3/messages`
+  let params = {
+    limit: SENDGRID_EMAIL_ACTIVITY_PAGE_SIZE,
+    query
+  }
+
+  for (let page = 0; page < SENDGRID_EMAIL_ACTIVITY_MAX_PAGES; page += 1) {
+    let response
+    try {
+      response = await axios.get(nextUrl, {
+        headers,
+        params
+      })
+    } catch (err) {
+      const statusCode = _.get(err, 'response.status')
+      logger.error(
+        `Failed to fetch SendGrid email activity for member "${handle}" (status: ${statusCode || 'N/A'}): ${err.message}`
+      )
+      throw new errors.ServiceUnavailableError('Failed to fetch SendGrid email activity.')
+    }
+
+    const pageMessages = _.get(response, 'data.messages', [])
+    if (Array.isArray(pageMessages) && pageMessages.length > 0) {
+      messages.push(...pageMessages)
+    }
+
+    const nextPath = _.get(response, 'data._metadata.next')
+    const normalizedNextUrl = normalizeSendgridNextPageUrl(nextPath)
+    if (!normalizedNextUrl) {
+      break
+    }
+    nextUrl = normalizedNextUrl
+    params = undefined
+  }
+
+  return messages
+}
+
+getMemberSendgridEmails.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required()
+}
+
+/**
  * Get member profile completeness data.
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
@@ -392,7 +510,6 @@ async function getProfileCompleteness (currentUser, handle, query) {
   data.skills = false
   data.gigAvailability = false
   data.bio = false
-  data.profilePicture = false
   data.workHistory = false
   data.education = false
   data.location = false
@@ -467,14 +584,16 @@ async function getProfileCompleteness (currentUser, handle, query) {
     showToast.push('skills')
   }
 
-  if (member.photoURL) {
-    completeItems += 1
-    data.profilePicture = true
-  } else {
-    showToast.push('profilePicture')
-  }
+  const hasCountry = !!(member.homeCountryCode)
 
-  if (member.addresses && member.addresses.length) {
+  const hasCity = !!(
+    member.addresses
+    && member.addresses.length
+    && member.addresses.some(a => a && a.city && a.city.trim())
+  )
+
+  // Should have city and country in at least one address
+  if (hasCity && hasCountry) {
     completeItems += 1
     data.location = true
 
@@ -578,6 +697,9 @@ async function updateMember (currentUser, handle, query, data) {
     if (!Array.isArray(data.phones)) {
       throw new errors.BadRequestError('phones must be an array')
     }
+
+    const seen = new Set()
+
     for (const phone of data.phones) {
       if (!phone.type || typeof phone.type !== 'string') {
         throw new errors.BadRequestError('Each phone must have a type (string)')
@@ -588,6 +710,14 @@ async function updateMember (currentUser, handle, query, data) {
       if (!phoneRegex.test(phone.number)) {
         throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
       }
+      const number = phone.number.trim()
+      phone.number = number
+
+      // only block duplicates within the payload
+      if (seen.has(number)) {
+        throw new errors.BadRequestError(`Duplicate phone number "${number}" is not allowed.`)
+      }
+      seen.add(number)
     }
   }
 
@@ -2049,6 +2179,7 @@ getMemberSkill.schema = {
 
 module.exports = {
   getMember,
+  getMemberSendgridEmails,
   getProfileCompleteness,
   getMemberUserIdSignature,
   getMemberSkill,

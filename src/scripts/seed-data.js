@@ -10,8 +10,6 @@ const skillsPrisma = prismaManager.getSkillsClient()
 const OUTPUT_DIR = config.fileLocation
 const handleList = config.handleList
 
-const distributions = config.distributions
-const distributionDir = path.join(OUTPUT_DIR, 'distribution')
 const statsHistoryDir = path.join(OUTPUT_DIR, 'statsHistory')
 
 const memberBasicData = [
@@ -337,28 +335,6 @@ async function importMember (handle) {
   console.log(`Import member data complete for ${handle}`)
 }
 
-async function importDistributions () {
-  const statsList = []
-  for (let track of distributions) {
-    const filename = path.join(distributionDir, `${track.track}_${track.subTrack}.json`)
-    const rawData = fs.readFileSync(filename, 'utf8')
-    const data = JSON.parse(rawData)
-    // convert from json to db format
-    const item = _.pick(data, ['track', 'subTrack'])
-    _.forEach(data.distribution, (value, key) => {
-      item[key] = value
-    })
-    item.createdBy = createdBy
-    item.createdAt = new Date()
-    statsList.push(item)
-  }
-  console.log('Importing distribution stats')
-  await prisma.distributionStats.createMany({
-    data: statsList
-  })
-  console.log('Importing distribution stats complete')
-}
-
 async function importStatsHistory () {
   for (let handle of handleList) {
     if (handle === 'iamtong' || handle === 'jiangliwu') {
@@ -372,68 +348,86 @@ async function importStatsHistory () {
       continue
     }
     const statsData = data[0]
-    const prismaData = {
-      userId: statsData.userId,
-      groupId: statsData.groupId,
-      isPrivate: false,
-      createdBy,
-      createdAt: new Date()
-    }
+    const historyRecords = []
+
     // handle develop stats history
     if (statsData.DEVELOP && statsData.DEVELOP.subTracks &&
       statsData.DEVELOP.subTracks.length > 0) {
-      const devItems = []
       _.forEach(statsData.DEVELOP.subTracks, t => {
-        const subTrackId = t.id
-        const subTrack = t.name
+        const typeId = `${t.name || t.id || 'Challenge'}`
         _.forEach(t.history, h => {
-          devItems.push({
-            subTrackId,
-            subTrack,
+          historyRecords.push({
+            userId: statsData.userId,
+            trackId: 'DEVELOP',
+            typeId,
+            challengeId: `${h.challengeId}`,
+            oldRating: h.oldRating,
+            newRating: h.newRating,
+            oldGlobalRank: h.oldGlobalRank,
+            newGlobalRank: h.newGlobalRank,
+            oldCountryRank: h.oldCountryRank,
+            newCountryRank: h.newCountryRank,
+            oldSchoolRank: h.oldSchoolRank,
+            newSchoolRank: h.newSchoolRank,
+            eventDate: new Date(h.ratingDate),
             createdBy,
-            ..._.pick(h, ['challengeId', 'challengeName', 'newRating']),
-            ratingDate: new Date(h.ratingDate)
+            updatedBy: createdBy
           })
         })
       })
-      prismaData.develop = {
-        createMany: { data: devItems }
-      }
     }
 
     // handle data science stats history
-    const dataScienceItems = []
     const srmHistory = _.get(statsData, 'DATA_SCIENCE.SRM.history', [])
     const marathonHistory = _.get(statsData, 'DATA_SCIENCE.MARATHON_MATCH.history', [])
     if (srmHistory.length > 0) {
       _.forEach(srmHistory, t => {
-        dataScienceItems.push({
-          subTrack: 'SRM',
+        historyRecords.push({
+          userId: statsData.userId,
+          trackId: 'DATA_SCIENCE',
+          typeId: 'SRM',
+          challengeId: `${t.challengeId}`,
+          oldRating: t.oldRating,
+          newRating: t.newRating || t.rating,
+          oldGlobalRank: t.oldGlobalRank,
+          newGlobalRank: t.newGlobalRank || t.placement,
+          oldCountryRank: t.oldCountryRank,
+          newCountryRank: t.newCountryRank,
+          oldSchoolRank: t.oldSchoolRank,
+          newSchoolRank: t.newSchoolRank,
+          eventDate: new Date(t.date),
           createdBy,
-          ..._.pick(t, ['challengeId', 'challengeName', 'rating', 'placement', 'percentile']),
-          date: new Date(t.date)
+          updatedBy: createdBy
         })
       })
     }
     if (marathonHistory.length > 0) {
       _.forEach(marathonHistory, t => {
-        dataScienceItems.push({
-          subTrack: 'MARATHON_MATCH',
+        historyRecords.push({
+          userId: statsData.userId,
+          trackId: 'DATA_SCIENCE',
+          typeId: 'MARATHON_MATCH',
+          challengeId: `${t.challengeId}`,
+          oldRating: t.oldRating,
+          newRating: t.newRating || t.rating,
+          oldGlobalRank: t.oldGlobalRank,
+          newGlobalRank: t.newGlobalRank || t.placement,
+          oldCountryRank: t.oldCountryRank,
+          newCountryRank: t.newCountryRank,
+          oldSchoolRank: t.oldSchoolRank,
+          newSchoolRank: t.newSchoolRank,
+          eventDate: new Date(t.date),
           createdBy,
-          ..._.pick(t, ['challengeId', 'challengeName', 'rating', 'placement', 'percentile']),
-          date: new Date(t.date)
+          updatedBy: createdBy
         })
       })
     }
-    if (dataScienceItems.length > 0) {
-      prismaData.dataScience = {
-        createMany: { data: dataScienceItems }
-      }
-    }
 
-    await prisma.memberHistoryStats.create({
-      data: prismaData
-    })
+    if (historyRecords.length > 0) {
+      await prisma.memberStatsHistory.createMany({
+        data: historyRecords
+      })
+    }
   }
   console.log('Importing stats history complete')
 }
@@ -443,91 +437,71 @@ async function importStatsHistory () {
  */
 async function mockPrivateStatsHistory () {
   console.log('Creating mock stats history data for ACRush')
-  await prisma.memberHistoryStats.create({
-    data: {
+  await prisma.memberStatsHistory.createMany({
+    data: [{
       userId: 19849563,
-      groupId: 20000001,
-      isPrivate: true,
+      trackId: 'DEVELOP',
+      typeId: 'SECRET_TRACK',
+      challengeId: '99999',
+      newRating: 3000,
+      eventDate: new Date(),
       createdBy,
-      createdAt: new Date(),
-      develop: {
-        createMany: {
-          data: [{
-            subTrackId: 999,
-            subTrack: 'secret track',
-            challengeId: 99999,
-            challengeName: 'Secret Challenge',
-            newRating: 3000,
-            ratingDate: new Date(),
-            createdBy
-          }]
-        }
-      },
-      dataScience: {
-        createMany: {
-          data: [{
-            challengeId: 99998,
-            challengeName: 'Secret SRM',
-            date: new Date(),
-            rating: 2999,
-            placement: 1,
-            percentile: 100,
-            subTrack: 'SRM',
-            createdBy
-          }, {
-            challengeId: 99997,
-            challengeName: 'Secret Marathon',
-            date: new Date(),
-            rating: 2998,
-            placement: 1,
-            percentile: 100,
-            subTrack: 'MARATHON_MATCH',
-            createdBy
-          }]
-        }
-      }
-    }
+      updatedBy: createdBy
+    }, {
+      userId: 19849563,
+      trackId: 'DATA_SCIENCE',
+      typeId: 'SRM',
+      challengeId: '99998',
+      newRating: 2999,
+      newGlobalRank: 1,
+      eventDate: new Date(),
+      createdBy,
+      updatedBy: createdBy
+    }, {
+      userId: 19849563,
+      trackId: 'DATA_SCIENCE',
+      typeId: 'MARATHON_MATCH',
+      challengeId: '99997',
+      newRating: 2998,
+      newGlobalRank: 1,
+      eventDate: new Date(),
+      createdBy,
+      updatedBy: createdBy
+    }]
   })
 }
 
 async function mockPrivateStats () {
   console.log('Creating mock stats data for ACRush')
-  await prisma.memberStats.create({
-    data: {
+  await prisma.memberStats.createMany({
+    data: [{
       userId: 19849563,
-      groupId: 20000001,
-      challenges: 1000,
-      wins: 1000,
+      trackId: 'DEVELOP',
+      typeId: 'Challenge',
+      challenges: 999,
+      wins: 999,
       isPrivate: true,
       createdBy,
-      createdAt: new Date(),
-      develop: {
-        create: {
-          challenges: 999,
-          wins: 999,
-          createdBy
-        }
-      },
-      dataScience: {
-        create: {
-          challenges: 999,
-          wins: 999,
-          createdBy
-        }
-      },
-      copilot: {
-        create: {
-          contests: 100,
-          projects: 100,
-          failures: 0,
-          reposts: 0,
-          activeContests: 1,
-          activeProjects: 1,
-          fulfillment: 100,
-          createdBy
-        }
-      }
-    }
+      updatedBy: createdBy
+    }, {
+      userId: 19849563,
+      trackId: 'DATA_SCIENCE',
+      typeId: 'SRM',
+      challenges: 999,
+      wins: 999,
+      isPrivate: true,
+      createdBy,
+      updatedBy: createdBy
+    }, {
+      userId: 19849563,
+      trackId: 'COPILOT',
+      typeId: 'Challenge',
+      challenges: 100,
+      wins: 100,
+      isPrivate: true,
+      createdBy,
+      updatedBy: createdBy
+    }]
   })
 }
 
@@ -535,7 +509,6 @@ async function main () {
   for (let handle of handleList) {
     await importMember(handle)
   }
-  await importDistributions()
   await importStatsHistory()
   // create mock data for private stats history
   await mockPrivateStatsHistory()

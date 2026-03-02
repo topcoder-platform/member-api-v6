@@ -67,10 +67,10 @@ model member {
   aggregatedSkills               Json?
   enteredSkills                  Json?
 
-  financial    memberFinancial?
-  historyStats memberHistoryStats[]
-  memberStats  memberStats[]
-  memberTraits memberTraits?
+  financial          memberFinancial?
+  memberStats        memberStats[]
+  memberStatsHistory memberStatsHistory[]
+  memberTraits       memberTraits?
 
   createdAt DateTime  @default(now())
   createdBy String
@@ -138,66 +138,10 @@ model memberMaxRating {
   updatedAt DateTime? @updatedAt
   updatedBy String?
 
-  member      member        @relation(fields: [userId], references: [userId], onDelete: Cascade)
-  memberStats memberStats[] // virtual relation
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@unique([userId])
   @@index([userId])
-  @@schema("members")
-}
-
-model distributionStats {
-  id       BigInt @id @default(autoincrement())
-  track    String
-  subTrack String
-
-  ratingRange0To099     Int
-  ratingRange100To199   Int
-  ratingRange200To299   Int
-  ratingRange300To399   Int
-  ratingRange400To499   Int
-  ratingRange500To599   Int
-  ratingRange600To699   Int
-  ratingRange700To799   Int
-  ratingRange800To899   Int
-  ratingRange900To999   Int
-  ratingRange1000To1099 Int
-  ratingRange1100To1199 Int
-  ratingRange1200To1299 Int
-  ratingRange1300To1399 Int
-  ratingRange1400To1499 Int
-  ratingRange1500To1599 Int
-  ratingRange1600To1699 Int
-  ratingRange1700To1799 Int
-  ratingRange1800To1899 Int
-  ratingRange1900To1999 Int
-  ratingRange2000To2099 Int
-  ratingRange2100To2199 Int
-  ratingRange2200To2299 Int
-  ratingRange2300To2399 Int
-  ratingRange2400To2499 Int
-  ratingRange2500To2599 Int
-  ratingRange2600To2699 Int
-  ratingRange2700To2799 Int
-  ratingRange2800To2899 Int
-  ratingRange2900To2999 Int
-  ratingRange3000To3099 Int
-  ratingRange3100To3199 Int
-  ratingRange3200To3299 Int
-  ratingRange3300To3399 Int
-  ratingRange3400To3499 Int
-  ratingRange3500To3599 Int
-  ratingRange3600To3699 Int
-  ratingRange3700To3799 Int
-  ratingRange3800To3899 Int
-  ratingRange3900To3999 Int
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([track, subTrack])
   @@schema("members")
 }
 
@@ -216,13 +160,22 @@ model memberFinancial {
   @@schema("members")
 }
 
-model memberHistoryStats {
-  id          BigInt                          @id @default(autoincrement())
-  userId      BigInt
-  develop     memberDevelopHistoryStats[]
-  dataScience memberDataScienceHistoryStats[]
-  groupId     BigInt?
-  isPrivate   Boolean                         @default(false)
+model memberStatsHistory {
+  id             BigInt   @id @default(autoincrement())
+  userId         BigInt
+  trackId        String
+  typeId         String
+  challengeId    String
+  mostRecent     Boolean  @default(false)
+  oldRating      Int?
+  newRating      Int?
+  oldGlobalRank  Int?
+  newGlobalRank  Int?
+  oldCountryRank Int?
+  newCountryRank Int?
+  oldSchoolRank  Int?
+  newSchoolRank  Int?
+  eventDate      DateTime
 
   member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
@@ -232,72 +185,35 @@ model memberHistoryStats {
   updatedBy String?
 
   @@index([userId])
-  @@index([groupId])
-  @@index([userId, isPrivate])
-  @@schema("members")
-}
-
-model memberDevelopHistoryStats {
-  id             BigInt @id @default(autoincrement())
-  historyStatsId BigInt
-
-  challengeId   BigInt
-  challengeName String
-  ratingDate    DateTime
-  newRating     Int
-  subTrack      String
-  subTrackId    Int
-
-  historyStats memberHistoryStats @relation(fields: [historyStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@index([historyStatsId])
-  @@schema("members")
-}
-
-model memberDataScienceHistoryStats {
-  id             BigInt @id @default(autoincrement())
-  historyStatsId BigInt
-
-  challengeId   BigInt
-  challengeName String
-  date          DateTime
-  rating        Int
-  placement     Int
-  percentile    Float
-  subTrack      String
-  subTrackId    Int
-
-  historyStats memberHistoryStats @relation(fields: [historyStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@index([historyStatsId])
+  @@index([userId, trackId, typeId])
+  @@index([userId, trackId, typeId, mostRecent])
+  @@index([challengeId])
+  @@index([eventDate])
   @@schema("members")
 }
 
 model memberStats {
-  id     BigInt @id @default(autoincrement())
-  userId BigInt
-
-  memberRatingId BigInt?
-  maxRating      memberMaxRating? @relation(fields: [memberRatingId], references: [id], onDelete: NoAction)
-
-  challenges  Int?
-  wins        Int?
-  develop     memberDevelopStats?
-  design      memberDesignStats?
-  dataScience memberDataScienceStats?
-  copilot     memberCopilotStats?
-  groupId     BigInt?
-  isPrivate   Boolean                 @default(false)
+  id                   BigInt    @id @default(autoincrement())
+  userId               BigInt
+  trackId              String
+  typeId               String
+  challenges           Int?
+  wins                 Int?
+  mostRecentSubmission DateTime?
+  mostRecentEventDate  DateTime?
+  rating               Int?
+  avgRank              Float?
+  avgNumSubmissions    Int?
+  bestRank             Int?
+  globalRank           Int?
+  countryRank          Int?
+  schoolRank           Int?
+  volatility           Int?
+  maxRating            Int?
+  minRating            Int?
+  topFiveFinishes      Int?
+  topTenFinishes       Int?
+  isPrivate            Boolean   @default(false)
 
   member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
@@ -306,300 +222,14 @@ model memberStats {
   updatedAt DateTime? @updatedAt
   updatedBy String?
 
+  @@unique([userId, trackId, typeId])
   @@index([userId])
-  @@index([userId, groupId])
-  @@schema("members")
-}
-
-model memberCopilotStats {
-  id            BigInt @id @default(autoincrement())
-  memberStatsId BigInt
-
-  contests       Int
-  projects       Int
-  failures       Int
-  reposts        Int
-  activeContests Int
-  activeProjects Int
-  fulfillment    Float
-
-  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([memberStatsId])
-  @@index([memberStatsId])
-  @@schema("members")
-}
-
-model memberDevelopStats {
-  id                   BigInt                   @id @default(autoincrement())
-  memberStatsId        BigInt
-  challenges           BigInt?
-  wins                 BigInt?
-  mostRecentSubmission DateTime?
-  mostRecentEventDate  DateTime?
-  items                memberDevelopStatsItem[]
-
-  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([memberStatsId])
-  @@index([memberStatsId])
-  @@schema("members")
-}
-
-model memberDevelopStatsItem {
-  id             BigInt @id @default(autoincrement())
-  developStatsId BigInt
-
-  // subTrack name
-  name                 String
-  subTrackId           Int
-  challenges           BigInt?
-  wins                 BigInt?
-  mostRecentSubmission DateTime?
-  mostRecentEventDate  DateTime?
-  // submission part
-  numInquiries         BigInt?
-  submissions          BigInt?
-  passedScreening      BigInt?
-  passedReview         BigInt?
-  appeals              BigInt?
-  submissionRate       Float?
-  screeningSuccessRate Float?
-  reviewSuccessRate    Float?
-  appealSuccessRate    Float?
-  minScore             Float?
-  maxScore             Float?
-  avgScore             Float?
-  avgPlacement         Float?
-  winPercent           Float?
-
-  // rank part
-  rating             Int?
-  minRating          Int?
-  maxRating          Int?
-  volatility         Int?
-  reliability        Float?
-  overallRank        Int?
-  overallSchoolRank  Int?
-  overallCountryRank Int?
-  overallPercentile  Float?
-  activeRank         Int?
-  activeSchoolRank   Int?
-  activeCountryRank  Int?
-  activePercentile   Float?
-
-  developStats memberDevelopStats @relation(fields: [developStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([developStatsId, name])
-  @@index([developStatsId])
-  @@schema("members")
-}
-
-model memberDesignStats {
-  id                   BigInt                  @id @default(autoincrement())
-  memberStatsId        BigInt
-  challenges           BigInt?
-  wins                 BigInt?
-  mostRecentSubmission DateTime?
-  mostRecentEventDate  DateTime?
-  items                memberDesignStatsItem[]
-
-  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([memberStatsId])
-  @@index([memberStatsId])
-  @@schema("members")
-}
-
-model memberDesignStatsItem {
-  id            BigInt @id @default(autoincrement())
-  designStatsId BigInt
-
-  // subTrack name
-  name                 String
-  subTrackId           Int
-  challenges           BigInt?
-  wins                 BigInt?
-  mostRecentSubmission DateTime?
-  mostRecentEventDate  DateTime?
-
-  numInquiries         Int
-  submissions          Int
-  passedScreening      Int
-  avgPlacement         Float
-  screeningSuccessRate Float
-  submissionRate       Float
-  winPercent           Float
-
-  designStats memberDesignStats @relation(fields: [designStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([designStatsId, name])
-  @@index([designStatsId])
-  @@schema("members")
-}
-
-model memberDataScienceStats {
-  id            BigInt @id @default(autoincrement())
-  memberStatsId BigInt @unique
-
-  challenges           BigInt?
-  wins                 BigInt?
-  mostRecentSubmission DateTime?
-  mostRecentEventDate  DateTime?
-  mostRecentEventName  String?
-
-  srm      memberSrmStats?      @relation(map: "member_srm_stats")
-  marathon memberMarathonStats? @relation(map: "member_marathon_stats")
-
-  memberStats memberStats @relation(fields: [memberStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@index([memberStatsId])
-  @@schema("members")
-}
-
-model memberSrmStats {
-  id                 BigInt @id @default(autoincrement())
-  dataScienceStatsId BigInt
-
-  challenges           BigInt?
-  wins                 BigInt?
-  mostRecentSubmission DateTime?
-  mostRecentEventDate  DateTime?
-  mostRecentEventName  String?
-
-  // rank data
-  rating          Int
-  percentile      Float
-  rank            Int
-  countryRank     Int
-  schoolRank      Int
-  volatility      Int
-  maximumRating   Int
-  minimumRating   Int
-  defaultLanguage String
-  competitions    Int
-
-  challengeDetails memberSrmChallengeDetail[]
-  divisions        memberSrmDivisionDetail[]
-
-  dataScienceStats memberDataScienceStats @relation(fields: [dataScienceStatsId], references: [id])
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([dataScienceStatsId])
-  @@index([dataScienceStatsId])
-  @@schema("members")
-}
-
-model memberSrmChallengeDetail {
-  id         BigInt @id @default(autoincrement())
-  srmStatsId BigInt
-
-  challenges       Int
-  failedChallenges Int
-  levelName        String
-
-  srmStats memberSrmStats @relation(fields: [srmStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@index([srmStatsId])
-  @@schema("members")
-}
-
-model memberSrmDivisionDetail {
-  id         BigInt @id @default(autoincrement())
-  srmStatsId BigInt
-
-  problemsSubmitted Int
-  problemsSysByTest Int
-  problemsFailed    Int
-  levelName         String
-  divisionName      String
-
-  srmStats memberSrmStats @relation(fields: [srmStatsId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@index([srmStatsId])
-  @@schema("members")
-}
-
-model memberMarathonStats {
-  id                 BigInt @id @default(autoincrement())
-  dataScienceStatsId BigInt
-
-  challenges           BigInt?
-  wins                 BigInt?
-  mostRecentSubmission DateTime?
-  mostRecentEventDate  DateTime?
-  mostRecentEventName  String?
-
-  // rank data
-  rating            Int
-  percentile        Float
-  rank              Int
-  avgRank           Float
-  avgNumSubmissions Int
-  bestRank          Int
-  countryRank       Int
-  schoolRank        Int
-  volatility        Int
-  maximumRating     Int
-  minimumRating     Int
-  defaultLanguage   String
-  competitions      Int
-  topFiveFinishes   Int
-  topTenFinishes    Int
-
-  dataScienceStats memberDataScienceStats @relation(fields: [dataScienceStatsId], references: [id])
-
-  createdAt DateTime  @default(now())
-  createdBy String
-  updatedAt DateTime? @updatedAt
-  updatedBy String?
-
-  @@unique([dataScienceStatsId])
-  @@index([dataScienceStatsId])
+  @@index([trackId])
+  @@index([typeId])
+  @@index([userId, trackId, typeId])
+  @@index([globalRank])
+  @@index([countryRank])
+  @@index([schoolRank])
   @@schema("members")
 }
 

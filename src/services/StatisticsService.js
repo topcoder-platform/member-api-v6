@@ -9,13 +9,13 @@ const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
 const prismaManager = require('../common/prisma')
+const { Prisma } = prismaManager
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 const prismaHelper = require('../common/prismaHelper')
 
 const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', 'updatedAt',
   'createdBy', 'updatedBy']
-
 const DISTRIBUTION_FIELDS_NO_DATE = ['track', 'subTrack', 'distribution']
 
 const HISTORY_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'DEVELOP', 'DATA_SCIENCE',
@@ -25,6 +25,708 @@ const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxR
   'challenges', 'wins', 'DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT', 'createdAt',
   'updatedAt', 'createdBy', 'updatedBy']
 
+const TRACK_NAMES = {
+  DEVELOP: 'DEVELOP',
+  DESIGN: 'DESIGN',
+  DATA_SCIENCE: 'DATA_SCIENCE',
+  COPILOT: 'COPILOT'
+}
+
+const TYPE_NAMES = {
+  CHALLENGE: 'Challenge',
+  FIRST2FINISH: 'First2Finish',
+  TASK: 'Task',
+  SRM: 'SRM',
+  MARATHON_MATCH: 'MARATHON_MATCH'
+}
+
+const LEGACY_STATS_READ_SOURCE = 'legacy'
+const SUPPORTED_STATS_READ_SOURCES = ['unified', LEGACY_STATS_READ_SOURCE]
+const DISTRIBUTION_RANGES = _.range(0, 4000, 100)
+const configuredStatsReadSource = _.toLower(String(config.STATS_READ_SOURCE || 'unified').trim())
+if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
+  logger.warn(`Invalid STATS_READ_SOURCE='${config.STATS_READ_SOURCE}'. Falling back to 'unified'.`)
+}
+const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
+
+function toOptionalInt (value) {
+  if (_.isNil(value) || value === '') {
+    return undefined
+  }
+  return _.toInteger(value)
+}
+
+function toOptionalFloat (value) {
+  if (_.isNil(value) || value === '') {
+    return undefined
+  }
+  return Number(value)
+}
+
+function toOptionalDate (value) {
+  if (_.isNil(value)) {
+    return undefined
+  }
+  return prismaHelper.convertDate(value)
+}
+
+function resolveTrackId (trackId) {
+  if (_.isNil(trackId)) {
+    return undefined
+  }
+  const normalized = String(trackId).trim().toUpperCase()
+  if (!normalized) {
+    return undefined
+  }
+  if (normalized.includes('DATA') && normalized.includes('SCIENCE')) {
+    return TRACK_NAMES.DATA_SCIENCE
+  }
+  if (normalized.includes('DEVELOP') || normalized === 'DEV') {
+    return TRACK_NAMES.DEVELOP
+  }
+  if (normalized.includes('DESIGN') || normalized === 'DES') {
+    return TRACK_NAMES.DESIGN
+  }
+  if (normalized.includes('COPILOT')) {
+    return TRACK_NAMES.COPILOT
+  }
+  return trackId
+}
+
+function resolveTypeId (typeId) {
+  if (_.isNil(typeId)) {
+    return undefined
+  }
+  const normalized = String(typeId).trim().toUpperCase()
+  if (!normalized) {
+    return undefined
+  }
+  if (normalized.includes('MARATHON')) {
+    return TYPE_NAMES.MARATHON_MATCH
+  }
+  if (normalized.includes('FIRST') || normalized.includes('F2F')) {
+    return TYPE_NAMES.FIRST2FINISH
+  }
+  if (normalized.includes('TASK')) {
+    return TYPE_NAMES.TASK
+  }
+  if (normalized.includes('SRM')) {
+    return TYPE_NAMES.SRM
+  }
+  if (normalized.includes('CHALLENGE')) {
+    return TYPE_NAMES.CHALLENGE
+  }
+  return typeId
+}
+
+function isLegacyMaxRatingPayload (value) {
+  return _.isPlainObject(value) && !_.isNil(value.rating) && !_.isNil(value.ratingColor)
+}
+
+function normalizeUnifiedRecord (record, isPrivate) {
+  if (!record || !record.trackId || !record.typeId) {
+    return null
+  }
+
+  const normalized = _.omitBy({
+    trackId: resolveTrackId(record.trackId),
+    typeId: resolveTypeId(record.typeId),
+    challenges: toOptionalInt(record.challenges),
+    wins: toOptionalInt(record.wins),
+    mostRecentSubmission: toOptionalDate(record.mostRecentSubmission),
+    mostRecentEventDate: toOptionalDate(record.mostRecentEventDate),
+    rating: toOptionalInt(record.rating),
+    avgRank: toOptionalFloat(record.avgRank),
+    avgNumSubmissions: toOptionalInt(record.avgNumSubmissions),
+    bestRank: toOptionalInt(record.bestRank),
+    globalRank: toOptionalInt(record.globalRank),
+    countryRank: toOptionalInt(record.countryRank),
+    schoolRank: toOptionalInt(record.schoolRank),
+    volatility: toOptionalInt(record.volatility),
+    maxRating: toOptionalInt(record.maxRating),
+    minRating: toOptionalInt(record.minRating),
+    topFiveFinishes: toOptionalInt(record.topFiveFinishes),
+    topTenFinishes: toOptionalInt(record.topTenFinishes),
+    isPrivate
+  }, _.isUndefined)
+
+  if (!normalized.trackId || !normalized.typeId) {
+    return null
+  }
+
+  return normalized
+}
+
+function pushUnifiedRecord (collection, record, isPrivate) {
+  const normalized = normalizeUnifiedRecord(record, isPrivate)
+  if (normalized) {
+    collection.push(normalized)
+  }
+}
+
+function buildUnifiedStatsRecordsFromPayload (payload, isPrivate, options = {}) {
+  const data = payload || {}
+  const records = []
+  const isPartial = !!options.partial
+  const unifiedMaxRating = isLegacyMaxRatingPayload(data.maxRating) ? undefined : data.maxRating
+
+  const rootPayload = {
+    trackId: data.trackId,
+    typeId: data.typeId,
+    challenges: data.challenges,
+    wins: data.wins,
+    mostRecentSubmission: data.mostRecentSubmission,
+    mostRecentEventDate: data.mostRecentEventDate,
+    rating: data.rating,
+    avgRank: data.avgRank,
+    avgNumSubmissions: data.avgNumSubmissions,
+    bestRank: data.bestRank,
+    globalRank: data.globalRank,
+    countryRank: data.countryRank,
+    schoolRank: data.schoolRank,
+    volatility: data.volatility,
+    maxRating: unifiedMaxRating,
+    minRating: data.minRating,
+    topFiveFinishes: data.topFiveFinishes,
+    topTenFinishes: data.topTenFinishes
+  }
+
+  if (rootPayload.trackId && rootPayload.typeId) {
+    pushUnifiedRecord(records, rootPayload, isPrivate)
+  }
+
+  if (_.isArray(data.records)) {
+    _.forEach(data.records, (record) => {
+      pushUnifiedRecord(records, record, isPrivate)
+    })
+  }
+
+  if (!isPartial && records.length === 0 && (!_.isNil(data.challenges) || !_.isNil(data.wins))) {
+    pushUnifiedRecord(records, {
+      trackId: resolveTrackId(data.trackId || TRACK_NAMES.DEVELOP),
+      typeId: resolveTypeId(data.typeId || TYPE_NAMES.CHALLENGE),
+      challenges: data.challenges,
+      wins: data.wins,
+      mostRecentSubmission: data.mostRecentSubmission,
+      mostRecentEventDate: data.mostRecentEventDate,
+      rating: data.rating,
+      avgRank: data.avgRank,
+      avgNumSubmissions: data.avgNumSubmissions,
+      bestRank: data.bestRank,
+      globalRank: data.globalRank,
+      countryRank: data.countryRank,
+      schoolRank: data.schoolRank,
+      volatility: data.volatility,
+      maxRating: unifiedMaxRating,
+      minRating: data.minRating,
+      topFiveFinishes: data.topFiveFinishes,
+      topTenFinishes: data.topTenFinishes
+    }, isPrivate)
+  }
+
+  // Last record wins for duplicate (trackId, typeId) keys.
+  return _.values(_.keyBy(records, record => `${record.trackId}::${record.typeId}`))
+}
+
+function getDistributionRangeKey (rangeStart) {
+  if (rangeStart < 0 || rangeStart > 3900) {
+    return null
+  }
+  if (rangeStart === 0) {
+    return 'ratingRange0To099'
+  }
+  return `ratingRange${rangeStart}To${rangeStart + 99}`
+}
+
+function createEmptyDistribution () {
+  const distribution = {}
+  _.forEach(DISTRIBUTION_RANGES, (rangeStart) => {
+    distribution[getDistributionRangeKey(rangeStart)] = 0
+  })
+  return distribution
+}
+
+function toInteger (value) {
+  if (_.isNil(value)) {
+    return undefined
+  }
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed)) {
+    return undefined
+  }
+  return parsed
+}
+
+/**
+ * Convert legacy history stats data to response structure.
+ * @param {Object} member member data
+ * @param {Object} historyStats stats history row with nested develop/dataScience history
+ * @param {Array} fields fields to return in response
+ * @returns response
+ */
+function buildLegacyStatsHistoryResponse (member, historyStats, fields) {
+  const item = {
+    userId: helper.bigIntToNumber(member.userId),
+    groupId: helper.bigIntToNumber(historyStats.groupId),
+    handle: member.handle,
+    handleLower: member.handleLower
+  }
+
+  if (historyStats.develop && historyStats.develop.length > 0) {
+    item.DEVELOP = { subTracks: [] }
+    const subTrackGroupData = _.groupBy(historyStats.develop, 'subTrackId')
+    _.forEach(subTrackGroupData, (trackHistory, subTrackId) => {
+      const subTrackItem = {
+        id: subTrackId,
+        name: trackHistory[0].subTrack
+      }
+      subTrackItem.history = _.map(trackHistory, h => ({
+        ..._.pick(h, ['challengeName', 'newRating']),
+        challengeId: helper.bigIntToNumber(h.challengeId),
+        ratingDate: h.ratingDate ? h.ratingDate.getTime() : null
+      }))
+      item.DEVELOP.subTracks.push(subTrackItem)
+    })
+  }
+
+  if (historyStats.dataScience && historyStats.dataScience.length > 0) {
+    item.DATA_SCIENCE = {}
+    const srmHistory = _.filter(historyStats.dataScience, t => t.subTrack === 'SRM')
+    const marathonHistory = _.filter(historyStats.dataScience, t => t.subTrack === 'MARATHON_MATCH')
+    if (srmHistory.length > 0) {
+      item.DATA_SCIENCE.SRM = {}
+      item.DATA_SCIENCE.SRM.history = _.map(srmHistory, h => ({
+        ..._.pick(h, ['challengeName', 'rating', 'placement', 'percentile']),
+        challengeId: helper.bigIntToNumber(h.challengeId),
+        date: h.date ? h.date.getTime() : null
+      }))
+    }
+    if (marathonHistory.length > 0) {
+      item.DATA_SCIENCE.MARATHON_MATCH = {}
+      item.DATA_SCIENCE.MARATHON_MATCH.history = _.map(marathonHistory, h => ({
+        ..._.pick(h, ['challengeName', 'rating', 'placement', 'percentile']),
+        challengeId: helper.bigIntToNumber(h.challengeId),
+        date: h.date ? h.date.getTime() : null
+      }))
+    }
+  }
+  return fields ? _.pick(item, fields) : item
+}
+
+/**
+ * Get distribution statistics from legacy table.
+ * @param {Object} query the query parameters
+ * @param {Array} fields selected fields
+ * @returns {Object} the distribution statistics
+ */
+async function getLegacyDistribution (query, fields) {
+  const whereConditions = []
+  if (query.track) {
+    whereConditions.push(Prisma.sql`UPPER("track") LIKE ${`%${query.track.toUpperCase()}%`}`)
+  }
+  if (query.subTrack) {
+    whereConditions.push(Prisma.sql`UPPER("subTrack") LIKE ${`%${query.subTrack.toUpperCase()}%`}`)
+  }
+
+  const whereClause = whereConditions.length > 0
+    ? Prisma.sql`WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}`
+    : Prisma.empty
+
+  const items = await prisma.$queryRaw`
+    SELECT *
+    FROM "members"."distributionStats"
+    ${whereClause}
+  `
+
+  if (!items || items.length === 0) {
+    throw new errors.NotFoundError('No member distribution statistics is found.')
+  }
+
+  const records = []
+  _.forEach(items, row => {
+    const record = _.pick(row, DISTRIBUTION_FIELDS)
+    record.distribution = createEmptyDistribution()
+    _.forEach(DISTRIBUTION_RANGES, (rangeStart) => {
+      const key = getDistributionRangeKey(rangeStart)
+      record.distribution[key] = Number(row[key] || 0)
+    })
+    records.push(record)
+  })
+
+  let result = { track: query.track, subTrack: query.subTrack, distribution: {} }
+  _.forEach(records, (record) => {
+    _.forIn(record.distribution, (value, key) => {
+      if (!result.distribution[key]) {
+        result.distribution[key] = 0
+      }
+      result.distribution[key] += Number(value)
+    })
+    if (record.createdAt && (!result.createdAt || new Date(record.createdAt) < result.createdAt)) {
+      result.createdAt = new Date(record.createdAt)
+      result.createdBy = record.createdBy
+    }
+    if (record.updatedAt && (!result.updatedAt || new Date(record.updatedAt) > result.updatedAt)) {
+      result.updatedAt = new Date(record.updatedAt)
+      result.updatedBy = record.updatedBy
+    }
+  })
+
+  if (fields) {
+    result = _.pick(result, fields)
+  }
+  return result
+}
+
+/**
+ * Load one legacy member stats aggregate row with nested legacy stats details.
+ * @param {BigInt} userId member user id
+ * @param {String|Number} groupId requested group id
+ * @returns {Object|null} member stats row in legacy shape
+ */
+async function getLegacyMemberStatsRow (userId, groupId) {
+  const isPrivate = String(groupId) !== String(config.PUBLIC_GROUP_ID)
+  const statsRows = await prisma.$queryRaw`
+    SELECT ms.*
+    FROM "members"."memberStats" ms
+    WHERE ms."userId" = ${userId}
+      AND ms."isPrivate" = ${isPrivate}
+    ORDER BY
+      CASE
+        WHEN EXISTS (SELECT 1 FROM "members"."memberDevelopStats" ds WHERE ds."memberStatsId" = ms."id")
+          OR EXISTS (SELECT 1 FROM "members"."memberDesignStats" ds WHERE ds."memberStatsId" = ms."id")
+          OR EXISTS (SELECT 1 FROM "members"."memberDataScienceStats" ds WHERE ds."memberStatsId" = ms."id")
+          OR EXISTS (SELECT 1 FROM "members"."memberCopilotStats" cs WHERE cs."memberStatsId" = ms."id")
+          THEN 0
+        ELSE 1
+      END,
+      ms."id" ASC
+    LIMIT 1
+  `
+
+  const stat = _.head(statsRows)
+  if (!stat) {
+    return null
+  }
+
+  const numericGroupId = _.toNumber(groupId)
+  if (!Number.isNaN(numericGroupId)) {
+    stat.groupId = numericGroupId
+  }
+
+  const [designRows, developRows, dataScienceRows, copilotRows] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDesignStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDevelopStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDataScienceStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberCopilotStats"
+      WHERE "memberStatsId" = ${stat.id}
+      ORDER BY "id" ASC
+      LIMIT 1
+    `
+  ])
+
+  const design = _.head(designRows)
+  if (design) {
+    const designItems = await prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDesignStatsItem"
+      WHERE "designStatsId" = ${design.id}
+      ORDER BY "subTrackId" ASC, "id" ASC
+    `
+    design.items = designItems
+  }
+  stat.design = design
+
+  const develop = _.head(developRows)
+  if (develop) {
+    const developItems = await prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDevelopStatsItem"
+      WHERE "developStatsId" = ${develop.id}
+      ORDER BY "subTrackId" ASC, "id" ASC
+    `
+    develop.items = developItems
+  }
+  stat.develop = develop
+
+  const dataScience = _.head(dataScienceRows)
+  if (dataScience) {
+    const [srmRows, marathonRows] = await Promise.all([
+      prisma.$queryRaw`
+        SELECT *
+        FROM "members"."memberSrmStats"
+        WHERE "dataScienceStatsId" = ${dataScience.id}
+        ORDER BY "id" ASC
+        LIMIT 1
+      `,
+      prisma.$queryRaw`
+        SELECT *
+        FROM "members"."memberMarathonStats"
+        WHERE "dataScienceStatsId" = ${dataScience.id}
+        ORDER BY "id" ASC
+        LIMIT 1
+      `
+    ])
+    const srm = _.head(srmRows)
+    if (srm) {
+      const [challengeDetails, divisions] = await Promise.all([
+        prisma.$queryRaw`
+          SELECT *
+          FROM "members"."memberSrmChallengeDetail"
+          WHERE "srmStatsId" = ${srm.id}
+          ORDER BY "id" ASC
+        `,
+        prisma.$queryRaw`
+          SELECT *
+          FROM "members"."memberSrmDivisionDetail"
+          WHERE "srmStatsId" = ${srm.id}
+          ORDER BY "divisionName" ASC, "levelName" ASC, "id" ASC
+        `
+      ])
+      srm.challengeDetails = challengeDetails
+      srm.divisions = divisions
+    }
+    dataScience.srm = srm
+    dataScience.marathon = _.head(marathonRows)
+  }
+  stat.dataScience = dataScience
+  stat.copilot = _.head(copilotRows)
+
+  return stat
+}
+
+/**
+ * Load one legacy history stats aggregate row with nested history details.
+ * @param {BigInt} userId member user id
+ * @param {String|Number} groupId requested group id
+ * @returns {Object|null} history stats row in legacy shape
+ */
+async function getLegacyHistoryStatsRow (userId, groupId) {
+  const isPrivate = String(groupId) !== String(config.PUBLIC_GROUP_ID)
+  const groupIdValue = toInteger(groupId)
+
+  if (isPrivate && _.isNil(groupIdValue)) {
+    return null
+  }
+
+  const whereConditions = [
+    Prisma.sql`"userId" = ${userId}`,
+    Prisma.sql`"isPrivate" = ${isPrivate}`
+  ]
+  if (isPrivate) {
+    whereConditions.push(Prisma.sql`"groupId" = ${groupIdValue}`)
+  }
+
+  const historyRows = await prisma.$queryRaw`
+    SELECT *
+    FROM "members"."memberHistoryStats"
+    WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}
+    ORDER BY "id" ASC
+    LIMIT 1
+  `
+
+  const history = _.head(historyRows)
+  if (!history) {
+    return null
+  }
+
+  if (!isPrivate) {
+    history.groupId = _.toNumber(groupId)
+  }
+
+  const [developRows, dataScienceRows] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDevelopHistoryStats"
+      WHERE "historyStatsId" = ${history.id}
+      ORDER BY "subTrackId" ASC, "ratingDate" DESC, "id" DESC
+    `,
+    prisma.$queryRaw`
+      SELECT *
+      FROM "members"."memberDataScienceHistoryStats"
+      WHERE "historyStatsId" = ${history.id}
+      ORDER BY "subTrack" ASC, "date" DESC, "id" DESC
+    `
+  ])
+
+  history.develop = developRows
+  history.dataScience = dataScienceRows
+  return history
+}
+
+function buildUnifiedHistoryRecordsFromPayload (payload) {
+  const data = payload || {}
+  const records = []
+  const pushHistoryRecord = (item, fallbackTrackId, fallbackTypeId) => {
+    const trackId = resolveTrackId(item.trackId || fallbackTrackId)
+    const typeId = resolveTypeId(item.typeId || fallbackTypeId)
+    if (!trackId || !typeId) {
+      return
+    }
+    const eventDate = toOptionalDate(item.eventDate || item.date || item.ratingDate)
+    if (!eventDate || _.isNil(item.challengeId)) {
+      return
+    }
+    records.push(_.omitBy({
+      trackId,
+      typeId,
+      challengeId: String(item.challengeId),
+      oldRating: toOptionalInt(item.oldRating),
+      newRating: toOptionalInt(item.newRating),
+      oldGlobalRank: toOptionalInt(item.oldGlobalRank),
+      newGlobalRank: toOptionalInt(item.newGlobalRank),
+      oldCountryRank: toOptionalInt(item.oldCountryRank),
+      newCountryRank: toOptionalInt(item.newCountryRank),
+      oldSchoolRank: toOptionalInt(item.oldSchoolRank),
+      newSchoolRank: toOptionalInt(item.newSchoolRank),
+      eventDate
+    }, _.isUndefined))
+  }
+
+  if (!_.isNil(data.challengeId)) {
+    pushHistoryRecord(data, data.trackId, data.typeId)
+  }
+
+  if (_.isArray(data.history) && data.history.length > 0) {
+    _.forEach(data.history, (item) => {
+      pushHistoryRecord(item, data.trackId, data.typeId)
+    })
+  }
+
+  return _.values(_.keyBy(records, record => `${record.trackId}::${record.typeId}::${record.challengeId}`))
+}
+
+function getUniqueTrackTypePairs (records) {
+  return _.values(_.keyBy(_.map(records, record => ({
+    trackId: record.trackId,
+    typeId: record.typeId
+  })), pair => `${pair.trackId}::${pair.typeId}`))
+}
+
+/**
+ * Recompute the mostRecent marker for each affected (trackId, typeId) pair.
+ * Exactly one row per pair is marked as mostRecent=true when rows exist.
+ * The latest row's newRating is aligned with the current memberStats rating when available.
+ *
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId user id
+ * @param {Array} records history records that determine affected pairs
+ * @param {String} operatorId operator id
+ */
+async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
+  const pairs = getUniqueTrackTypePairs(records)
+  for (const pair of pairs) {
+    await tx.memberStatsHistory.updateMany({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        mostRecent: true
+      },
+      data: {
+        mostRecent: false,
+        updatedBy: operatorId
+      }
+    })
+
+    const latest = await tx.memberStatsHistory.findFirst({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId
+      },
+      orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
+      select: { id: true }
+    })
+
+    if (latest) {
+      const currentStats = await tx.memberStats.findFirst({
+        where: {
+          userId,
+          trackId: pair.trackId,
+          typeId: pair.typeId
+        },
+        select: {
+          rating: true
+        }
+      })
+
+      const latestUpdateData = {
+        mostRecent: true,
+        updatedBy: operatorId
+      }
+      if (currentStats) {
+        latestUpdateData.newRating = currentStats.rating
+      }
+
+      await tx.memberStatsHistory.update({
+        where: { id: latest.id },
+        data: latestUpdateData
+      })
+    }
+  }
+}
+
+/**
+ * Synchronize newRating on the most recent history row per (trackId, typeId) pair
+ * with the current value in memberStats.rating.
+ *
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId user id
+ * @param {Array} records stats records that determine affected pairs
+ * @param {String} operatorId operator id
+ */
+async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
+  const pairs = getUniqueTrackTypePairs(records)
+  for (const pair of pairs) {
+    const currentStats = await tx.memberStats.findFirst({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId
+      },
+      select: {
+        rating: true
+      }
+    })
+    if (!currentStats) {
+      continue
+    }
+
+    await tx.memberStatsHistory.updateMany({
+      where: {
+        userId,
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        mostRecent: true
+      },
+      data: {
+        newRating: currentStats.rating,
+        updatedBy: operatorId
+      }
+    })
+  }
+}
+
 /**
  * Get distribution statistics.
  * @param {Object} query the query parameters
@@ -33,63 +735,51 @@ const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxR
 async function getDistribution (query) {
   // validate and parse query parameter
   const fields = helper.parseCommaSeparatedString(query.fields, DISTRIBUTION_FIELDS_NO_DATE) || DISTRIBUTION_FIELDS_NO_DATE
+  if (USE_LEGACY_STATS_READS) {
+    return getLegacyDistribution(query, fields)
+  }
 
-  // find matched distribution records
-  const prismaFilter = { where: {} }
-  if (query.track || query.subTrack) {
-    prismaFilter.where = { AND: [] }
-    if (query.track) {
-      prismaFilter.where.AND.push({
-        track: { contains: query.track.toUpperCase() }
-      })
-    }
-    if (query.subTrack) {
-      prismaFilter.where.AND.push({
-        subTrack: { contains: query.subTrack.toUpperCase() }
-      })
-    }
+  logger.info(`Calculating distribution on-the-fly for track='${query.track || ''}' subTrack='${query.subTrack || ''}'`)
+  const trackId = resolveTrackId(query.track)
+  const typeId = resolveTypeId(query.subTrack)
+
+  const whereConditions = [Prisma.sql`"rating" IS NOT NULL`]
+  if (trackId) {
+    whereConditions.push(Prisma.sql`"trackId" = ${trackId}`)
   }
-  const items = await prisma.distributionStats.findMany(prismaFilter)
-  if (!items || items.length === 0) {
-    throw new errors.NotFoundError(`No member distribution statistics is found.`)
+  if (typeId) {
+    whereConditions.push(Prisma.sql`"typeId" = ${typeId}`)
   }
-  // convert result to response structure
-  const records = []
-  _.forEach(items, t => {
-    const r = _.pick(t, DISTRIBUTION_FIELDS)
-    r.distribution = {}
-    _.forEach(t, (value, key) => {
-      if (key.startsWith('ratingRange')) {
-        r.distribution[key] = value
-      }
-    })
-    records.push(r)
+
+  const rows = await prisma.$queryRaw`
+    SELECT
+      (FLOOR("rating" / 100.0)::int * 100) AS "rangeStart",
+      COUNT(*)::int AS "count"
+    FROM "members"."memberStats"
+    WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}
+    GROUP BY (FLOOR("rating" / 100.0)::int * 100)
+    ORDER BY "rangeStart" ASC
+  `
+
+  if (!rows || rows.length === 0) {
+    throw new errors.NotFoundError('No member distribution statistics is found.')
+  }
+
+  const distribution = createEmptyDistribution()
+  _.forEach(rows, (row) => {
+    const rangeStart = _.toInteger(row.rangeStart)
+    const key = getDistributionRangeKey(rangeStart)
+    if (key) {
+      distribution[key] = Number(row.count)
+    }
   })
 
-  // aggregate the statistics
-  let result = { track: query.track, subTrack: query.subTrack, distribution: {} }
-  _.forEach(records, (record) => {
-    if (record.distribution) {
-      // sum the statistics
-      _.forIn(record.distribution, (value, key) => {
-        if (!result.distribution[key]) {
-          result.distribution[key] = 0
-        }
-        result.distribution[key] += Number(value)
-      })
-      // use earliest createdAt
-      if (record.createdAt && (!result.createdAt || new Date(record.createdAt) < result.createdAt)) {
-        result.createdAt = new Date(record.createdAt)
-        result.createdBy = record.createdBy
-      }
-      // use latest updatedAt
-      if (record.updatedAt && (!result.updatedAt || new Date(record.updatedAt) > result.updatedAt)) {
-        result.updatedAt = new Date(record.updatedAt)
-        result.updatedBy = record.updatedBy
-      }
-    }
-  })
-  // select fields if provided
+  let result = {
+    track: query.track,
+    subTrack: query.subTrack,
+    distribution
+  }
+
   if (fields) {
     result = _.pick(result, fields)
   }
@@ -111,38 +801,51 @@ getDistribution.schema = {
  * @returns {Object} the history statistics
  */
 async function getHistoryStats (currentUser, handle, query) {
-  let overallStat = []
   // validate and parse query parameter
   const fields = helper.parseCommaSeparatedString(query.fields, HISTORY_STATS_FIELDS) || HISTORY_STATS_FIELDS
   // get member by handle
   const member = await helper.getMemberByHandle(handle)
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, query.groupIds)
+  let result = []
 
-  for (const groupId of groupIds) {
-    let statsDb
-    if (groupId === config.PUBLIC_GROUP_ID) {
-      // get statistics by member user id from db
-      statsDb = await prisma.memberHistoryStats.findFirst({
-        where: { userId: member.userId, isPrivate: false },
-        include: { develop: true, dataScience: true }
-      })
+  if (USE_LEGACY_STATS_READS) {
+    const overallStat = []
+    for (const groupId of groupIds) {
+      const statsDb = await getLegacyHistoryStatsRow(member.userId, groupId)
       if (!_.isNil(statsDb)) {
-        statsDb.groupId = _.toNumber(groupId)
+        overallStat.push(statsDb)
       }
-    } else {
-      // get statistics private by member user id from db
-      statsDb = await prisma.memberHistoryStats.findFirst({
-        where: { userId: member.userId, groupId, isPrivate: true },
-        include: { develop: true, dataScience: true }
+    }
+    result = _.map(overallStat, t => buildLegacyStatsHistoryResponse(member, t, fields))
+  } else {
+    const where = {
+      userId: member.userId
+    }
+    const trackId = resolveTrackId(query.trackId)
+    const typeId = resolveTypeId(query.typeId)
+    if (trackId) {
+      where.trackId = trackId
+    }
+    if (typeId) {
+      where.typeId = typeId
+    }
+
+    const historyRows = await prisma.memberStatsHistory.findMany({
+      where,
+      orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
+    })
+
+    const overallStat = []
+    if (historyRows.length > 0) {
+      _.forEach(groupIds, (groupId) => {
+        const scopedRows = _.map(historyRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
+        overallStat.push(scopedRows)
       })
     }
-    if (!_.isNil(statsDb)) {
-      overallStat.push(statsDb)
-    }
+
+    result = _.map(overallStat, rows => prismaHelper.buildUnifiedStatsHistoryResponse(member, rows, fields))
   }
-  // build stats history response
-  let result = _.map(overallStat, t => prismaHelper.buildStatsHistoryResponse(member, t, fields))
-  // remove identifiable info fields if user is not admin, not M2M and not member himself
+
   if (!helper.canManageMember(currentUser, member)) {
     result = _.map(result, (item) => _.omit(item, config.STATISTICS_SECURE_FIELDS))
   }
@@ -154,6 +857,8 @@ getHistoryStats.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     groupIds: Joi.string(),
+    trackId: Joi.string(),
+    typeId: Joi.string(),
     fields: Joi.string()
   })
 }
@@ -179,102 +884,55 @@ async function createHistoryStats (currentUser, handle, data) {
   }
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
-
-  let existingStat
-  if (groupIds[0] === config.PUBLIC_GROUP_ID) {
-    data.isPrivate = false
-    // get statistics by member user id from db
-    existingStat = await prisma.memberHistoryStats.findFirst({
-      where: { userId: member.userId, isPrivate: false },
-      include: { develop: true, dataScience: true }
-    })
-    if (!_.isNil(existingStat)) {
-      existingStat = _.assign(existingStat, { groupId: _.toNumber(groupIds[0]) })
-    }
-  } else {
-    data.isPrivate = true
-    // get statistics private by member user id from db
-    existingStat = await prisma.memberHistoryStats.findFirst({
-      where: { userId: member.userId, groupId: groupIds[0], isPrivate: true },
-      include: { develop: true, dataScience: true }
-    })
-  }
-
-  if (existingStat) {
-    throw new errors.BadRequestError('History stats already exists')
-  }
-
   const operatorId = currentUser.userId || currentUser.sub
-
-  if (data.DEVELOP && data.DEVELOP.subTracks && data.DEVELOP.subTracks.length > 0) {
-    prismaHelper.validateSubTrackData(data.DEVELOP.subTracks, [], 'Member develop history subTrack')
-
-    data.develop = []
-    data.DEVELOP.subTracks.forEach(item => {
-      if (item.history && item.history.length > 0) {
-        const historyItems = item.history.map(item2 => ({
-          ...item2,
-          ratingDate: prismaHelper.convertDate(item2.ratingDate),
-          subTrackId: item.id,
-          subTrack: item.name,
-          createdBy: operatorId
-        }))
-        prismaHelper.validateHistoryData(historyItems, [], 'Member develop history stats')
-
-        data.develop = data.develop.concat(historyItems)
-      }
-    })
+  const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data)
+  if (!unifiedHistoryRecords || unifiedHistoryRecords.length === 0) {
+    throw new errors.BadRequestError('No valid history records provided for unified history stats.')
   }
 
-  if (data.DATA_SCIENCE) {
-    data.dataScience = []
-    if (data.DATA_SCIENCE.SRM && data.DATA_SCIENCE.SRM.history && data.DATA_SCIENCE.SRM.history.length > 0) {
-      const historyItems = data.DATA_SCIENCE.SRM.history.map(item => ({
-        ...item,
-        date: prismaHelper.convertDate(item.date),
-        subTrack: 'SRM',
-        createdBy: operatorId
-      }))
-      prismaHelper.validateHistoryData(historyItems, [], 'Member dataScience history srm stats')
+  logger.info(`Creating unified history stats for userId=${member.userId.toString()} with ${unifiedHistoryRecords.length} record(s)`)
 
-      data.dataScience = historyItems
-    }
-    if (data.DATA_SCIENCE.MARATHON_MATCH && data.DATA_SCIENCE.MARATHON_MATCH.history && data.DATA_SCIENCE.MARATHON_MATCH.history.length > 0) {
-      const historyItems = data.DATA_SCIENCE.MARATHON_MATCH.history.map(item => ({
-        ...item,
-        date: prismaHelper.convertDate(item.date),
-        subTrack: 'MARATHON_MATCH',
-        createdBy: operatorId
-      }))
-      prismaHelper.validateHistoryData(historyItems, [], 'Member dataScience history marathon stats')
-
-      data.dataScience = data.dataScience.concat(historyItems)
-    }
-  }
-
-  // create model memberHistoryStats
-  const statsRes = await prisma.memberHistoryStats.create({
-    data: {
-      isPrivate: data.isPrivate,
-      createdBy: operatorId,
+  await prisma.$transaction(async (tx) => {
+    const existingClauses = _.map(unifiedHistoryRecords, record => ({
       userId: member.userId,
-      develop: {
-        create: data.develop
-      },
-      dataScience: {
-        create: data.dataScience
-      }
-    },
-    include: { develop: true, dataScience: true }
+      trackId: record.trackId,
+      typeId: record.typeId,
+      challengeId: record.challengeId
+    }))
+
+    const existingCount = await tx.memberStatsHistory.count({
+      where: { OR: existingClauses }
+    })
+    if (existingCount > 0) {
+      throw new errors.BadRequestError('History stats already exists')
+    }
+
+    await tx.memberStatsHistory.createMany({
+      data: _.map(unifiedHistoryRecords, record => ({
+        ...record,
+        userId: member.userId,
+        createdBy: operatorId,
+        updatedBy: operatorId
+      }))
+    })
+
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords, operatorId)
   })
 
-  if (!data.isPrivate) {
-    statsRes.groupId = _.toNumber(groupIds[0])
-  }
+  const createdRows = await prisma.memberStatsHistory.findMany({
+    where: {
+      userId: member.userId,
+      OR: _.map(unifiedHistoryRecords, record => ({
+        trackId: record.trackId,
+        typeId: record.typeId,
+        challengeId: record.challengeId
+      }))
+    },
+    orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
+  })
 
-  // build stats history response
-  let result = prismaHelper.buildStatsHistoryResponse(member, statsRes, HISTORY_STATS_FIELDS)
-  // remove identifiable info fields if user is not admin, not M2M and not member himself
+  const scopedRows = _.map(createdRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
+  let result = prismaHelper.buildUnifiedStatsHistoryResponse(member, scopedRows, HISTORY_STATS_FIELDS)
   if (!helper.canManageMember(currentUser, member)) {
     result = _.omit(result, config.STATISTICS_SECURE_FIELDS)
   }
@@ -286,40 +944,38 @@ createHistoryStats.schema = {
   handle: Joi.string().required(),
   data: Joi.object().keys({
     groupId: Joi.string(),
-    DEVELOP: Joi.object().keys({
-      subTracks: Joi.array().items(Joi.object().keys({
-        id: Joi.positive().required(),
-        name: Joi.string().required(),
-        history: Joi.array().items(Joi.object().keys({
-          challengeId: Joi.positive().required(),
-          challengeName: Joi.string().required(),
-          ratingDate: Joi.positive().required(),
-          newRating: Joi.positive().required()
-        }))
-      }))
-    }),
-    DATA_SCIENCE: Joi.object().keys({
-      SRM: Joi.object().keys({
-        history: Joi.array().items(Joi.object().keys({
-          challengeId: Joi.positive().required(),
-          challengeName: Joi.string().required(),
-          date: Joi.positive().required(),
-          rating: Joi.positive().required(),
-          placement: Joi.positive().required(),
-          percentile: Joi.number().required()
-        }))
-      }),
-      MARATHON_MATCH: Joi.object().keys({
-        history: Joi.array().items(Joi.object().keys({
-          challengeId: Joi.positive().required(),
-          challengeName: Joi.string().required(),
-          date: Joi.positive().required(),
-          rating: Joi.positive().required(),
-          placement: Joi.positive().required(),
-          percentile: Joi.number().required()
-        }))
-      })
-    })
+    trackId: Joi.string(),
+    typeId: Joi.string(),
+    challengeId: Joi.alternatives().try(Joi.string(), Joi.number()),
+    mostRecent: Joi.boolean(),
+    oldRating: Joi.number(),
+    newRating: Joi.number(),
+    oldGlobalRank: Joi.number(),
+    newGlobalRank: Joi.number(),
+    oldCountryRank: Joi.number(),
+    newCountryRank: Joi.number(),
+    oldSchoolRank: Joi.number(),
+    newSchoolRank: Joi.number(),
+    eventDate: Joi.positive(),
+    date: Joi.positive(),
+    ratingDate: Joi.positive(),
+    history: Joi.array().items(Joi.object().keys({
+      trackId: Joi.string(),
+      typeId: Joi.string(),
+      challengeId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+      mostRecent: Joi.boolean(),
+      oldRating: Joi.number(),
+      newRating: Joi.number(),
+      oldGlobalRank: Joi.number(),
+      newGlobalRank: Joi.number(),
+      oldCountryRank: Joi.number(),
+      newCountryRank: Joi.number(),
+      oldSchoolRank: Joi.number(),
+      newSchoolRank: Joi.number(),
+      eventDate: Joi.positive(),
+      date: Joi.positive(),
+      ratingDate: Joi.positive()
+    }))
   }).required()
 }
 
@@ -344,210 +1000,161 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
   }
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
-
-  let existingStat
-  if (groupIds[0] === config.PUBLIC_GROUP_ID) {
-    // get statistics by member user id from db
-    existingStat = await prisma.memberHistoryStats.findFirst({
-      where: { userId: member.userId, isPrivate: false },
-      include: { develop: true, dataScience: true }
-    })
-    if (!_.isNil(existingStat)) {
-      existingStat = _.assign(existingStat, { groupId: _.toNumber(groupIds[0]) })
-    }
-  } else {
-    // get statistics private by member user id from db
-    existingStat = await prisma.memberHistoryStats.findFirst({
-      where: { userId: member.userId, groupId: groupIds[0], isPrivate: true },
-      include: { develop: true, dataScience: true }
-    })
-  }
-
-  if (!existingStat || !existingStat.id) {
-    throw new errors.NotFoundError('History stats not found')
-  }
-
-  if (data.DEVELOP && data.DEVELOP.subTracks && data.DEVELOP.subTracks.length > 0) {
-    prismaHelper.validateSubTrackData(data.DEVELOP.subTracks, existingStat.develop || [], 'Member develop history subTrack')
-
-    data.DEVELOP.subTracks.forEach(item => {
-      if (item.history && item.history.length > 0) {
-        const historyItems = item.history.map(item2 => ({
-          ...item2,
-          subTrackId: item.id,
-          subTrack: item.name
-        }))
-        const toCreateItems = prismaHelper.validateHistoryData(historyItems, existingStat.develop || [], 'Member develop history stats')
-
-        if (toCreateItems.length > 0) {
-          const validateRes = DevelopHistoryStatsSchema.validate(toCreateItems)
-
-          if (validateRes.error) {
-            throw new errors.BadRequestError(validateRes.error.error)
-          }
-        }
-      }
-    })
-  }
-
-  if (data.DATA_SCIENCE) {
-    if (data.DATA_SCIENCE.SRM && data.DATA_SCIENCE.SRM.history && data.DATA_SCIENCE.SRM.history.length > 0) {
-      const historyItems = data.DATA_SCIENCE.SRM.history.map(item => ({
-        ...item,
-        subTrack: 'SRM'
-      }))
-      const toCreateItems = prismaHelper.validateHistoryData(historyItems, existingStat.dataScience || [], 'Member dataScience history srm stats')
-
-      if (toCreateItems.length > 0) {
-        const validateRes = DataScienceHistoryStatsSchema.validate(toCreateItems)
-
-        if (validateRes.error) {
-          throw new errors.BadRequestError(validateRes.error.error)
-        }
-      }
-    }
-    if (data.DATA_SCIENCE.MARATHON_MATCH && data.DATA_SCIENCE.MARATHON_MATCH.history && data.DATA_SCIENCE.MARATHON_MATCH.history.length > 0) {
-      const historyItems = data.DATA_SCIENCE.MARATHON_MATCH.history.map(item => ({
-        ...item,
-        subTrack: 'MARATHON_MATCH'
-      }))
-      const toCreateItems = prismaHelper.validateHistoryData(historyItems, existingStat.dataScience || [], 'Member dataScience history marathon stats')
-
-      if (toCreateItems.length > 0) {
-        const validateRes = DataScienceHistoryStatsSchema.validate(toCreateItems)
-
-        if (validateRes.error) {
-          throw new errors.BadRequestError(validateRes.error.error)
-        }
-      }
-    }
-  }
-
   const operatorId = currentUser.userId || currentUser.sub
-  const historyStatsId = existingStat.id
+  const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data)
+  if (!unifiedHistoryRecords || unifiedHistoryRecords.length === 0) {
+    throw new errors.BadRequestError('No valid history records provided for unified history stats.')
+  }
 
-  // open a transaction to handle update
-  let result = await prisma.$transaction(async (tx) => {
-    // update DEVELOP subTracks history
-    if (data.DEVELOP && data.DEVELOP.subTracks && data.DEVELOP.subTracks.length > 0) {
-      let developHistory = []
-      data.DEVELOP.subTracks.forEach(item => {
-        const baseItem = {
-          subTrackId: item.id,
-          subTrack: item.name
+  await prisma.$transaction(async (tx) => {
+    logger.info(`Upserting unified history stats for userId=${member.userId.toString()} with ${unifiedHistoryRecords.length} record(s)`)
+    for (const record of unifiedHistoryRecords) {
+      const existingRecord = await tx.memberStatsHistory.findFirst({
+        where: {
+          userId: member.userId,
+          trackId: record.trackId,
+          typeId: record.typeId,
+          challengeId: record.challengeId
         }
-        developHistory = developHistory.concat((item.history || []).map(h => ({
-          ...baseItem,
-          ...h,
-          ratingDate: prismaHelper.convertDate(h.ratingDate)
-        })))
       })
-
-      const existingItems = existingStat.develop || []
-
-      await prismaHelper.updateHistoryItems(developHistory, existingItems, tx.memberDevelopHistoryStats, { historyStatsId }, operatorId)
+      if (existingRecord) {
+        await tx.memberStatsHistory.update({
+          where: { id: existingRecord.id },
+          data: {
+            ..._.omit(record, ['trackId', 'typeId', 'challengeId']),
+            updatedBy: operatorId
+          }
+        })
+      } else {
+        await tx.memberStatsHistory.create({
+          data: {
+            ...record,
+            userId: member.userId,
+            createdBy: operatorId,
+            updatedBy: operatorId
+          }
+        })
+      }
     }
 
-    // update DATA_SCIENCE history
-    if (data.DATA_SCIENCE) {
-      let dataScienceHistory = []
-      if (data.DATA_SCIENCE.SRM && data.DATA_SCIENCE.SRM.history && data.DATA_SCIENCE.SRM.history.length > 0) {
-        dataScienceHistory = data.DATA_SCIENCE.SRM.history.map(h => ({
-          ...h,
-          date: prismaHelper.convertDate(h.date),
-          subTrack: 'SRM'
-        }))
-      }
-
-      if (data.DATA_SCIENCE.MARATHON_MATCH && data.DATA_SCIENCE.MARATHON_MATCH.history && data.DATA_SCIENCE.MARATHON_MATCH.history.length > 0) {
-        dataScienceHistory = dataScienceHistory.concat(data.DATA_SCIENCE.MARATHON_MATCH.history.map(h => ({
-          ...h,
-          date: prismaHelper.convertDate(h.date),
-          subTrack: 'MARATHON_MATCH'
-        })))
-      }
-
-      const existingItems = existingStat.dataScience || []
-
-      await prismaHelper.updateHistoryItems(dataScienceHistory, existingItems, tx.memberDataScienceHistoryStats, { historyStatsId }, operatorId)
-    }
-
-    const updatedHistoryStats = await tx.memberHistoryStats.findUnique({
-      where: { id: existingStat.id },
-      include: { develop: true, dataScience: true }
-    })
-
-    return updatedHistoryStats
+    await refreshMostRecentHistoryFlags(tx, member.userId, unifiedHistoryRecords, operatorId)
   })
 
-  // build stats history response
-  result = prismaHelper.buildStatsHistoryResponse(member, result, HISTORY_STATS_FIELDS)
-  // remove identifiable info fields if user is not admin, not M2M and not member himself
+  const updatedRows = await prisma.memberStatsHistory.findMany({
+    where: {
+      userId: member.userId,
+      OR: _.map(unifiedHistoryRecords, record => ({
+        trackId: record.trackId,
+        typeId: record.typeId,
+        challengeId: record.challengeId
+      }))
+    },
+    orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
+  })
+
+  const scopedRows = _.map(updatedRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
+  let result = prismaHelper.buildUnifiedStatsHistoryResponse(member, scopedRows, HISTORY_STATS_FIELDS)
   if (!helper.canManageMember(currentUser, member)) {
-    result = _.map(result, (item) => _.omit(item, config.STATISTICS_SECURE_FIELDS))
+    result = _.omit(result, config.STATISTICS_SECURE_FIELDS)
   }
   return result
 }
-
-const DevelopHistoryStatsSchema = Joi.array().items(Joi.object().keys({
-  challengeId: Joi.positive().required(),
-  challengeName: Joi.string().required(),
-  ratingDate: Joi.positive().required(),
-  newRating: Joi.positive().required(),
-  subTrackId: Joi.positive(),
-  subTrack: Joi.string()
-}))
-
-const DataScienceHistoryStatsSchema = Joi.array().items(Joi.object().keys({
-  challengeId: Joi.positive().required(),
-  challengeName: Joi.string().required(),
-  date: Joi.positive().required(),
-  rating: Joi.positive().required(),
-  placement: Joi.positive().required(),
-  percentile: Joi.number().required(),
-  subTrack: Joi.string()
-}))
 
 partiallyUpdateHistoryStats.schema = {
   currentUser: Joi.any(),
   handle: Joi.string().required(),
   data: Joi.object().keys({
     groupId: Joi.string(),
-    DEVELOP: Joi.object().keys({
-      subTracks: Joi.array().items(Joi.object().keys({
-        id: Joi.positive().required(),
-        name: Joi.string().required(),
-        history: Joi.array().items(Joi.object().keys({
-          challengeId: Joi.positive().required(),
-          challengeName: Joi.string(),
-          ratingDate: Joi.positive(),
-          newRating: Joi.positive()
-        }))
-      }))
-    }),
-    DATA_SCIENCE: Joi.object().keys({
-      SRM: Joi.object().keys({
-        history: Joi.array().items(Joi.object().keys({
-          challengeId: Joi.positive().required(),
-          challengeName: Joi.string(),
-          date: Joi.positive(),
-          rating: Joi.positive(),
-          placement: Joi.positive(),
-          percentile: Joi.number()
-        }))
-      }),
-      MARATHON_MATCH: Joi.object().keys({
-        history: Joi.array().items(Joi.object().keys({
-          challengeId: Joi.positive().required(),
-          challengeName: Joi.string(),
-          date: Joi.positive(),
-          rating: Joi.positive(),
-          placement: Joi.positive(),
-          percentile: Joi.number()
-        }))
-      })
-    })
+    trackId: Joi.string(),
+    typeId: Joi.string(),
+    challengeId: Joi.alternatives().try(Joi.string(), Joi.number()),
+    mostRecent: Joi.boolean(),
+    oldRating: Joi.number(),
+    newRating: Joi.number(),
+    oldGlobalRank: Joi.number(),
+    newGlobalRank: Joi.number(),
+    oldCountryRank: Joi.number(),
+    newCountryRank: Joi.number(),
+    oldSchoolRank: Joi.number(),
+    newSchoolRank: Joi.number(),
+    eventDate: Joi.positive(),
+    date: Joi.positive(),
+    ratingDate: Joi.positive(),
+    history: Joi.array().items(Joi.object().keys({
+      trackId: Joi.string(),
+      typeId: Joi.string(),
+      challengeId: Joi.alternatives().try(Joi.string(), Joi.number()).required(),
+      mostRecent: Joi.boolean(),
+      oldRating: Joi.number(),
+      newRating: Joi.number(),
+      oldGlobalRank: Joi.number(),
+      newGlobalRank: Joi.number(),
+      oldCountryRank: Joi.number(),
+      newCountryRank: Joi.number(),
+      oldSchoolRank: Joi.number(),
+      newSchoolRank: Joi.number(),
+      eventDate: Joi.positive(),
+      date: Joi.positive(),
+      ratingDate: Joi.positive()
+    }))
   }).required()
+}
+
+/**
+ * Load member statistics from unified table.
+ * @param {Object} member member row
+ * @param {Array} groupIds requested group ids
+ * @param {Object} query the query parameters
+ * @param {Array} fields fields to return in response
+ * @returns {Array} member statistics
+ */
+async function getUnifiedMemberStats (member, groupIds, query, fields) {
+  const trackId = resolveTrackId(query.trackId)
+  const typeId = resolveTypeId(query.typeId)
+  const stats = []
+
+  for (const groupId of groupIds) {
+    const where = {
+      userId: member.userId,
+      isPrivate: String(groupId) !== String(config.PUBLIC_GROUP_ID)
+    }
+    if (trackId) {
+      where.trackId = trackId
+    }
+    if (typeId) {
+      where.typeId = typeId
+    }
+
+    const unifiedStats = await prisma.memberStats.findMany({
+      where,
+      include: prismaHelper.unifiedStatsIncludeParams
+    })
+
+    if (unifiedStats && unifiedStats.length > 0) {
+      const scopedStats = _.map(unifiedStats, stat => ({ ...stat, groupId: _.toNumber(groupId) }))
+      stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
+    }
+  }
+
+  return stats
+}
+
+/**
+ * Load member statistics using legacy mapper from memberStats and nested legacy tables.
+ * @param {Object} member member row
+ * @param {Array} groupIds requested group ids
+ * @param {Array} fields fields to return in response
+ * @returns {Array} member statistics
+ */
+async function getLegacyMemberStats (member, groupIds, fields) {
+  const stats = []
+  for (const groupId of groupIds) {
+    const stat = await getLegacyMemberStatsRow(member.userId, groupId)
+    if (!_.isNil(stat)) {
+      stats.push(prismaHelper.buildStatsResponse(member, stat, fields))
+    }
+  }
+  return stats
 }
 
 /**
@@ -557,45 +1164,31 @@ partiallyUpdateHistoryStats.schema = {
  * @returns {Object} the member statistics
  */
 async function getMemberStats (currentUser, handle, query, throwError) {
-  let stats = []
   // validate and parse query parameter
   const fields = helper.parseCommaSeparatedString(query.fields, MEMBER_STATS_FIELDS) || MEMBER_STATS_FIELDS
   // get member by handle
   const member = await helper.getMemberByHandle(handle)
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, query.groupIds)
-
-  const includeParams = prismaHelper.statsIncludeParams
-
-  for (const groupId of groupIds) {
-    let stat
-    if (groupId === config.PUBLIC_GROUP_ID) {
-      // get statistics by member user id from db
-      stat = await prisma.memberStats.findFirst({
-        where: { userId: member.userId, isPrivate: false },
-        include: includeParams
-      })
-      if (!_.isNil(stat)) {
-        stat = _.assign(stat, { groupId: _.toNumber(groupId) })
-      }
-    } else {
-      // get statistics private by member user id from db
-      stat = await prisma.memberStats.findFirst({
-        where: { userId: member.userId, isPrivate: true, groupId },
-        include: includeParams
-      })
+  let stats
+  if (USE_LEGACY_STATS_READS) {
+    stats = await getLegacyMemberStats(member, groupIds, fields)
+    if (stats.length === 0) {
+      logger.warn(`Legacy member stats lookup returned no rows for handle='${handle}', groupIds='${groupIds}'. Falling back to unified memberStats lookup.`)
+      stats = await getUnifiedMemberStats(member, groupIds, query, fields)
     }
-    if (!_.isNil(stat)) {
-      stats.push(stat)
-    }
+  } else {
+    stats = await getUnifiedMemberStats(member, groupIds, query, fields)
   }
 
-  let result = _.map(stats, t => prismaHelper.buildStatsResponse(member, t, fields))
-  // remove identifiable info fields if user is not admin, not M2M and not member himself
+  if (throwError && stats.length === 0) {
+    throw new errors.NotFoundError('Member stats not found')
+  }
+
   if (!helper.canManageMember(currentUser, member)) {
-    result = _.map(result, (item) => _.omit(item, config.STATISTICS_SECURE_FIELDS))
+    stats = _.map(stats, (item) => _.omit(item, config.STATISTICS_SECURE_FIELDS))
   }
-  return result
+  return stats
 }
 
 getMemberStats.schema = {
@@ -603,6 +1196,8 @@ getMemberStats.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     groupIds: Joi.string(),
+    trackId: Joi.string(),
+    typeId: Joi.string(),
     fields: Joi.string()
   }),
   throwError: Joi.boolean()
@@ -629,19 +1224,21 @@ async function createMemberStats (currentUser, handle, data) {
   }
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
+  const isPrivate = groupIds[0] !== config.PUBLIC_GROUP_ID
+  const rawData = _.cloneDeep(data)
+  const unifiedRecords = buildUnifiedStatsRecordsFromPayload(rawData, isPrivate)
+  const legacyMaxRatingData = isLegacyMaxRatingPayload(rawData.maxRating) ? rawData.maxRating : null
 
   let existingStat
   if (groupIds[0] === config.PUBLIC_GROUP_ID) {
-    data.isPrivate = false
     // get statistics by member user id from db
     existingStat = await prisma.memberStats.findFirst({
       where: { userId: member.userId, isPrivate: false }
     })
   } else {
-    data.isPrivate = true
     // get statistics private by member user id from db
     existingStat = await prisma.memberStats.findFirst({
-      where: { userId: member.userId, isPrivate: true, groupId: groupIds[0] }
+      where: { userId: member.userId, isPrivate: true }
     })
   }
 
@@ -649,214 +1246,44 @@ async function createMemberStats (currentUser, handle, data) {
     throw new errors.BadRequestError('Member stats already exists')
   }
 
-  // validate request data
-  if (data.DEVELOP && data.DEVELOP.subTracks && data.DEVELOP.subTracks.length > 0) {
-    prismaHelper.validateSubTrackData(data.DEVELOP.subTracks, [], 'Member stats develop')
+  if (!unifiedRecords || unifiedRecords.length === 0) {
+    throw new errors.BadRequestError('No valid unified member stats payload provided.')
   }
-
-  if (data.DESIGN && data.DESIGN.subTracks && data.DESIGN.subTracks.length > 0) {
-    prismaHelper.validateSubTrackData(data.DESIGN.subTracks, [], 'Member stats design')
-  }
-
-  if (data.DATA_SCIENCE && data.DATA_SCIENCE.SRM) {
-    if (data.DATA_SCIENCE.SRM.challengeDetails) {
-      prismaHelper.validateLevelItemsData(data.DATA_SCIENCE.SRM.challengeDetails, [], 'Member stats dataScience srm', 'challengeDetail', MemberStatsSrmChallengeDetailsSchema)
-    }
-
-    if (data.DATA_SCIENCE.SRM.division1) {
-      prismaHelper.validateLevelItemsData(data.DATA_SCIENCE.SRM.division1, [], 'Member stats dataScience srm', 'division1', MemberStatsSrmDivisionsSchema)
-    }
-
-    if (data.DATA_SCIENCE.SRM.division2) {
-      prismaHelper.validateLevelItemsData(data.DATA_SCIENCE.SRM.division2, [], 'Member stats dataScience srm', 'division2', MemberStatsSrmDivisionsSchema)
-    }
-  }
-
   const operatorId = currentUser.userId || currentUser.sub
-
-  // prepare insert data
-  if (data.DEVELOP) {
-    data.develop = {
-      challenges: data.DEVELOP.challenges,
-      wins: data.DEVELOP.wins,
-      mostRecentSubmission: prismaHelper.convertDate(data.DEVELOP.mostRecentSubmission),
-      mostRecentEventDate: prismaHelper.convertDate(data.DEVELOP.mostRecentEventDate),
-      createdBy: operatorId
-    }
-
-    if (data.DEVELOP.subTracks) {
-      const developItems = data.DEVELOP.subTracks.map(item => ({
-        subTrackId: item.id,
-        name: item.name,
-        challenges: item.challenges,
-        wins: item.wins,
-        mostRecentSubmission: prismaHelper.convertDate(item.mostRecentSubmission),
-        mostRecentEventDate: prismaHelper.convertDate(item.mostRecentEventDate),
-        ...(item.submissions ? item.submissions : {}),
-        ...(item.rank ? item.rank : {}),
-        createdBy: operatorId
-      }))
-
-      data.develop.items = {
-        create: developItems
-      }
-    }
-  }
-
-  if (data.DESIGN) {
-    data.design = {
-      challenges: data.DESIGN.challenges,
-      wins: data.DESIGN.wins,
-      mostRecentSubmission: prismaHelper.convertDate(data.DESIGN.mostRecentSubmission),
-      mostRecentEventDate: prismaHelper.convertDate(data.DESIGN.mostRecentEventDate),
-      createdBy: operatorId
-    }
-
-    if (data.DESIGN.subTracks) {
-      const designItems = data.DESIGN.subTracks.map(item => ({
-        ...(_.omit(item, ['id', 'mostRecentSubmission', 'mostRecentEventDate'])),
-        subTrackId: item.id,
-        mostRecentSubmission: prismaHelper.convertDate(item.mostRecentSubmission),
-        mostRecentEventDate: prismaHelper.convertDate(item.mostRecentEventDate),
-        createdBy: operatorId
-      }))
-
-      data.design.items = {
-        create: designItems
-      }
-    }
-  }
-
-  if (data.DATA_SCIENCE) {
-    data.dataScience = {
-      challenges: data.DATA_SCIENCE.challenges,
-      wins: data.DATA_SCIENCE.wins,
-      mostRecentEventName: data.DATA_SCIENCE.mostRecentEventName,
-      mostRecentSubmission: prismaHelper.convertDate(data.DATA_SCIENCE.mostRecentSubmission),
-      mostRecentEventDate: prismaHelper.convertDate(data.DATA_SCIENCE.mostRecentEventDate),
-      createdBy: operatorId
-    }
-
-    if (data.DATA_SCIENCE.SRM) {
-      const dataScienceSrmData = {
-        challenges: data.DATA_SCIENCE.SRM.challenges,
-        wins: data.DATA_SCIENCE.SRM.wins,
-        mostRecentEventName: data.DATA_SCIENCE.SRM.mostRecentEventName,
-        mostRecentSubmission: prismaHelper.convertDate(data.DATA_SCIENCE.SRM.mostRecentSubmission),
-        mostRecentEventDate: prismaHelper.convertDate(data.DATA_SCIENCE.SRM.mostRecentEventDate),
-        ...(data.DATA_SCIENCE.SRM.rank),
-        createdBy: operatorId
-      }
-
-      data.dataScience.srm = {
-        create: dataScienceSrmData
-      }
-
-      if (data.DATA_SCIENCE.SRM.challengeDetails) {
-        const srmChallengeDetailData = data.DATA_SCIENCE.SRM.challengeDetails.map(item => ({
-          ...item,
-          createdBy: operatorId
-        }))
-
-        data.dataScience.srm.create.challengeDetails = {
-          create: srmChallengeDetailData
+  logger.info(`Creating unified memberStats rows for userId=${member.userId.toString()} with ${unifiedRecords.length} row(s)`)
+  await prisma.$transaction(async (tx) => {
+    for (const record of unifiedRecords) {
+      await tx.memberStats.create({
+        data: {
+          ...record,
+          userId: member.userId,
+          createdBy: operatorId,
+          updatedBy: operatorId
         }
-      }
-
-      if (data.DATA_SCIENCE.SRM.division1 || data.DATA_SCIENCE.SRM.division2) {
-        const srmDivision1Data = (data.DATA_SCIENCE.SRM.division1 || []).map(item => ({
-          ...item,
-          divisionName: 'division1',
-          createdBy: operatorId
-        }))
-
-        const srmDivision2Data = (data.DATA_SCIENCE.SRM.division2 || []).map(item => ({
-          ...item,
-          divisionName: 'division2',
-          createdBy: operatorId
-        }))
-
-        data.dataScience.srm.create.divisions = {
-          create: _.concat(srmDivision1Data, srmDivision2Data)
-        }
-      }
+      })
     }
+    await syncMostRecentHistoryRatings(tx, member.userId, unifiedRecords, operatorId)
 
-    if (data.DATA_SCIENCE.MARATHON_MATCH) {
-      const dataScienceMarathonData = {
-        challenges: data.DATA_SCIENCE.MARATHON_MATCH.challenges,
-        wins: data.DATA_SCIENCE.MARATHON_MATCH.wins,
-        mostRecentEventName: data.DATA_SCIENCE.MARATHON_MATCH.mostRecentEventName,
-        mostRecentSubmission: prismaHelper.convertDate(data.DATA_SCIENCE.MARATHON_MATCH.mostRecentSubmission),
-        mostRecentEventDate: prismaHelper.convertDate(data.DATA_SCIENCE.MARATHON_MATCH.mostRecentEventDate),
-        ...(data.DATA_SCIENCE.MARATHON_MATCH.rank),
-        createdBy: operatorId
-      }
-
-      data.dataScience.marathon = {
-        create: dataScienceMarathonData
-      }
+    if (legacyMaxRatingData) {
+      await prismaHelper.updateOrCreateModel(legacyMaxRatingData, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
     }
-
-    if (data.COPILOT) {
-      data.copilot = {
-        ...data.COPILOT,
-        createdBy: operatorId
-      }
-    }
-  }
-
-  // open a transaction to handle create
-  let result = await prisma.$transaction(async (tx) => {
-    // create model memberStats
-    const statsRes = await tx.memberStats.create({
-      data: {
-        challenges: data.challenges,
-        wins: data.wins,
-        isPrivate: data.isPrivate,
-        createdBy: operatorId,
-        userId: member.userId,
-        develop: {
-          create: data.develop
-        },
-        design: {
-          create: data.design
-        },
-        dataScience: {
-          create: data.dataScience
-        },
-        copilot: {
-          create: data.copilot
-        }
-      },
-      include: prismaHelper.statsIncludeParams
-    })
-
-    if (!data.isPrivate) {
-      statsRes.groupId = _.toNumber(groupIds[0])
-    }
-
-    // create maxRating
-    if (data.maxRating) {
-      await prismaHelper.updateOrCreateModel(data.maxRating, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
-    }
-
-    return statsRes
   })
 
-  result = prismaHelper.buildStatsResponse(member, result, MEMBER_STATS_FIELDS)
-  // update maxRating
-  if (data.maxRating) {
-    result.maxRating = {
-      ...result.maxRating,
-      ...data.maxRating
-    }
-  }
-  // remove identifiable info fields if user is not admin, not M2M and not member himself
+  const allStats = await prisma.memberStats.findMany({
+    where: { userId: member.userId, isPrivate },
+    include: prismaHelper.unifiedStatsIncludeParams
+  })
+  const scopedStats = _.map(allStats, stat => ({ ...stat, groupId: _.toNumber(groupIds[0]) }))
+  let result = prismaHelper.buildUnifiedStatsResponse(member, scopedStats, MEMBER_STATS_FIELDS)
   if (!helper.canManageMember(currentUser, member)) {
     result = _.omit(result, config.STATISTICS_SECURE_FIELDS)
   }
-
+  if (legacyMaxRatingData) {
+    result.maxRating = {
+      ...result.maxRating,
+      ...legacyMaxRatingData
+    }
+  }
   return result
 }
 
@@ -865,156 +1292,52 @@ createMemberStats.schema = {
   handle: Joi.string().required(),
   data: Joi.object().keys({
     groupId: Joi.string(),
+    trackId: Joi.string(),
+    typeId: Joi.string(),
     challenges: Joi.positive(),
     wins: Joi.positive(),
-    maxRating: Joi.object().keys({
-      rating: Joi.positive().required(),
-      track: Joi.string(),
-      subTrack: Joi.string(),
-      ratingColor: Joi.string().required()
-    }),
-    DEVELOP: Joi.object().keys({
-      challenges: Joi.positive(),
-      wins: Joi.positive(),
+    mostRecentSubmission: Joi.positive(),
+    mostRecentEventDate: Joi.positive(),
+    rating: Joi.number(),
+    avgRank: Joi.number(),
+    avgNumSubmissions: Joi.number(),
+    bestRank: Joi.number(),
+    globalRank: Joi.number(),
+    countryRank: Joi.number(),
+    schoolRank: Joi.number(),
+    volatility: Joi.number(),
+    minRating: Joi.number(),
+    topFiveFinishes: Joi.number(),
+    topTenFinishes: Joi.number(),
+    records: Joi.array().items(Joi.object().keys({
+      trackId: Joi.string().required(),
+      typeId: Joi.string().required(),
+      challenges: Joi.number(),
+      wins: Joi.number(),
       mostRecentSubmission: Joi.positive(),
       mostRecentEventDate: Joi.positive(),
-      subTracks: Joi.array().items(Joi.object().keys({
-        id: Joi.positive().required(),
-        name: Joi.string().required(),
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        submissions: Joi.object().keys({
-          numInquiries: Joi.positive(),
-          submissions: Joi.positive(),
-          submissionRate: Joi.number(),
-          passedScreening: Joi.positive(),
-          screeningSuccessRate: Joi.number(),
-          passedReview: Joi.positive(),
-          reviewSuccessRate: Joi.number(),
-          appeals: Joi.positive(),
-          appealSuccessRate: Joi.number(),
-          maxScore: Joi.number(),
-          minScore: Joi.number(),
-          avgScore: Joi.number(),
-          avgPlacement: Joi.number(),
-          winPercent: Joi.number()
-        }),
-        rank: Joi.object().keys({
-          rating: Joi.positive(),
-          activePercentile: Joi.number(),
-          activeRank: Joi.positive(),
-          activeCountryRank: Joi.positive(),
-          activeSchoolRank: Joi.positive(),
-          overallPercentile: Joi.number(),
-          overallRank: Joi.positive(),
-          overallCountryRank: Joi.positive(),
-          overallSchoolRank: Joi.positive(),
-          volatility: Joi.positive(),
-          reliability: Joi.number(),
-          maxRating: Joi.positive(),
-          minRating: Joi.positive()
-        })
-      }))
-    }),
-    DESIGN: Joi.object().keys({
-      challenges: Joi.positive(),
-      wins: Joi.positive(),
-      mostRecentSubmission: Joi.positive(),
-      mostRecentEventDate: Joi.positive(),
-      subTracks: Joi.array().items(Joi.object().keys({
-        id: Joi.positive().required(),
-        name: Joi.string().required(),
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        numInquiries: Joi.positive().required(),
-        submissions: Joi.positive().required(),
-        passedScreening: Joi.positive().required(),
-        avgPlacement: Joi.number().required(),
-        screeningSuccessRate: Joi.number().required(),
-        submissionRate: Joi.number().required(),
-        winPercent: Joi.number().required()
-      }))
-    }),
-    DATA_SCIENCE: Joi.object().keys({
-      challenges: Joi.positive(),
-      wins: Joi.positive(),
-      mostRecentSubmission: Joi.positive(),
-      mostRecentEventDate: Joi.positive(),
-      mostRecentEventName: Joi.string(),
-      SRM: Joi.object().keys({
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        mostRecentEventName: Joi.string(),
-        rank: Joi.object().keys({
-          rating: Joi.positive().required(),
-          percentile: Joi.number().required(),
-          rank: Joi.positive().required(),
-          countryRank: Joi.positive().required(),
-          schoolRank: Joi.positive().required(),
-          volatility: Joi.positive().required(),
-          maximumRating: Joi.positive().required(),
-          minimumRating: Joi.positive().required(),
-          defaultLanguage: Joi.string().required(),
-          competitions: Joi.positive().required()
-        }).required(),
-        challengeDetails: Joi.array().items(Joi.object().keys({
-          challenges: Joi.positive().required(),
-          levelName: Joi.string().required(),
-          failedChallenges: Joi.positive().required()
-        })),
-        division1: Joi.array().items(Joi.object().keys({
-          problemsSubmitted: Joi.positive().required(),
-          problemsSysByTest: Joi.positive().required(),
-          problemsFailed: Joi.positive().required(),
-          levelName: Joi.string().required()
-        })),
-        division2: Joi.array().items(Joi.object().keys({
-          problemsSubmitted: Joi.positive().required(),
-          problemsSysByTest: Joi.positive().required(),
-          problemsFailed: Joi.positive().required(),
-          levelName: Joi.string().required()
-        }))
+      rating: Joi.number(),
+      avgRank: Joi.number(),
+      avgNumSubmissions: Joi.number(),
+      bestRank: Joi.number(),
+      globalRank: Joi.number(),
+      countryRank: Joi.number(),
+      schoolRank: Joi.number(),
+      volatility: Joi.number(),
+      maxRating: Joi.number(),
+      minRating: Joi.number(),
+      topFiveFinishes: Joi.number(),
+      topTenFinishes: Joi.number()
+    })),
+    maxRating: Joi.alternatives().try(
+      Joi.object().keys({
+        rating: Joi.positive().required(),
+        track: Joi.string(),
+        subTrack: Joi.string(),
+        ratingColor: Joi.string().required()
       }),
-      MARATHON_MATCH: Joi.object().keys({
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        mostRecentEventName: Joi.string(),
-        rank: Joi.object().keys({
-          rating: Joi.positive().required(),
-          competitions: Joi.positive().required(),
-          avgRank: Joi.number().required(),
-          avgNumSubmissions: Joi.positive().required(),
-          bestRank: Joi.positive().required(),
-          topFiveFinishes: Joi.positive().required(),
-          topTenFinishes: Joi.positive().required(),
-          rank: Joi.positive().required(),
-          percentile: Joi.number().required(),
-          volatility: Joi.positive().required(),
-          minimumRating: Joi.positive().required(),
-          maximumRating: Joi.positive().required(),
-          countryRank: Joi.positive().required(),
-          schoolRank: Joi.positive().required(),
-          defaultLanguage: Joi.string().required()
-        }).required()
-      })
-    }),
-    COPILOT: Joi.object().keys({
-      contests: Joi.positive().required(),
-      projects: Joi.positive().required(),
-      failures: Joi.positive().required(),
-      reposts: Joi.positive().required(),
-      activeContests: Joi.positive().required(),
-      activeProjects: Joi.positive().required(),
-      fulfillment: Joi.number().required()
-    })
+      Joi.number()
+    )
   }).required()
 }
 
@@ -1039,501 +1362,119 @@ async function partiallyUpdateMemberStats (currentUser, handle, data) {
   }
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
+  const isPrivate = groupIds[0] !== config.PUBLIC_GROUP_ID
+  const rawData = _.cloneDeep(data)
+  const unifiedRecords = buildUnifiedStatsRecordsFromPayload(rawData, isPrivate, { partial: true })
+  const legacyMaxRatingData = isLegacyMaxRatingPayload(rawData.maxRating) ? rawData.maxRating : null
 
-  const includeParams = prismaHelper.statsIncludeParams
-
-  let existingStat
-  if (groupIds[0] === config.PUBLIC_GROUP_ID) {
-    // get statistics by member user id from db
-    existingStat = await prisma.memberStats.findFirst({
-      where: { userId: member.userId, isPrivate: false },
-      include: includeParams
-    })
-    if (!_.isNil(existingStat)) {
-      existingStat = _.assign(existingStat, { groupId: _.toNumber(groupIds[0]) })
-    }
-  } else {
-    // get statistics private by member user id from db
-    existingStat = await prisma.memberStats.findFirst({
-      where: { userId: member.userId, isPrivate: true, groupId: groupIds[0] },
-      include: includeParams
-    })
-  }
-
-  if (!existingStat || !existingStat.id) {
-    throw new errors.NotFoundError('Member stats not found')
-  }
-
-  // validate request data
-  if (data.DEVELOP && data.DEVELOP.subTracks && data.DEVELOP.subTracks.length > 0) {
-    const developItemsDB = existingStat.develop ? (existingStat.develop.items || []) : []
-    prismaHelper.validateSubTrackData(data.DEVELOP.subTracks, developItemsDB, 'Member stats develop')
-  }
-
-  if (data.DESIGN && data.DESIGN.subTracks && data.DESIGN.subTracks.length > 0) {
-    const designItemsDB = existingStat.design ? (existingStat.design.items || []) : []
-    const toCreateItems = prismaHelper.validateSubTrackData(data.DESIGN.subTracks, designItemsDB, 'Member stats design')
-    if (toCreateItems.length > 0) {
-      const validateRes = MemberStatsDesignSubTrackSchema.validate(toCreateItems)
-
-      if (validateRes.error) {
-        throw new errors.BadRequestError(validateRes.error.error)
-      }
-    }
-  }
-
-  if (data.DATA_SCIENCE && data.DATA_SCIENCE.SRM) {
-    if (!existingStat.dataScience || !existingStat.dataScience.srm) {
-      const validateRes1 = MemberStatsDataScienceSrmSchema.validate(data.DATA_SCIENCE.SRM)
-      if (validateRes1.error) {
-        throw new errors.BadRequestError(validateRes1.error.error)
-      }
-    }
-
-    const dataScienceDB = existingStat.dataScience || {}
-    const srmDB = dataScienceDB.srm || {}
-    if (data.DATA_SCIENCE.SRM.challengeDetails) {
-      const srmChallengeDetailsDB = srmDB.challengeDetails || []
-      prismaHelper.validateLevelItemsData(data.DATA_SCIENCE.SRM.challengeDetails, srmChallengeDetailsDB, 'Member stats dataScience srm', 'challengeDetail', MemberStatsSrmChallengeDetailsSchema)
-    }
-
-    const srmDivisionsDB = srmDB.divisions || []
-    if (data.DATA_SCIENCE.SRM.division1) {
-      prismaHelper.validateLevelItemsData(data.DATA_SCIENCE.SRM.division1, srmDivisionsDB, 'Member stats dataScience srm', 'division1', MemberStatsSrmDivisionsSchema)
-    }
-
-    if (data.DATA_SCIENCE.SRM.division2) {
-      prismaHelper.validateLevelItemsData(data.DATA_SCIENCE.SRM.division2, srmDivisionsDB, 'Member stats dataScience srm', 'division2', MemberStatsSrmDivisionsSchema)
-    }
-  }
-
-  if (data.DATA_SCIENCE && data.DATA_SCIENCE.MARATHON_MATCH && !(existingStat.dataScience || {}).marathon) {
-    const validateRes1 = MemberStatsDataScienceMarathonSchema.validate(data.DATA_SCIENCE.MARATHON_MATCH)
-    if (validateRes1.error) {
-      throw new errors.BadRequestError(validateRes1.error.error)
-    }
-  }
-
-  if (data.COPILOT && data.COPILOT && !existingStat.copilot) {
-    const validateRes1 = MemberStatsDataScienceCopilotSchema.validate(data.COPILOT)
-    if (validateRes1.error) {
-      throw new errors.BadRequestError(validateRes1.error.error)
-    }
+  if ((!unifiedRecords || unifiedRecords.length === 0) && !legacyMaxRatingData) {
+    throw new errors.BadRequestError('No valid unified member stats update payload provided.')
   }
 
   const operatorId = currentUser.userId || currentUser.sub
 
-  // open a transaction to handle update
-  const result = await prisma.$transaction(async (tx) => {
-    // update model memberStats
-    if (data.challenges || data.wins) {
-      await tx.memberStats.update({
+  await prisma.$transaction(async (tx) => {
+    logger.info(`Upserting unified memberStats rows for userId=${member.userId.toString()} with ${unifiedRecords.length} row(s)`)
+    for (const record of unifiedRecords) {
+      await tx.memberStats.upsert({
         where: {
-          id: existingStat.id
+          userId_trackId_typeId: {
+            userId: member.userId,
+            trackId: record.trackId,
+            typeId: record.typeId
+          }
         },
-        data: {
-          challenges: data.challenges,
-          wins: data.wins,
+        create: {
+          ...record,
+          userId: member.userId,
+          createdBy: operatorId,
+          updatedBy: operatorId
+        },
+        update: {
+          ..._.omit(record, ['trackId', 'typeId', 'isPrivate']),
+          isPrivate: record.isPrivate,
           updatedBy: operatorId
         }
       })
     }
-
-    // update maxRating
-    if (data.maxRating) {
-      await prismaHelper.updateOrCreateModel(data.maxRating, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
-      const updatedMaxRating = await tx.memberMaxRating.findFirst({
-        where: {
-          userId: member.userId
-        }
-      })
-      member.maxRating = updatedMaxRating
+    if (unifiedRecords.length > 0) {
+      await syncMostRecentHistoryRatings(tx, member.userId, unifiedRecords, operatorId)
     }
 
-    // update DEVELOP
-    if (data.DEVELOP) {
-      const developData = {
-        challenges: data.DEVELOP.challenges,
-        wins: data.DEVELOP.wins,
-        mostRecentSubmission: prismaHelper.convertDate(data.DEVELOP.mostRecentSubmission),
-        mostRecentEventDate: prismaHelper.convertDate(data.DEVELOP.mostRecentEventDate)
-      }
-      const newDevelop = await prismaHelper.updateOrCreateModel(developData, existingStat.develop, tx.memberDevelopStats, { memberStatsId: existingStat.id }, operatorId)
-      if (newDevelop) {
-        existingStat.develop = newDevelop
-      }
-
-      // update develop subTracks
-      if (data.DEVELOP.subTracks) {
-        const developItems = data.DEVELOP.subTracks.map(item => ({
-          subTrackId: item.id,
-          name: item.name,
-          challenges: item.challenges,
-          wins: item.wins,
-          mostRecentSubmission: prismaHelper.convertDate(item.mostRecentSubmission),
-          mostRecentEventDate: prismaHelper.convertDate(item.mostRecentEventDate),
-          ...(item.submissions ? item.submissions : {}),
-          ...(item.rank ? item.rank : {})
-        }))
-
-        const developStatsId = existingStat.develop.id
-        const existingItems = existingStat.develop.items || []
-
-        await prismaHelper.updateArrayItems(developItems, existingItems, tx.memberDevelopStatsItem, { developStatsId }, operatorId)
-      }
+    if (legacyMaxRatingData) {
+      await prismaHelper.updateOrCreateModel(legacyMaxRatingData, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
     }
-
-    // update DESIGN
-    if (data.DESIGN) {
-      const designData = {
-        challenges: data.DESIGN.challenges,
-        wins: data.DESIGN.wins,
-        mostRecentSubmission: prismaHelper.convertDate(data.DESIGN.mostRecentSubmission),
-        mostRecentEventDate: prismaHelper.convertDate(data.DESIGN.mostRecentEventDate)
-      }
-      const newDesign = await prismaHelper.updateOrCreateModel(designData, existingStat.design, tx.memberDesignStats, { memberStatsId: existingStat.id }, operatorId)
-      if (newDesign) {
-        existingStat.design = newDesign
-      }
-
-      // update design subTracks
-      if (data.DESIGN.subTracks) {
-        const designItems = data.DESIGN.subTracks.map(item => ({
-          ...(_.omit(item, ['id', 'mostRecentSubmission', 'mostRecentEventDate'])),
-          subTrackId: item.id,
-          mostRecentSubmission: prismaHelper.convertDate(item.mostRecentSubmission),
-          mostRecentEventDate: prismaHelper.convertDate(item.mostRecentEventDate)
-        }))
-
-        const designStatsId = existingStat.design.id
-        const existingItems = existingStat.design.items || []
-
-        await prismaHelper.updateArrayItems(designItems, existingItems, tx.memberDesignStatsItem, { designStatsId }, operatorId)
-      }
-    }
-
-    // update DATA_SCIENCE
-    if (data.DATA_SCIENCE) {
-      const dataScienceData = {
-        challenges: data.DATA_SCIENCE.challenges,
-        wins: data.DATA_SCIENCE.wins,
-        mostRecentEventName: data.DATA_SCIENCE.mostRecentEventName,
-        mostRecentSubmission: prismaHelper.convertDate(data.DATA_SCIENCE.mostRecentSubmission),
-        mostRecentEventDate: prismaHelper.convertDate(data.DATA_SCIENCE.mostRecentEventDate)
-      }
-      const newDataScience = await prismaHelper.updateOrCreateModel(dataScienceData, existingStat.dataScience, tx.memberDataScienceStats, { memberStatsId: existingStat.id }, operatorId)
-      if (newDataScience) {
-        existingStat.dataScience = newDataScience
-      }
-
-      // update data science srm
-      if (data.DATA_SCIENCE.SRM) {
-        const dataScienceSrmData = {
-          challenges: data.DATA_SCIENCE.SRM.challenges,
-          wins: data.DATA_SCIENCE.SRM.wins,
-          mostRecentEventName: data.DATA_SCIENCE.SRM.mostRecentEventName,
-          mostRecentSubmission: prismaHelper.convertDate(data.DATA_SCIENCE.SRM.mostRecentSubmission),
-          mostRecentEventDate: prismaHelper.convertDate(data.DATA_SCIENCE.SRM.mostRecentEventDate),
-          ...(data.DATA_SCIENCE.SRM.rank)
-        }
-        const newDataScienceSrm = await prismaHelper.updateOrCreateModel(dataScienceSrmData, existingStat.dataScience.srm, tx.memberSrmStats, { dataScienceStatsId: existingStat.dataScience.id }, operatorId)
-        if (newDataScienceSrm) {
-          existingStat.dataScience.srm = newDataScienceSrm
-        }
-
-        const srmStatsId = existingStat.dataScience.srm.id
-        if (data.DATA_SCIENCE.SRM.challengeDetails) {
-          const existingItems = existingStat.dataScience.srm.challengeDetails || []
-
-          await prismaHelper.updateArrayLevelItems(data.DATA_SCIENCE.SRM.challengeDetails, existingItems, tx.memberSrmChallengeDetail, { srmStatsId }, operatorId)
-        }
-
-        if (data.DATA_SCIENCE.SRM.division1 || data.DATA_SCIENCE.SRM.division2) {
-          const existingItems = existingStat.dataScience.srm.divisions || []
-
-          await prismaHelper.updateArrayDivisionItems(data.DATA_SCIENCE.SRM.division1, data.DATA_SCIENCE.SRM.division2, existingItems, tx.memberSrmDivisionDetail, { srmStatsId }, operatorId)
-        }
-      }
-
-      // update data science marathon
-      if (data.DATA_SCIENCE.MARATHON_MATCH) {
-        const dataScienceMarathonData = {
-          challenges: data.DATA_SCIENCE.MARATHON_MATCH.challenges,
-          wins: data.DATA_SCIENCE.MARATHON_MATCH.wins,
-          mostRecentEventName: data.DATA_SCIENCE.MARATHON_MATCH.mostRecentEventName,
-          mostRecentSubmission: prismaHelper.convertDate(data.DATA_SCIENCE.MARATHON_MATCH.mostRecentSubmission),
-          mostRecentEventDate: prismaHelper.convertDate(data.DATA_SCIENCE.MARATHON_MATCH.mostRecentEventDate),
-          ...(data.DATA_SCIENCE.MARATHON_MATCH.rank)
-        }
-        await prismaHelper.updateOrCreateModel(dataScienceMarathonData, existingStat.dataScience.marathon, tx.memberMarathonStats, { dataScienceStatsId: existingStat.dataScience.id }, operatorId)
-      }
-    }
-
-    // update COPILOT
-    if (data.COPILOT) {
-      await prismaHelper.updateOrCreateModel(data.COPILOT, existingStat.copilot, tx.memberCopilotStats, { memberStatsId: existingStat.id }, operatorId)
-    }
-
-    // Fetch updated stats
-    let updatedStats = await tx.memberStats.findUnique({
-      where: { id: existingStat.id },
-      include: includeParams
-    })
-    updatedStats.groupId = existingStat.groupId
-    updatedStats = prismaHelper.buildStatsResponse(member, updatedStats, MEMBER_STATS_FIELDS)
-    // remove identifiable info fields if user is not admin, not M2M and not member himself
-    if (!helper.canManageMember(currentUser, member)) {
-      updatedStats = _.omit(updatedStats, config.STATISTICS_SECURE_FIELDS)
-    }
-
-    return updatedStats
   })
 
+  const updatedRows = await prisma.memberStats.findMany({
+    where: { userId: member.userId, isPrivate },
+    include: prismaHelper.unifiedStatsIncludeParams
+  })
+  const scopedRows = _.map(updatedRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
+  let result = prismaHelper.buildUnifiedStatsResponse(member, scopedRows, MEMBER_STATS_FIELDS)
+  if (legacyMaxRatingData) {
+    result.maxRating = {
+      ...result.maxRating,
+      ...legacyMaxRatingData
+    }
+  }
+  if (!helper.canManageMember(currentUser, member)) {
+    result = _.omit(result, config.STATISTICS_SECURE_FIELDS)
+  }
   return result
 }
-
-const MemberStatsDesignSubTrackSchema = Joi.array().items(Joi.object().keys({
-  id: Joi.positive().required(),
-  name: Joi.string(),
-  challenges: Joi.positive(),
-  wins: Joi.positive(),
-  mostRecentSubmission: Joi.positive(),
-  mostRecentEventDate: Joi.positive(),
-  numInquiries: Joi.positive().required(),
-  submissions: Joi.positive().required(),
-  passedScreening: Joi.positive().required(),
-  avgPlacement: Joi.number().required(),
-  screeningSuccessRate: Joi.number().required(),
-  submissionRate: Joi.number().required(),
-  winPercent: Joi.number().required()
-}))
-
-const MemberStatsDataScienceSrmSchema = Joi.object().keys({
-  challenges: Joi.positive(),
-  wins: Joi.positive(),
-  mostRecentSubmission: Joi.positive(),
-  mostRecentEventDate: Joi.positive(),
-  mostRecentEventName: Joi.string(),
-  rank: Joi.object().keys({
-    rating: Joi.positive().required(),
-    percentile: Joi.number().required(),
-    rank: Joi.positive().required(),
-    countryRank: Joi.positive().required(),
-    schoolRank: Joi.positive().required(),
-    volatility: Joi.positive().required(),
-    maximumRating: Joi.positive().required(),
-    minimumRating: Joi.positive().required(),
-    defaultLanguage: Joi.string().required(),
-    competitions: Joi.positive().required()
-  }).required(),
-  challengeDetails: Joi.array(),
-  division1: Joi.array(),
-  division2: Joi.array()
-})
-
-const MemberStatsSrmChallengeDetailsSchema = Joi.array().items(Joi.object().keys({
-  challenges: Joi.positive().required(),
-  levelName: Joi.string().required(),
-  failedChallenges: Joi.positive().required()
-}))
-
-const MemberStatsSrmDivisionsSchema = Joi.array().items(Joi.object().keys({
-  problemsSubmitted: Joi.positive().required(),
-  problemsSysByTest: Joi.positive().required(),
-  problemsFailed: Joi.positive().required(),
-  levelName: Joi.string().required()
-}))
-
-const MemberStatsDataScienceMarathonSchema = Joi.object().keys({
-  challenges: Joi.positive(),
-  wins: Joi.positive(),
-  mostRecentSubmission: Joi.positive(),
-  mostRecentEventDate: Joi.positive(),
-  mostRecentEventName: Joi.string(),
-  rank: Joi.object().keys({
-    rating: Joi.positive().required(),
-    competitions: Joi.positive().required(),
-    avgRank: Joi.number().required(),
-    avgNumSubmissions: Joi.positive().required(),
-    bestRank: Joi.positive().required(),
-    topFiveFinishes: Joi.positive().required(),
-    topTenFinishes: Joi.positive().required(),
-    rank: Joi.positive().required(),
-    percentile: Joi.number().required(),
-    volatility: Joi.positive().required(),
-    minimumRating: Joi.positive().required(),
-    maximumRating: Joi.positive().required(),
-    countryRank: Joi.positive().required(),
-    schoolRank: Joi.positive().required(),
-    defaultLanguage: Joi.string().required()
-  }).required()
-})
-
-const MemberStatsDataScienceCopilotSchema = Joi.object().keys({
-  contests: Joi.positive().required(),
-  projects: Joi.positive().required(),
-  failures: Joi.positive().required(),
-  reposts: Joi.positive().required(),
-  activeContests: Joi.positive().required(),
-  activeProjects: Joi.positive().required(),
-  fulfillment: Joi.number().required()
-})
 
 partiallyUpdateMemberStats.schema = {
   currentUser: Joi.any(),
   handle: Joi.string().required(),
   data: Joi.object().keys({
     groupId: Joi.string(),
+    trackId: Joi.string(),
+    typeId: Joi.string(),
     challenges: Joi.positive(),
     wins: Joi.positive(),
-    maxRating: Joi.object().keys({
-      rating: Joi.positive().required(),
-      track: Joi.string(),
-      subTrack: Joi.string(),
-      ratingColor: Joi.string().required()
-    }),
-    DEVELOP: Joi.object().keys({
-      challenges: Joi.positive(),
-      wins: Joi.positive(),
+    mostRecentSubmission: Joi.positive(),
+    mostRecentEventDate: Joi.positive(),
+    rating: Joi.number(),
+    avgRank: Joi.number(),
+    avgNumSubmissions: Joi.number(),
+    bestRank: Joi.number(),
+    globalRank: Joi.number(),
+    countryRank: Joi.number(),
+    schoolRank: Joi.number(),
+    volatility: Joi.number(),
+    minRating: Joi.number(),
+    topFiveFinishes: Joi.number(),
+    topTenFinishes: Joi.number(),
+    records: Joi.array().items(Joi.object().keys({
+      trackId: Joi.string().required(),
+      typeId: Joi.string().required(),
+      challenges: Joi.number(),
+      wins: Joi.number(),
       mostRecentSubmission: Joi.positive(),
       mostRecentEventDate: Joi.positive(),
-      subTracks: Joi.array().items(Joi.object().keys({
-        id: Joi.positive().required(),
-        name: Joi.string(),
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        submissions: Joi.object().keys({
-          numInquiries: Joi.positive(),
-          submissions: Joi.positive(),
-          submissionRate: Joi.number(),
-          passedScreening: Joi.positive(),
-          screeningSuccessRate: Joi.number(),
-          passedReview: Joi.positive(),
-          reviewSuccessRate: Joi.number(),
-          appeals: Joi.positive(),
-          appealSuccessRate: Joi.number(),
-          maxScore: Joi.number(),
-          minScore: Joi.number(),
-          avgScore: Joi.number(),
-          avgPlacement: Joi.number(),
-          winPercent: Joi.number()
-        }),
-        rank: Joi.object().keys({
-          rating: Joi.positive(),
-          activePercentile: Joi.number(),
-          activeRank: Joi.positive(),
-          activeCountryRank: Joi.positive(),
-          activeSchoolRank: Joi.positive(),
-          overallPercentile: Joi.number(),
-          overallRank: Joi.positive(),
-          overallCountryRank: Joi.positive(),
-          overallSchoolRank: Joi.positive(),
-          volatility: Joi.positive(),
-          reliability: Joi.number(),
-          maxRating: Joi.positive(),
-          minRating: Joi.positive()
-        })
-      }))
-    }),
-    DESIGN: Joi.object().keys({
-      challenges: Joi.positive(),
-      wins: Joi.positive(),
-      mostRecentSubmission: Joi.positive(),
-      mostRecentEventDate: Joi.positive(),
-      subTracks: Joi.array().items(Joi.object().keys({
-        id: Joi.positive().required(),
-        name: Joi.string(),
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        numInquiries: Joi.positive(),
-        submissions: Joi.positive(),
-        passedScreening: Joi.positive(),
-        avgPlacement: Joi.number(),
-        screeningSuccessRate: Joi.number(),
-        submissionRate: Joi.number(),
-        winPercent: Joi.number()
-      }))
-    }),
-    DATA_SCIENCE: Joi.object().keys({
-      challenges: Joi.positive(),
-      wins: Joi.positive(),
-      mostRecentSubmission: Joi.positive(),
-      mostRecentEventDate: Joi.positive(),
-      mostRecentEventName: Joi.string(),
-      SRM: Joi.object().keys({
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        mostRecentEventName: Joi.string(),
-        rank: Joi.object().keys({
-          rating: Joi.positive(),
-          percentile: Joi.number(),
-          rank: Joi.positive(),
-          countryRank: Joi.positive(),
-          schoolRank: Joi.positive(),
-          volatility: Joi.positive(),
-          maximumRating: Joi.positive(),
-          minimumRating: Joi.positive(),
-          defaultLanguage: Joi.string(),
-          competitions: Joi.positive()
-        }),
-        challengeDetails: Joi.array().items(Joi.object().keys({
-          challenges: Joi.positive(),
-          levelName: Joi.string().required(),
-          failedChallenges: Joi.positive()
-        })),
-        division1: Joi.array().items(Joi.object().keys({
-          problemsSubmitted: Joi.positive(),
-          problemsSysByTest: Joi.positive(),
-          problemsFailed: Joi.positive(),
-          levelName: Joi.string().required()
-        })),
-        division2: Joi.array().items(Joi.object().keys({
-          problemsSubmitted: Joi.positive(),
-          problemsSysByTest: Joi.positive(),
-          problemsFailed: Joi.positive(),
-          levelName: Joi.string().required()
-        }))
+      rating: Joi.number(),
+      avgRank: Joi.number(),
+      avgNumSubmissions: Joi.number(),
+      bestRank: Joi.number(),
+      globalRank: Joi.number(),
+      countryRank: Joi.number(),
+      schoolRank: Joi.number(),
+      volatility: Joi.number(),
+      maxRating: Joi.number(),
+      minRating: Joi.number(),
+      topFiveFinishes: Joi.number(),
+      topTenFinishes: Joi.number()
+    })),
+    maxRating: Joi.alternatives().try(
+      Joi.object().keys({
+        rating: Joi.positive().required(),
+        track: Joi.string(),
+        subTrack: Joi.string(),
+        ratingColor: Joi.string().required()
       }),
-      MARATHON_MATCH: Joi.object().keys({
-        challenges: Joi.positive(),
-        wins: Joi.positive(),
-        mostRecentSubmission: Joi.positive(),
-        mostRecentEventDate: Joi.positive(),
-        mostRecentEventName: Joi.string(),
-        rank: Joi.object().keys({
-          rating: Joi.positive(),
-          competitions: Joi.positive(),
-          avgRank: Joi.number(),
-          avgNumSubmissions: Joi.positive(),
-          bestRank: Joi.positive(),
-          topFiveFinishes: Joi.positive(),
-          topTenFinishes: Joi.positive(),
-          rank: Joi.positive(),
-          percentile: Joi.number(),
-          volatility: Joi.positive(),
-          minimumRating: Joi.positive(),
-          maximumRating: Joi.positive(),
-          countryRank: Joi.positive(),
-          schoolRank: Joi.positive(),
-          defaultLanguage: Joi.string()
-        })
-      })
-    }),
-    COPILOT: Joi.object().keys({
-      contests: Joi.positive(),
-      projects: Joi.positive(),
-      failures: Joi.positive(),
-      reposts: Joi.positive(),
-      activeContests: Joi.positive(),
-      activeProjects: Joi.positive(),
-      fulfillment: Joi.number()
-    })
+      Joi.number()
+    )
   }).required()
 }
 

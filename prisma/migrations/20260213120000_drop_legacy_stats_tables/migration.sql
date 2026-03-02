@@ -1,0 +1,4 @@
+-- Deferred legacy table cleanup.
+-- Keep legacy stats/history/distribution tables in place while validating
+-- the unified stats pipeline and backfilled aggregate data.
+-- A follow-up migration should perform the table drops once validation is complete.

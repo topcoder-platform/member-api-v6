@@ -206,7 +206,7 @@ async function getMemberByHandle (handle) {
     where: {
       handleLower: handle.trim().toLowerCase()
     },
-    include: { maxRating: true }
+    include: { maxRating: true, phones: true }
   })
   if (!ret || !ret.userId) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)

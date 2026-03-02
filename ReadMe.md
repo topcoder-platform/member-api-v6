@@ -21,9 +21,11 @@ After that, please set db URL environment variables:
 ```bash
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
 export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
+export CHALLENGE_DB_URL="postgresql://johndoe:mypassword@localhost:5432/challengedb?schema=challenges"
 ```
 
 These variables are important since they're required by Prisma clients.
+`CHALLENGE_DB_URL` should target the same PostgreSQL instance/database used by `challenge-api-v6`.
 
 If you want to do anything with database, these variables are necessary.
 
@@ -35,6 +37,7 @@ Before running db scripts, please make sure you have setup db and config db url 
 # set db url values
 export DATABASE_URL="postgresql://johndoe:mypassword@localhost:5432/memberdb"
 export SKILLS_DB_URL="postgresql://johndoe:mypassword@localhost:5432/skillsdb"
+export CHALLENGE_DB_URL="postgresql://johndoe:mypassword@localhost:5432/challengedb?schema=challenges"
 
 # install dependencies
 npm install
@@ -79,6 +82,8 @@ The following parameters can be set in config files or in env variables:
 - PORT: the server port, default is 3000
 - AUTH_SECRET: The authorization secret used during token verification.
 - VALID_ISSUERS: The valid issuer of tokens.
+- IDENTITY_DB_URL: PostgreSQL connection string for Identity schema reads.
+- CHALLENGE_DB_URL: PostgreSQL connection string for challenge schema reads (format: `postgresql://user:password@host:port/database?schema=challenges`, and should point to the same database used by challenge-api-v6).
 - VANILLA_DB_URL: MySQL connection string for the Vanilla forums database.
 - AUTH0_URL: AUTH0 URL, used to get M2M token
 - AUTH0_PROXY_SERVER_URL: AUTH0 proxy server URL, used to get M2M token
@@ -89,6 +94,7 @@ The following parameters can be set in config files or in env variables:
 - BUSAPI_URL: Bus API URL
 - KAFKA_ERROR_TOPIC: Kafka error topic used by bus API wrapper
 - GROUPS_API_URL: Groups API URL
+- SENDGRID_API_KEY: SendGrid API key used for member email activity lookups.
 - AMAZON.AWS_ACCESS_KEY_ID: The Amazon certificate key to use when connecting.
 - AMAZON.AWS_SECRET_ACCESS_KEY: The Amazon certificate access key to use when connecting.
 - AMAZON.AWS.SESSION_TOKEN: The user session token, used when developing locally against the TC dev AWS services
@@ -106,6 +112,7 @@ The following parameters can be set in config files or in env variables:
 - MEMBER_TRAIT_SECURE_FIELDS: Member traits identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - MISC_SECURE_FIELDS: Misc identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATISTICS_SECURE_FIELDS: Member Statistics identifiable info fields, only admin, M2M, or member himself can fetch these fields
+- STATS_READ_SOURCE: Controls stats read backend, `unified` (default, new tables) or `legacy` (pre-refactor tables)
 - HEALTH_CHECK_TIMEOUT: health check timeout in milliseconds
 
 Set the following environment variables used by bus API to get TC M2M token (use 'set' insted of 'export' for Windows OS):

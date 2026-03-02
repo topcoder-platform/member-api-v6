@@ -21,6 +21,7 @@ module.exports = {
   AUTH_SECRET: process.env.AUTH_SECRET || 'mysecret',
   VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
   IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
+  CHALLENGE_DB_URL: process.env.CHALLENGE_DB_URL,
   RESOURCES_DB_URL: process.env.RESOURCES_DB_URL,
   VANILLA_DB_URL: process.env.VANILLA_DB_URL,
 
@@ -119,6 +120,8 @@ module.exports = {
   STATISTICS_SECURE_FIELDS: process.env.STATISTICS_SECURE_FIELDS
     ? process.env.STATISTICS_SECURE_FIELDS.split(',')
     : ['createdBy', 'updatedBy'],
+  // Select stats read source: 'unified' (new tables) or 'legacy' (pre-refactor tables)
+  STATS_READ_SOURCE: process.env.STATS_READ_SOURCE || 'unified',
 
   // Public group id
   PUBLIC_GROUP_ID: process.env.PUBLIC_GROUP_ID || '10',
@@ -146,6 +149,7 @@ module.exports = {
 
   // Finance database connection string
   FINANCE_DATABASE_URL: process.env.FINANCE_DATABASE_URL,
+  SENDGRID_API_KEY: process.env.SENDGRID_API_KEY,
 
   HUBSPOT_API_KEY: process.env.HUBSPOT_API_KEY,
   HUBSPOT_BASE_URL: process.env.HUBSPOT_BASE_URL,

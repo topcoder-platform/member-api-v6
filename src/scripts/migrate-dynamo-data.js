@@ -1,7 +1,7 @@
 const path = require('path')
 const fs = require('fs')
 const readline = require('readline')
-const { concat, isArray, isBoolean, isEmpty, isEqual, isInteger, find, omit, pick, isNumber, forEach, map, uniqBy, isString, cloneDeep, flattenDeep } = require('lodash')
+const { concat, isArray, isBoolean, isEmpty, isEqual, isInteger, omit, pick, isNumber, forEach, uniqBy, isString, cloneDeep, flattenDeep, isNil, omitBy, isUndefined, get, values, keyBy } = require('lodash')
 const { v4: uuidv4 } = require('uuid')
 const config = require('./config')
 const prismaManager = require('../common/prisma')
@@ -15,8 +15,23 @@ const TRANSACTION_TIMEOUT_MS = 60000
 const TRANSACTION_MAX_RETRIES = 3
 const TRANSACTION_RETRY_DELAY_MS = 1000
 const DEFAULT_RATING_COLOR = '#EF3A3A'
-const DEFAULT_SRM_ID = 101
-const DEFAULT_MARATHON_MATCH_ID = 102
+const HEX_COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/
+const RATING_COLORS = [{
+  color: '#9D9FA0',
+  limit: 900
+}, {
+  color: '#69C329',
+  limit: 1200
+}, {
+  color: '#616BD5',
+  limit: 1500
+}, {
+  color: '#FCD617',
+  limit: 2200
+}, {
+  color: '#EF3A3A',
+  limit: Infinity
+}]
 const DRY_RUN = process.env.MEMBER_MIGRATION_DRY_RUN === 'true'
 const LOG_LEVELS = {
   INFO: 'INFO',
@@ -52,7 +67,7 @@ const TRAIT_DEVICE = ['deviceType', 'manufacturer', 'model', 'operatingSystem', 
 const WORK_INDUSTRY_TYPES = ['Banking', 'ConsumerGoods', 'Energy', 'Entertainment', 'HealthCare', 'Pharma', 'PublicSector', 'TechAndTechnologyService', 'Telecoms', 'TravelAndHospitality']
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/
 const FALLBACK_RECORD_DATE_FIELDS = ['lastLoginDate', 'modified', 'modifiedAt', 'modified_on', 'modifiedOn', 'lastModified', 'lastModifiedAt', 'lastModifiedOn', 'timestamp', 'lastActivityDate']
-const NULL_BYTE_REGEX = /\u0000/g
+const NULL_BYTE_CHAR = String.fromCharCode(0)
 
 const SKILL_IMPORT_LOG_PATH = path.join(MIGRATE_DIR, 'skill-import.log')
 let skillImportLogStream
@@ -72,6 +87,43 @@ const destructiveApprovals = new Map()
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
+}
+
+/**
+ * Return Topcoder rating color from numeric rating.
+ * @param {Number|String} rating rating value from import source
+ * @returns {String} resolved rating color
+ */
+function getRatingColorFromRating (rating) {
+  const numericRating = Number(rating)
+  if (!Number.isFinite(numericRating)) {
+    return DEFAULT_RATING_COLOR
+  }
+
+  let i = 0
+  while (i < RATING_COLORS.length && RATING_COLORS[i].limit <= numericRating) {
+    i += 1
+  }
+
+  return (RATING_COLORS[i] && RATING_COLORS[i].color) || DEFAULT_RATING_COLOR
+}
+
+/**
+ * Resolve maxRating.ratingColor from imported payload.
+ * Preserve valid imported values, otherwise derive the color from rating.
+ * @param {Object} maxRating max rating payload
+ * @returns {String} resolved rating color
+ */
+function resolveMaxRatingColor (maxRating) {
+  const providedColor = get(maxRating, 'ratingColor')
+  if (isString(providedColor)) {
+    const normalizedColor = providedColor.trim()
+    if (HEX_COLOR_REGEX.test(normalizedColor)) {
+      return normalizedColor.toUpperCase()
+    }
+  }
+
+  return getRatingColorFromRating(get(maxRating, 'rating'))
 }
 
 function logWithLevel (level, message, context = null) {
@@ -669,22 +721,10 @@ async function clearDB () {
   await executeWrite('memberFinancial.deleteMany', () => prisma.memberFinancial.deleteMany(), context)
 
   console.log('Clearing member stats data')
-  await executeWrite('memberCopilotStats.deleteMany', () => prisma.memberCopilotStats.deleteMany(), context)
-  await executeWrite('memberMarathonStats.deleteMany', () => prisma.memberMarathonStats.deleteMany(), context)
-  await executeWrite('memberDesignStatsItem.deleteMany', () => prisma.memberDesignStatsItem.deleteMany(), context)
-  await executeWrite('memberDesignStats.deleteMany', () => prisma.memberDesignStats.deleteMany(), context)
-  await executeWrite('memberDevelopStatsItem.deleteMany', () => prisma.memberDevelopStatsItem.deleteMany(), context)
-  await executeWrite('memberDevelopStats.deleteMany', () => prisma.memberDevelopStats.deleteMany(), context)
-  await executeWrite('memberSrmChallengeDetail.deleteMany', () => prisma.memberSrmChallengeDetail.deleteMany(), context)
-  await executeWrite('memberSrmDivisionDetail.deleteMany', () => prisma.memberSrmDivisionDetail.deleteMany(), context)
-  await executeWrite('memberSrmStats.deleteMany', () => prisma.memberSrmStats.deleteMany(), context)
   await executeWrite('memberStats.deleteMany', () => prisma.memberStats.deleteMany(), context)
-  await executeWrite('memberDataScienceStats.deleteMany', () => prisma.memberDataScienceStats.deleteMany(), context)
 
   console.log('Clearing member stats history data')
-  await executeWrite('memberDataScienceHistoryStats.deleteMany', () => prisma.memberDataScienceHistoryStats.deleteMany(), context)
-  await executeWrite('memberDevelopHistoryStats.deleteMany', () => prisma.memberDevelopHistoryStats.deleteMany(), context)
-  await executeWrite('memberHistoryStats.deleteMany', () => prisma.memberHistoryStats.deleteMany(), context)
+  await executeWrite('memberStatsHistory.deleteMany', () => prisma.memberStatsHistory.deleteMany(), context)
 
   console.log('Clearing member traits data')
   await executeWrite('memberTraitBasicInfo.deleteMany', () => prisma.memberTraitBasicInfo.deleteMany(), context)
@@ -711,9 +751,6 @@ async function clearDB () {
   console.log('Clearing maxRating and member data')
   await executeWrite('memberMaxRating.deleteMany', () => prisma.memberMaxRating.deleteMany(), context)
   await executeWrite('member.deleteMany', () => prisma.member.deleteMany(), context)
-
-  console.log('Clearing rating distribution data')
-  await executeWrite('distributionStats.deleteMany', () => prisma.distributionStats.deleteMany(), context)
 
   console.log('All done')
 }
@@ -950,7 +987,7 @@ function stripNullBytes (value) {
   if (typeof value !== 'string') {
     return value
   }
-  return value.replace(NULL_BYTE_REGEX, '')
+  return value.split(NULL_BYTE_CHAR).join('')
 }
 
 /**
@@ -964,9 +1001,9 @@ function sanitizeNullBytesDeep (target) {
 
   function visit (value) {
     if (typeof value === 'string') {
-      if (NULL_BYTE_REGEX.test(value)) {
+      if (value.indexOf(NULL_BYTE_CHAR) !== -1) {
         removed = true
-        return value.replace(NULL_BYTE_REGEX, '')
+        return value.split(NULL_BYTE_CHAR).join('')
       }
       return value
     }
@@ -1191,7 +1228,6 @@ async function importDynamoMember (filename, dateFilter = null) {
   let total = 0
   // count skipped items due to date filter
   let skipped = 0
-  let skippedDueToErrors = 0
   // store the temp json object string
   let stringObject = ''
   // store batch items
@@ -1375,7 +1411,7 @@ async function fixMemberData (memberItem, batchItems) {
     maxRatingObj = pick(maxRatingObj, MAX_RATING_FIELDS)
     maxRatingObj.track = maxRatingObj.track ? maxRatingObj.track : 'DEV'
     maxRatingObj.subTrack = maxRatingObj.subTrack ? maxRatingObj.subTrack : 'CODE'
-    maxRatingObj.ratingColor = maxRatingObj.ratingColor ? maxRatingObj.ratingColor : DEFAULT_RATING_COLOR
+    maxRatingObj.ratingColor = resolveMaxRatingColor(maxRatingObj)
     maxRatingObj.createdBy = CREATED_BY
     if (isInteger(maxRatingObj.rating) && maxRatingObj.rating > 0) {
       memberItem.maxRating = {
@@ -1923,34 +1959,18 @@ async function importDynamoMemberStatHistory (filename, dateFilter = null) {
     })
 
     if (member) {
-      const statHistory = fixDynamoMemberStatHistoryData(dataItem)
+      const statHistoryRecords = fixDynamoMemberStatHistoryData(dataItem)
 
-      if (!isEmpty(statHistory)) {
-        const createData = {
-          groupId: dataItem.groupId,
-          createdBy: CREATED_BY,
-          userId: member.userId
-        }
-
-        if (statHistory.develop) {
-          createData.develop = {
-            create: statHistory.develop
-          }
-        }
-
-        if (statHistory.dataScience) {
-          createData.dataScience = {
-            create: statHistory.dataScience
-          }
-        }
-
-        if (createData.develop || createData.dataScience) {
-          await prisma.memberHistoryStats.create({
-            data: createData,
-            include: { develop: true, dataScience: true }
-          })
-          total += 1
-        }
+      if (statHistoryRecords.length > 0) {
+        await prisma.memberStatsHistory.createMany({
+          data: statHistoryRecords.map(record => ({
+            ...record,
+            userId: member.userId,
+            createdBy: CREATED_BY,
+            updatedBy: CREATED_BY
+          }))
+        })
+        total += 1
       }
     }
 
@@ -2076,33 +2096,16 @@ async function importDynamoMemberStatHistoryPrivate (filename, dateFilter = null
     })
 
     if (member) {
-      const statHistory = fixDynamoMemberStatHistoryData(dataItem)
-
-      const createData = {
-        groupId: dataItem.groupId,
-        isPrivate: true,
-        createdBy: CREATED_BY,
-        userId: member.userId
-      }
-
-      if (statHistory.develop) {
-        createData.develop = {
-          create: statHistory.develop
-        }
-      }
-
-      if (statHistory.dataScience) {
-        createData.dataScience = {
-          create: statHistory.dataScience
-        }
-      }
-
-      if (createData.develop || createData.dataScience) {
-        await prisma.memberHistoryStats.create({
-          data: createData,
-          include: { develop: true, dataScience: true }
+      const statHistoryRecords = fixDynamoMemberStatHistoryData(dataItem)
+      if (statHistoryRecords.length > 0) {
+        await prisma.memberStatsHistory.createMany({
+          data: statHistoryRecords.map(record => ({
+            ...record,
+            userId: member.userId,
+            createdBy: CREATED_BY,
+            updatedBy: CREATED_BY
+          }))
         })
-
         total += 1
       }
     }
@@ -2119,76 +2122,87 @@ async function importDynamoMemberStatHistoryPrivate (filename, dateFilter = null
  * @returns member stat history data
  */
 function fixDynamoMemberStatHistoryData (dataItem) {
-  const statHistory = {}
+  const records = []
+  const pushRecord = (record) => {
+    if (!record.eventDate || isNil(record.challengeId)) {
+      return
+    }
+    records.push(omitBy({
+      trackId: record.trackId,
+      typeId: record.typeId,
+      challengeId: String(record.challengeId),
+      oldRating: isInteger(record.oldRating) ? record.oldRating : undefined,
+      newRating: isInteger(record.newRating) ? record.newRating : undefined,
+      oldGlobalRank: isInteger(record.oldGlobalRank) ? record.oldGlobalRank : undefined,
+      newGlobalRank: isInteger(record.newGlobalRank) ? record.newGlobalRank : undefined,
+      oldCountryRank: isInteger(record.oldCountryRank) ? record.oldCountryRank : undefined,
+      newCountryRank: isInteger(record.newCountryRank) ? record.newCountryRank : undefined,
+      oldSchoolRank: isInteger(record.oldSchoolRank) ? record.oldSchoolRank : undefined,
+      newSchoolRank: isInteger(record.newSchoolRank) ? record.newSchoolRank : undefined,
+      eventDate: record.eventDate
+    }, isUndefined))
+  }
 
   if (dataItem.DEVELOP) {
     const developData = JSON.parse(dataItem.DEVELOP)
     if (developData.subTracks && developData.subTracks.length > 0) {
-      statHistory.develop = []
       developData.subTracks.forEach(item => {
-        if (item.history && item.history.length > 0) {
-          let historyItems = item.history.map(item2 => ({
-            ...item2,
-            ratingDate: _convert2Date(item2.ratingDate),
-            subTrackId: item.id || DEFAULT_SRM_ID,
-            subTrack: item.name,
-            createdBy: CREATED_BY
-          }))
-
-          historyItems = historyItems.filter(item => isInteger(item.challengeId) && isString(item.challengeName) &&
-            item.ratingDate && isInteger(item.newRating)
-          )
-
-          if (historyItems.length > 0) {
-            statHistory.develop = statHistory.develop.concat(historyItems)
-          }
+        const typeId = item.name || item.id || 'Challenge'
+        if (!item.history || item.history.length === 0) {
+          return
         }
+        item.history.forEach(historyItem => {
+          const eventDate = _convert2Date(historyItem.eventDate || historyItem.ratingDate)
+          pushRecord({
+            trackId: 'DEVELOP',
+            typeId: String(typeId),
+            challengeId: historyItem.challengeId,
+            oldRating: historyItem.oldRating,
+            newRating: historyItem.newRating,
+            oldGlobalRank: historyItem.oldGlobalRank,
+            newGlobalRank: historyItem.newGlobalRank,
+            oldCountryRank: historyItem.oldCountryRank,
+            newCountryRank: historyItem.newCountryRank,
+            oldSchoolRank: historyItem.oldSchoolRank,
+            newSchoolRank: historyItem.newSchoolRank,
+            eventDate
+          })
+        })
       })
-
-      if (isEmpty(statHistory.develop)) {
-        delete statHistory.develop
-      }
     }
   }
 
   if (dataItem.DATA_SCIENCE) {
     const scienceData = JSON.parse(dataItem.DATA_SCIENCE)
-    statHistory.dataScience = []
-    if (scienceData.SRM && scienceData.SRM.history && scienceData.SRM.history.length > 0) {
-      let historyItems = scienceData.SRM.history.map(item => ({
-        ...item,
-        date: _convert2Date(item.date),
-        subTrack: 'SRM',
-        subTrackId: item.id || DEFAULT_SRM_ID,
-        createdBy: CREATED_BY
-      }))
 
-      statHistory.dataScience = historyItems
-    }
-    if (scienceData.MARATHON_MATCH && scienceData.MARATHON_MATCH.history && scienceData.MARATHON_MATCH.history.length > 0) {
-      let historyItems = scienceData.MARATHON_MATCH.history.map(item => ({
-        ...item,
-        date: _convert2Date(item.date),
-        subTrack: 'MARATHON_MATCH',
-        subTrackId: item.id || DEFAULT_MARATHON_MATCH_ID,
-        createdBy: CREATED_BY
-      }))
-
-      statHistory.dataScience = statHistory.dataScience.concat(historyItems)
-    }
-
-    if (statHistory.dataScience.length > 0) {
-      statHistory.dataScience = statHistory.dataScience.filter(item => isInteger(item.challengeId) && isString(item.challengeName) &&
-        item.date && isInteger(item.rating) &&
-        isInteger(item.placement) && isNumber(item.percentile)
-      )
+    const appendScienceHistory = (subTrack, historyList) => {
+      if (!historyList || historyList.length === 0) {
+        return
+      }
+      historyList.forEach(historyItem => {
+        const eventDate = _convert2Date(historyItem.eventDate || historyItem.date || historyItem.ratingDate)
+        pushRecord({
+          trackId: 'DATA_SCIENCE',
+          typeId: subTrack,
+          challengeId: historyItem.challengeId,
+          oldRating: historyItem.oldRating,
+          newRating: historyItem.newRating || historyItem.rating,
+          oldGlobalRank: historyItem.oldGlobalRank,
+          newGlobalRank: historyItem.newGlobalRank || historyItem.placement,
+          oldCountryRank: historyItem.oldCountryRank,
+          newCountryRank: historyItem.newCountryRank,
+          oldSchoolRank: historyItem.oldSchoolRank,
+          newSchoolRank: historyItem.newSchoolRank,
+          eventDate
+        })
+      })
     }
 
-    if (isEmpty(statHistory.dataScience)) {
-      delete statHistory.dataScience
-    }
+    appendScienceHistory('SRM', get(scienceData, 'SRM.history', []))
+    appendScienceHistory('MARATHON_MATCH', get(scienceData, 'MARATHON_MATCH.history', []))
   }
-  return statHistory
+
+  return values(keyBy(records, item => `${item.trackId}|${item.typeId}|${item.challengeId}`))
 }
 
 /**
@@ -2214,6 +2228,7 @@ async function importElasticSearchMember (filename, dateFilter = null) {
   let total = 0
   // count skipped items due to date filter
   let skipped = 0
+  let skippedDueToErrors = 0
   for await (const line of rlRead) {
     currentLine += 1
     if (currentLine % 10 === 0) {
@@ -2860,7 +2875,7 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
 
           const maxRatingData = compactObject({
             ...memberObj.maxRating,
-            ratingColor: memberObj.maxRating.ratingColor || DEFAULT_RATING_COLOR,
+            ratingColor: resolveMaxRatingColor(memberObj.maxRating),
             userId: memberObj.userId
           })
 
@@ -2958,7 +2973,7 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
         timeout: TRANSACTION_TIMEOUT_MS
       }))
     } catch (err) {
-      logError('Failed to update member with traits and skills', { ...context, error: err?.message })
+      logError('Failed to update member with traits and skills', { ...context, error: err && err.message })
       if (isBigIntSerializationError(err)) {
         logWarn('Skipping member update due to BigInt serialization error', context)
         return false
@@ -2971,7 +2986,7 @@ async function updateMembersWithTraitsAndSkills (memberObj) {
     try {
       await syncMemberSkills(memberObj.userId, memberObj.memberSkills, memberObj.handle)
     } catch (err) {
-      logError('Failed to sync member skills', { ...context, error: err?.message })
+      logError('Failed to sync member skills', { ...context, error: err && err.message })
       if (isBigIntSerializationError(err)) {
         logWarn('Skipping member skill sync due to BigInt serialization error', context)
         return false
@@ -3024,8 +3039,8 @@ async function syncMemberAddresses (tx, userId, addresses = []) {
       processedIds.add(matchingAddress.id)
       const diff = {}
       ADDRESS_FIELDS.forEach((field) => {
-        const incomingValue = updatePayload[field] ?? null
-        const existingValue = matchingAddress[field] ?? null
+        const incomingValue = isNil(updatePayload[field]) ? null : updatePayload[field]
+        const existingValue = isNil(matchingAddress[field]) ? null : matchingAddress[field]
         if (!isEqual(existingValue, incomingValue)) {
           diff[field] = incomingValue
         }
@@ -3237,7 +3252,7 @@ function fixElasticSearchMemberStatData (dataItem) {
       rating: dataItem.maxRating.rating,
       track: dataItem.maxRating.track,
       subTrack: dataItem.maxRating.subTrack,
-      ratingColor: dataItem.maxRating.ratingColor || DEFAULT_RATING_COLOR
+      ratingColor: resolveMaxRatingColor(dataItem.maxRating)
     }
   }
 
@@ -3453,201 +3468,6 @@ async function updateOrCreateModel (itemData, existingData, txModel, parentId, o
 }
 
 /**
- * Update array items.
- * @param {Array} updateItems items to be updated
- * @param {Array} existingItems existing items in db
- * @param {Object} txModel the tx model
- * @param {Object} parentId the parent Id object
- * @param {String} operatorId the operator Id
- */
-async function updateArrayItems (updateItems, existingItems, txModel, parentId, operatorId, entityName) {
-  const toUpdate = []
-  const toCreate = []
-  if (updateItems.length === 0) {
-    return
-  }
-
-  updateItems.forEach(item => {
-    const foundItem = existingItems.find(eItem => eItem.subTrackId === item.subTrackId)
-    if (foundItem) {
-      item.id = foundItem.id
-      toUpdate.push(item)
-    } else {
-      toCreate.push(item)
-    }
-  })
-  const toDeleteIds = []
-  existingItems.forEach(item => {
-    const found = toUpdate.find(item2 => item2.id === item.id)
-    if (!found) {
-      toDeleteIds.push(item.id)
-    }
-  })
-
-  for (let i = 0; i < toUpdate.length; i++) {
-    const elem = toUpdate[i]
-    await txModel.update({
-      where: {
-        id: elem.id
-      },
-      data: {
-        ...omit(elem, ['id', 'subTrackId', 'name']),
-        updatedBy: operatorId
-      }
-    })
-  }
-
-  await txModel.createMany({
-    data: toCreate.map(item => ({
-      ...item,
-      ...parentId,
-      createdBy: operatorId
-    }))
-  })
-
-  const staleRecords = existingItems.filter(item => toDeleteIds.includes(item.id))
-  if (staleRecords.length > 0) {
-    await handleStaleRecords(entityName || 'memberStatsItems', txModel, staleRecords, { ...parentId, operatorId })
-  }
-}
-
-/**
- * Update array division items.
- * @param {Array} updateD1Items division1 items to be updated
- * @param {Array} updateD2Items division2 items to be updated
- * @param {Array} existingItems existing items in db
- * @param {Object} txModel the tx model
- * @param {Object} parentId the parent Id object
- * @param {String} operatorId the operator Id
- */
-async function updateArrayDivisionItems (updateD1Items, updateD2Items, existingItems, txModel, parentId, operatorId, entityName) {
-  const toUpdate = []
-  const toCreate = []
-  if ((!updateD1Items || updateD1Items.length === 0) && (!updateD2Items || updateD2Items.length === 0)) {
-    return
-  }
-
-  if (updateD1Items) {
-    updateD1Items.forEach(item => {
-      const foundItem = existingItems.find(eItem => eItem.levelName === item.levelName && eItem.divisionName === 'division1')
-      if (foundItem) {
-        item.id = foundItem.id
-        toUpdate.push(item)
-      } else {
-        item.divisionName = 'division1'
-        toCreate.push(item)
-      }
-    })
-  }
-
-  if (updateD2Items) {
-    updateD2Items.forEach(item => {
-      const foundItem = existingItems.find(eItem => eItem.levelName === item.levelName && eItem.divisionName === 'division2')
-      if (foundItem) {
-        item.id = foundItem.id
-        toUpdate.push(item)
-      } else {
-        item.divisionName = 'division2'
-        toCreate.push(item)
-      }
-    })
-  }
-
-  const toDeleteIds = []
-  existingItems.forEach(item => {
-    const found = toUpdate.find(item2 => item2.id === item.id)
-    if (!found) {
-      toDeleteIds.push(item.id)
-    }
-  })
-
-  for (let i = 0; i < toUpdate.length; i++) {
-    const elem = toUpdate[i]
-    await txModel.update({
-      where: {
-        id: elem.id
-      },
-      data: {
-        ...omit(elem, ['id']),
-        updatedBy: operatorId
-      }
-    })
-  }
-
-  await txModel.createMany({
-    data: toCreate.map(item => ({
-      ...item,
-      ...parentId,
-      createdBy: operatorId
-    }))
-  })
-
-  const staleRecords = existingItems.filter(item => toDeleteIds.includes(item.id))
-  if (staleRecords.length > 0) {
-    await handleStaleRecords(entityName || 'memberSrmDivisionDetail', txModel, staleRecords, { ...parentId, operatorId })
-  }
-}
-
-/**
- * Update array level items.
- * @param {Array} updateItems items to be updated
- * @param {Array} existingItems existing items in db
- * @param {Object} txModel the tx model
- * @param {Object} parentId the parent Id object
- * @param {String} operatorId the operator Id
- */
-async function updateArrayLevelItems (updateItems, existingItems, txModel, parentId, operatorId, entityName) {
-  const toUpdate = []
-  const toCreate = []
-  if (updateItems.length === 0) {
-    return
-  }
-
-  updateItems.forEach(item => {
-    const foundItem = existingItems.find(eItem => eItem.levelName === item.levelName)
-    if (foundItem) {
-      item.id = foundItem.id
-      toUpdate.push(item)
-    } else {
-      toCreate.push(item)
-    }
-  })
-  const toDeleteIds = []
-  existingItems.forEach(item => {
-    const found = toUpdate.find(item2 => item2.id === item.id)
-    if (!found) {
-      toDeleteIds.push(item.id)
-    }
-  })
-
-  for (let i = 0; i < toUpdate.length; i++) {
-    const elem = toUpdate[i]
-    await txModel.update({
-      where: {
-        id: elem.id
-      },
-      data: {
-        ...omit(elem, ['id']),
-        updatedBy: operatorId
-      }
-    })
-  }
-
-  await txModel.createMany({
-    data: toCreate.map(item => ({
-      ...item,
-      ...parentId,
-      createdBy: operatorId
-    }))
-  })
-
-  const staleRecords = existingItems.filter(item => toDeleteIds.includes(item.id))
-  if (staleRecords.length > 0) {
-    await handleStaleRecords(entityName || 'memberSrmChallengeDetail', txModel, staleRecords, { ...parentId, operatorId })
-  }
-}
-
-/**
  * Update member stats
  * @param {Object} data the member stats data
  * @param {Object} member the member
@@ -3655,42 +3475,36 @@ async function updateArrayLevelItems (updateItems, existingItems, txModel, paren
  */
 async function updateMemberStat (data, member, operatorId) {
   return prisma.$transaction(async (tx) => {
-    // update model memberStats
-    let memberStatDB = await prisma.memberStats.findFirst({
+    const existingUnifiedStats = await tx.memberStats.findFirst({
       where: {
-        userId: member.userId
-      },
-      include: {
-        develop: { include: { items: true } },
-        design: { include: { items: true } },
-        dataScience: { include: {
-          srm: { include: { challengeDetails: true, divisions: true } },
-          marathon: true
-        } },
-        copilot: true
+        userId: member.userId,
+        trackId: 'DEVELOP',
+        typeId: 'Challenge'
       }
     })
 
-    if (memberStatDB) {
-      await prisma.memberStats.update({
+    if (existingUnifiedStats) {
+      await tx.memberStats.update({
         where: {
-          id: memberStatDB.id
+          id: existingUnifiedStats.id
         },
         data: {
           challenges: data.challenges,
           wins: data.wins,
-          groupId: data.groupId,
           updatedBy: operatorId
         }
       })
     } else {
-      memberStatDB = await prisma.memberStats.create({
+      await tx.memberStats.create({
         data: {
           userId: member.userId,
+          trackId: 'DEVELOP',
+          typeId: 'Challenge',
           challenges: data.challenges,
           wins: data.wins,
-          groupId: data.groupId,
-          createdBy: operatorId
+          isPrivate: false,
+          createdBy: operatorId,
+          updatedBy: operatorId
         }
       })
     }
@@ -3699,198 +3513,6 @@ async function updateMemberStat (data, member, operatorId) {
     if (data.maxRating) {
       await updateOrCreateModel(data.maxRating, member.maxRating, tx.memberMaxRating, { userId: member.userId }, operatorId)
     }
-
-    // update DEVELOP
-    if (data.develop) {
-      const developData = pick(data.DEVELOP, ['challenges', 'wins', 'mostRecentSubmission', 'mostRecentEventDate'])
-      const newDevelop = await updateOrCreateModel(developData, memberStatDB.develop, tx.memberDevelopStats, { memberStatsId: memberStatDB.id }, operatorId)
-      if (newDevelop) {
-        memberStatDB.develop = newDevelop
-      }
-
-      // update develop subTracks
-      if (data.develop.items) {
-        const developStatsId = memberStatDB.develop.id
-        const existingItems = memberStatDB.develop.items || []
-
-        await updateArrayItems(data.develop.items, existingItems, tx.memberDevelopStatsItem, { developStatsId }, operatorId, 'memberDevelopStatsItem')
-      }
-    }
-
-    // update DESIGN
-    if (data.design) {
-      const designData = pick(data.design, ['challenges', 'wins', 'mostRecentSubmission', 'mostRecentEventDate'])
-      const newDesign = await updateOrCreateModel(designData, memberStatDB.design, tx.memberDesignStats, { memberStatsId: memberStatDB.id }, operatorId)
-      if (newDesign) {
-        memberStatDB.design = newDesign
-      }
-
-      // update design subTracks
-      if (data.design.items) {
-        const designStatsId = memberStatDB.design.id
-        const existingItems = memberStatDB.design.items || []
-
-        await updateArrayItems(data.design.items, existingItems, tx.memberDesignStatsItem, { designStatsId }, operatorId, 'memberDesignStatsItem')
-      }
-    }
-
-    // update DATA_SCIENCE
-    if (data.dataScience) {
-      const dataScienceData = pick(data.dataScience, ['challenges', 'wins', 'mostRecentEventName', 'mostRecentSubmission', 'mostRecentEventDate'])
-      const newDataScience = await updateOrCreateModel(dataScienceData, memberStatDB.dataScience, tx.memberDataScienceStats, { memberStatsId: memberStatDB.id }, operatorId)
-      if (newDataScience) {
-        memberStatDB.dataScience = newDataScience
-      }
-
-      // update data science srm
-      if (data.dataScience.srm) {
-        const dataScienceSrmData = omit(data.dataScience.srm, ['challengeDetails', 'division1', 'division2'])
-        const newDataScienceSrm = await updateOrCreateModel(dataScienceSrmData, memberStatDB.dataScience.srm, tx.memberSrmStats, { dataScienceStatsId: memberStatDB.dataScience.id }, operatorId)
-        if (newDataScienceSrm) {
-          memberStatDB.dataScience.srm = newDataScienceSrm
-        }
-
-        const srmStatsId = memberStatDB.dataScience.srm.id
-        if (data.dataScience.srm.challengeDetails) {
-          const existingItems = memberStatDB.dataScience.srm.challengeDetails || []
-
-          await updateArrayLevelItems(data.dataScience.srm.challengeDetails, existingItems, tx.memberSrmChallengeDetail, { srmStatsId }, operatorId, 'memberSrmChallengeDetail')
-        }
-
-        if (data.dataScience.srm.division1 || data.dataScience.srm.division2) {
-          const existingItems = memberStatDB.dataScience.srm.divisions || []
-
-          await updateArrayDivisionItems(data.dataScience.srm.division1, data.dataScience.srm.division2, existingItems, tx.memberSrmDivisionDetail, { srmStatsId }, operatorId, 'memberSrmDivisionDetail')
-        }
-      }
-
-      // update data science marathon
-      if (data.dataScience.marathon) {
-        await updateOrCreateModel(data.dataScience.marathon, memberStatDB.dataScience.marathon, tx.memberMarathonStats, { dataScienceStatsId: memberStatDB.dataScience.id }, operatorId)
-      }
-    }
-
-    // update COPILOT
-    if (data.copilot) {
-      await updateOrCreateModel(data.copilot, memberStatDB.copilot, tx.memberCopilotStats, { memberStatsId: memberStatDB.id }, operatorId)
-    }
-  })
-}
-
-/**
- * import distribution stats.
- */
-async function importDistributionStats () {
-  return prisma.$transaction(async (tx) => {
-    const total = await tx.memberMaxRating.count({})
-    console.log(`There are ${total} maxRating records`)
-
-    let current = 0
-    const uniqueMap = new Map()
-    const distributionStat = {
-      ratingRange0To099: 0,
-      ratingRange100To199: 0,
-      ratingRange200To299: 0,
-      ratingRange300To399: 0,
-      ratingRange400To499: 0,
-      ratingRange500To599: 0,
-      ratingRange600To699: 0,
-      ratingRange700To799: 0,
-      ratingRange800To899: 0,
-      ratingRange900To999: 0,
-      ratingRange1000To1099: 0,
-      ratingRange1100To1199: 0,
-      ratingRange1200To1299: 0,
-      ratingRange1300To1399: 0,
-      ratingRange1400To1499: 0,
-      ratingRange1500To1599: 0,
-      ratingRange1600To1699: 0,
-      ratingRange1700To1799: 0,
-      ratingRange1800To1899: 0,
-      ratingRange1900To1999: 0,
-      ratingRange2000To2099: 0,
-      ratingRange2100To2199: 0,
-      ratingRange2200To2299: 0,
-      ratingRange2300To2399: 0,
-      ratingRange2400To2499: 0,
-      ratingRange2500To2599: 0,
-      ratingRange2600To2699: 0,
-      ratingRange2700To2799: 0,
-      ratingRange2800To2899: 0,
-      ratingRange2900To2999: 0,
-      ratingRange3000To3099: 0,
-      ratingRange3100To3199: 0,
-      ratingRange3200To3299: 0,
-      ratingRange3300To3399: 0,
-      ratingRange3400To3499: 0,
-      ratingRange3500To3599: 0,
-      ratingRange3600To3699: 0,
-      ratingRange3700To3799: 0,
-      ratingRange3800To3899: 0,
-      ratingRange3900To3999: 0
-    }
-    const maxDistributionBucket = 39
-
-    while (current <= total) {
-      const records = await tx.memberMaxRating.findMany({
-        where: {},
-        orderBy: { id: 'asc' },
-        take: BATCH_SIZE,
-        skip: current
-      })
-      console.log(`Counting ${current} maxRating record`)
-
-      records.forEach(record => {
-        const mapKey = record.track.toUpperCase() + '-' + record.subTrack.toUpperCase()
-        let distributionValue
-        if (uniqueMap.has(mapKey)) {
-          distributionValue = uniqueMap.get(mapKey)
-        } else {
-          distributionValue = cloneDeep(distributionStat)
-        }
-
-        const idxValRaw = Math.floor(record.rating / 100)
-        const idxVal = Math.max(0, Math.min(idxValRaw, maxDistributionBucket))
-        const ratingKey = idxVal === 0 ? 'ratingRange0To099' : `ratingRange${idxVal}00To${idxVal}99`
-        distributionValue[ratingKey] = (distributionValue[ratingKey] ?? 0) + 1
-        uniqueMap.set(mapKey, distributionValue)
-      })
-
-      current += BATCH_SIZE
-    }
-
-    if (uniqueMap.size > 0) {
-      for (const [key, value] of uniqueMap.entries()) {
-        const [track, subTrack] = key.split('-')
-        const createData = {
-          ...value,
-          track,
-          subTrack,
-          createdBy: CREATED_BY
-        }
-        const updateData = {
-          ...value,
-          updatedBy: CREATED_BY
-        }
-
-        await executeWrite('distributionStats.upsert', () => tx.distributionStats.upsert({
-          where: {
-            track_subTrack: {
-              track,
-              subTrack
-            }
-          },
-          create: createData,
-          update: updateData
-        }), {
-          track,
-          subTrack,
-          step: migrationRuntimeState.step
-        })
-      }
-    }
-
-    console.log(`Finished counted ${uniqueMap.size} distributionStats records\n`)
   })
 }
 
@@ -3970,16 +3592,6 @@ async function runMigrationStep (step, dateFilter, askQuestion) {
         const executed = await withDestructiveGuard({ step, askQuestion, description: 'Member stats cleanup (step 3)' }, async () => {
           console.log('Clearing member stats data...')
           const cleanupContext = { ...logContext, operation: 'pre-import-clear' }
-          await executeWrite('memberCopilotStats.deleteMany', () => prisma.memberCopilotStats.deleteMany(), cleanupContext)
-          await executeWrite('memberMarathonStats.deleteMany', () => prisma.memberMarathonStats.deleteMany(), cleanupContext)
-          await executeWrite('memberDesignStatsItem.deleteMany', () => prisma.memberDesignStatsItem.deleteMany(), cleanupContext)
-          await executeWrite('memberDesignStats.deleteMany', () => prisma.memberDesignStats.deleteMany(), cleanupContext)
-          await executeWrite('memberDevelopStatsItem.deleteMany', () => prisma.memberDevelopStatsItem.deleteMany(), cleanupContext)
-          await executeWrite('memberDevelopStats.deleteMany', () => prisma.memberDevelopStats.deleteMany(), cleanupContext)
-          await executeWrite('memberSrmChallengeDetail.deleteMany', () => prisma.memberSrmChallengeDetail.deleteMany(), cleanupContext)
-          await executeWrite('memberSrmDivisionDetail.deleteMany', () => prisma.memberSrmDivisionDetail.deleteMany(), cleanupContext)
-          await executeWrite('memberSrmStats.deleteMany', () => prisma.memberSrmStats.deleteMany(), cleanupContext)
-          await executeWrite('memberDataScienceStats.deleteMany', () => prisma.memberDataScienceStats.deleteMany(), cleanupContext)
           await executeWrite('memberStats.deleteMany', () => prisma.memberStats.deleteMany(), cleanupContext)
         })
         if (!executed) {
@@ -3998,9 +3610,7 @@ async function runMigrationStep (step, dateFilter, askQuestion) {
         const executed = await withDestructiveGuard({ step, askQuestion, description: 'Member stats history cleanup (step 5)' }, async () => {
           console.log('Clearing member stats history data...')
           const cleanupContext = { ...logContext, operation: 'pre-import-clear' }
-          await executeWrite('memberDataScienceHistoryStats.deleteMany', () => prisma.memberDataScienceHistoryStats.deleteMany(), cleanupContext)
-          await executeWrite('memberDevelopHistoryStats.deleteMany', () => prisma.memberDevelopHistoryStats.deleteMany(), cleanupContext)
-          await executeWrite('memberHistoryStats.deleteMany', () => prisma.memberHistoryStats.deleteMany(), cleanupContext)
+          await executeWrite('memberStatsHistory.deleteMany', () => prisma.memberStatsHistory.deleteMany(), cleanupContext)
         })
         if (!executed) {
           logInfo('Retaining existing stats history for step 5 import', logContext)
@@ -4012,15 +3622,7 @@ async function runMigrationStep (step, dateFilter, askQuestion) {
         break
       }
       case '6': {
-        const executed = await withDestructiveGuard({ step, askQuestion, description: 'Distribution stats cleanup (step 6)' }, async () => {
-          console.log('Clearing distribution stats data...')
-          const cleanupContext = { ...logContext, operation: 'pre-import-clear' }
-          await executeWrite('distributionStats.deleteMany', () => prisma.distributionStats.deleteMany(), cleanupContext)
-        })
-        if (!executed) {
-          logInfo('Retaining existing distribution stats; incoming data will be merged', logContext)
-        }
-        await importDistributionStats()
+        logInfo('Skipping step 6 because distributionStats table has been removed', logContext)
         break
       }
       case '7': {
@@ -4114,8 +3716,8 @@ async function main () {
     await runMigrationStep(selectedStep, dateFilter, askQuestion)
     console.log('Script is finished.')
   } catch (err) {
-    logError('Migration step failed', { step: selectedStep, error: err?.message })
-    const label = selectedStep ?? 'unknown'
+    logError('Migration step failed', { step: selectedStep, error: err && err.message })
+    const label = isNil(selectedStep) ? 'unknown' : selectedStep
     console.error(`Migration step ${label} failed: ${err.message}`)
     process.exitCode = 1
   } finally {
@@ -4129,5 +3731,6 @@ if (require.main === module) {
 
 module.exports = {
   fixMemberUpdateData,
-  updateMembersWithTraitsAndSkills
+  updateMembersWithTraitsAndSkills,
+  resolveMaxRatingColor
 }
