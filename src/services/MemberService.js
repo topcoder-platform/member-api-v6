@@ -1783,29 +1783,32 @@ async function aggregatePDFData (currentUser, handle) {
   // Fetch skills from standardized-skills-api
   const skills = await getMemberSkills(memberData.userId)
 
-  // Separate skills by display mode and verification status
+  // Principal skills: same as before (verified / not verified lists)
   const principalSkills = { verified: [], notVerified: [] }
-  const additionalSkills = { verified: [], notVerified: [] }
-
   skills.forEach(skill => {
-    const isPrincipal = _.get(skill, 'displayMode.name') === 'principal'
+    if (_.get(skill, 'displayMode.name') !== 'principal') return
     const isVerified = _.some(_.get(skill, 'levels', []), level => level.name === 'verified')
     const skillName = skill.name
-
-    if (isPrincipal) {
-      if (isVerified) {
-        principalSkills.verified.push(skillName)
-      } else {
-        principalSkills.notVerified.push(skillName)
-      }
+    if (isVerified) {
+      principalSkills.verified.push(skillName)
     } else {
-      if (isVerified) {
-        additionalSkills.verified.push(skillName)
-      } else {
-        additionalSkills.notVerified.push(skillName)
-      }
+      principalSkills.notVerified.push(skillName)
     }
   })
+
+  // Additional skills: group by category, sort by name, take up to limit per category (env PDF_SKILLS_PER_CATEGORY, default 5)
+  const additionalSkills = skills.filter(skill => _.get(skill, 'displayMode.name') !== 'principal')
+  const skillsPerCategoryLimit = Math.max(1, parseInt(config.PDF_SKILLS_PER_CATEGORY, 10) || 5)
+  const categoryKey = (skill) => (skill.category && skill.category.name) ? skill.category.name : 'Other'
+  const byCategory = _.groupBy(additionalSkills, categoryKey)
+  const skillsByCategory = _.map(byCategory, (skillList, categoryName) => {
+    const names = _.map(skillList, 'name')
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .slice(0, skillsPerCategoryLimit)
+    return { categoryName, skills: names }
+  }).filter(item => item.skills.length > 0)
+  skillsByCategory.sort((a, b) => a.categoryName.localeCompare(b.categoryName, undefined, { sensitivity: 'base' }))
 
   const specialRoles = []
   const roleMap = {
@@ -1913,10 +1916,8 @@ async function aggregatePDFData (currentUser, handle) {
       shortBio: shortBio
     },
     // Skills
-    skills: {
-      principal: principalSkills,
-      additional: additionalSkills
-    },
+    skills: { principal: principalSkills },
+    skillsByCategory,
     // Topcoder activity
     topcoderActivity: {
       specialRole: specialRoles.length > 0 ? `Topcoder Special Role: ${specialRoles.join(', ')}` : null,
