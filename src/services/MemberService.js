@@ -538,8 +538,13 @@ async function getProfileCompleteness (currentUser, handle, query) {
     }
 
     if (item.traitId === 'personalization' && item.traits.data.length > 0 && !data.engagementAvailability) {
-      const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork'));
-      if (openToWorkTrait && typeof openToWorkTrait.availability === 'boolean' && openToWorkTrait.preferredRoles && openToWorkTrait.preferredRoles.length) {
+      const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork')) || {};
+      const openToWorkData = openToWorkTrait.openToWork || {};
+      
+      if (openToWorkData && (
+        !openToWorkData.availability ||
+        (openToWorkData.preferredRoles && openToWorkData.preferredRoles.length)
+      )) {
         completeItems += 1
         data.engagementAvailability = true
         data.engagementAvailabilityLastUpdateDate = new Date(item.updatedAt).toISOString()
