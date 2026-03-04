@@ -489,7 +489,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs,availableForGigsLastUpdateDate,lastProfileConfirmationDate,updatedAt,addresses' }
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,lastProfileConfirmationDate,updatedAt,addresses' }
   const member = await getMemberData(handle, memberFields)
 
   // Used for calculating the percentComplete
@@ -508,7 +508,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   // TODO: Turn this back on once we have verification flow implemented elsewhere
   // data.verified = false
   data.skills = false
-  data.gigAvailability = false
+  data.engagementAvailability = false
   data.bio = false
   data.workHistory = false
   data.education = false
@@ -517,18 +517,12 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const totalItems = Object.keys(data).length
 
   data.skillsLastUpdateDate = undefined
-  data.gigAvailabilityLastUpdateDate = undefined
+  data.engagementAvailabilityLastUpdateDate = undefined
   data.workHistoryLastUpdateDate = undefined
   data.educationLastUpdateDate = undefined
   data.locationLastUpdateDate = undefined
   data.profileLastUpdateDate = new Date(member.updatedAt).toISOString()
   data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined
-
-  if (member.availableForGigs != null) {
-    completeItems += 1
-    data.gigAvailability = true
-    data.gigAvailabilityLastUpdateDate = member.availableForGigsLastUpdateDate || undefined
-  }
 
   _.forEach(memberTraits, (item) => {
     if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
@@ -542,6 +536,15 @@ async function getProfileCompleteness (currentUser, handle, query) {
       data.workHistory = true
       data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
+
+    if (item.traitId === 'personalization' && item.traits.data.length > 0 && !data.engagementAvailability) {
+      const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork'));
+      if (openToWorkTrait && typeof openToWorkTrait.availability === 'boolean' && openToWorkTrait.preferredRoles && openToWorkTrait.preferredRoles.length) {
+        completeItems += 1
+        data.engagementAvailability = true
+        data.engagementAvailabilityLastUpdateDate = new Date(item.updatedAt).toISOString()
+      }
+    }
   })
   // Push on the incomplete traits for picking a random toast to show
   if (!data.education) {
@@ -550,8 +553,8 @@ async function getProfileCompleteness (currentUser, handle, query) {
   if (!data.workHistory) {
     showToast.push('workHistory')
   }
-  if (!data.gigAvailability) {
-    showToast.push('gigAvailability')
+  if (!data.engagementAvailability) {
+    showToast.push('engagementAvailability')
   }
 
   // TODO: Do we use the short bio or the "description" field of the member object?
