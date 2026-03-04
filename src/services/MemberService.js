@@ -537,7 +537,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
       data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
 
-    if (item.traitId === 'personalization' && item.traits.data.length > 1 && !data.engagementAvailability) {
+    if (item.traitId === 'personalization' && item.traits.data.length > 0 && !data.engagementAvailability) {
       const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork'));
       if (openToWorkTrait && typeof openToWorkTrait.availability === 'boolean' && openToWorkTrait.preferredRoles && openToWorkTrait.preferredRoles.length) {
         completeItems += 1
