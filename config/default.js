@@ -158,5 +158,6 @@ module.exports = {
     API_KEY: process.env.MAILCHIMP_API_KEY,
     SERVER_PREFIX: process.env.MAILCHIMP_SERVER_PREFIX,
     LIST_FETCH_COUNT: process.env.MAILCHIMP_LIST_FETCH_COUNT ? Number(process.env.MAILCHIMP_LIST_FETCH_COUNT) : 1000
-  }
+  },
+  PDF_SKILLS_PER_CATEGORY: process.env.PDF_SKILLS_PER_CATEGORY ? Number(process.env.PDF_SKILLS_PER_CATEGORY) : 5,
 }
