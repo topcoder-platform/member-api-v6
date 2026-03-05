@@ -539,7 +539,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
     if (item.traitId === 'personalization' && item.traits.data.length > 0 && !data.engagementAvailability) {
       const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork')) || {};
-      const openToWorkData = openToWorkTrait.openToWork || {};
+      const openToWorkData = openToWorkTrait.openToWork;
       
       if (openToWorkData && (
         !openToWorkData.availability ||
