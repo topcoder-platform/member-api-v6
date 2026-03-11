@@ -583,7 +583,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   // 1 principal skill and 1 additional skill
   if (member.skills && member.skills.length > 0) {
     const principalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') === 'principal').length
-    const additionalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') !== 'principal').length
+    const additionalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') !== 'additional').length
 
     if (principalCount >= 1 && additionalCount >= 1) {
       completeItems += 1

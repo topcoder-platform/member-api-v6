@@ -384,7 +384,7 @@ function buildProfileTemplate (pdfData) {
   )
 
   // Biography Section
-  const biography = member.description || (basicInfo && basicInfo.shortBio)
+  const biography = member.description
   if (biography) {
     children.push(
       React.createElement(
