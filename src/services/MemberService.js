@@ -579,15 +579,23 @@ async function getProfileCompleteness (currentUser, handle, query) {
   //   showToast.push("verified")
   // }
 
-  // Must have at least 3 skills entered
-  if (member.skills && member.skills.length >= 3) {
-    completeItems += 1
-    data.skills = true
+  // Skills section is complete only when member has at least
+  // 1 principal skill and 1 additional skill
+  if (member.skills && member.skills.length > 0) {
+    const principalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') === 'principal').length
+    const additionalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') !== 'additional').length
 
-    const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
-      Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
-    ), new Date(0))
-    data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
+    if (principalCount >= 1 && additionalCount >= 1) {
+      completeItems += 1
+      data.skills = true
+
+      const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
+        Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
+      ), new Date(0))
+      data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
+    } else {
+      showToast.push('skills')
+    }
   } else {
     showToast.push('skills')
   }
