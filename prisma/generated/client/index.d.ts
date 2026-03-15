@@ -10594,8 +10594,8 @@ export namespace Prisma {
   export type MemberStatsGroupByOutputType = {
     id: bigint
     userId: bigint
-    trackId: string
-    typeId: string
+    trackId: string | null
+    typeId: string | null
     challenges: number | null
     wins: number | null
     mostRecentSubmission: Date | null
@@ -10772,8 +10772,8 @@ export namespace Prisma {
     scalars: $Extensions.GetPayloadResult<{
       id: bigint
       userId: bigint
-      trackId: string
-      typeId: string
+      trackId: string | null
+      typeId: string | null
       challenges: number | null
       wins: number | null
       mostRecentSubmission: Date | null
@@ -25971,8 +25971,8 @@ export namespace Prisma {
     NOT?: memberStatsWhereInput | memberStatsWhereInput[]
     id?: BigIntFilter<"memberStats"> | bigint | number
     userId?: BigIntFilter<"memberStats"> | bigint | number
-    trackId?: StringFilter<"memberStats"> | string
-    typeId?: StringFilter<"memberStats"> | string
+    trackId?: StringNullableFilter<"memberStats"> | string | null
+    typeId?: StringNullableFilter<"memberStats"> | string | null
     challenges?: IntNullableFilter<"memberStats"> | number | null
     wins?: IntNullableFilter<"memberStats"> | number | null
     mostRecentSubmission?: DateTimeNullableFilter<"memberStats"> | Date | string | null
@@ -26000,8 +26000,8 @@ export namespace Prisma {
   export type memberStatsOrderByWithRelationInput = {
     id?: SortOrder
     userId?: SortOrder
-    trackId?: SortOrder
-    typeId?: SortOrder
+    trackId?: SortOrderInput | SortOrder
+    typeId?: SortOrderInput | SortOrder
     challenges?: SortOrderInput | SortOrder
     wins?: SortOrderInput | SortOrder
     mostRecentSubmission?: SortOrderInput | SortOrder
@@ -26033,8 +26033,8 @@ export namespace Prisma {
     OR?: memberStatsWhereInput[]
     NOT?: memberStatsWhereInput | memberStatsWhereInput[]
     userId?: BigIntFilter<"memberStats"> | bigint | number
-    trackId?: StringFilter<"memberStats"> | string
-    typeId?: StringFilter<"memberStats"> | string
+    trackId?: StringNullableFilter<"memberStats"> | string | null
+    typeId?: StringNullableFilter<"memberStats"> | string | null
     challenges?: IntNullableFilter<"memberStats"> | number | null
     wins?: IntNullableFilter<"memberStats"> | number | null
     mostRecentSubmission?: DateTimeNullableFilter<"memberStats"> | Date | string | null
@@ -26062,8 +26062,8 @@ export namespace Prisma {
   export type memberStatsOrderByWithAggregationInput = {
     id?: SortOrder
     userId?: SortOrder
-    trackId?: SortOrder
-    typeId?: SortOrder
+    trackId?: SortOrderInput | SortOrder
+    typeId?: SortOrderInput | SortOrder
     challenges?: SortOrderInput | SortOrder
     wins?: SortOrderInput | SortOrder
     mostRecentSubmission?: SortOrderInput | SortOrder
@@ -26098,8 +26098,8 @@ export namespace Prisma {
     NOT?: memberStatsScalarWhereWithAggregatesInput | memberStatsScalarWhereWithAggregatesInput[]
     id?: BigIntWithAggregatesFilter<"memberStats"> | bigint | number
     userId?: BigIntWithAggregatesFilter<"memberStats"> | bigint | number
-    trackId?: StringWithAggregatesFilter<"memberStats"> | string
-    typeId?: StringWithAggregatesFilter<"memberStats"> | string
+    trackId?: StringNullableWithAggregatesFilter<"memberStats"> | string | null
+    typeId?: StringNullableWithAggregatesFilter<"memberStats"> | string | null
     challenges?: IntNullableWithAggregatesFilter<"memberStats"> | number | null
     wins?: IntNullableWithAggregatesFilter<"memberStats"> | number | null
     mostRecentSubmission?: DateTimeNullableWithAggregatesFilter<"memberStats"> | Date | string | null
@@ -27853,8 +27853,8 @@ export namespace Prisma {
 
   export type memberStatsCreateInput = {
     id?: bigint | number
-    trackId: string
-    typeId: string
+    trackId?: string | null
+    typeId?: string | null
     challenges?: number | null
     wins?: number | null
     mostRecentSubmission?: Date | string | null
@@ -27882,8 +27882,8 @@ export namespace Prisma {
   export type memberStatsUncheckedCreateInput = {
     id?: bigint | number
     userId: bigint | number
-    trackId: string
-    typeId: string
+    trackId?: string | null
+    typeId?: string | null
     challenges?: number | null
     wins?: number | null
     mostRecentSubmission?: Date | string | null
@@ -27909,8 +27909,8 @@ export namespace Prisma {
 
   export type memberStatsUpdateInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
-    trackId?: StringFieldUpdateOperationsInput | string
-    typeId?: StringFieldUpdateOperationsInput | string
+    trackId?: NullableStringFieldUpdateOperationsInput | string | null
+    typeId?: NullableStringFieldUpdateOperationsInput | string | null
     challenges?: NullableIntFieldUpdateOperationsInput | number | null
     wins?: NullableIntFieldUpdateOperationsInput | number | null
     mostRecentSubmission?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -27938,8 +27938,8 @@ export namespace Prisma {
   export type memberStatsUncheckedUpdateInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     userId?: BigIntFieldUpdateOperationsInput | bigint | number
-    trackId?: StringFieldUpdateOperationsInput | string
-    typeId?: StringFieldUpdateOperationsInput | string
+    trackId?: NullableStringFieldUpdateOperationsInput | string | null
+    typeId?: NullableStringFieldUpdateOperationsInput | string | null
     challenges?: NullableIntFieldUpdateOperationsInput | number | null
     wins?: NullableIntFieldUpdateOperationsInput | number | null
     mostRecentSubmission?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -27966,8 +27966,8 @@ export namespace Prisma {
   export type memberStatsCreateManyInput = {
     id?: bigint | number
     userId: bigint | number
-    trackId: string
-    typeId: string
+    trackId?: string | null
+    typeId?: string | null
     challenges?: number | null
     wins?: number | null
     mostRecentSubmission?: Date | string | null
@@ -27993,8 +27993,8 @@ export namespace Prisma {
 
   export type memberStatsUpdateManyMutationInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
-    trackId?: StringFieldUpdateOperationsInput | string
-    typeId?: StringFieldUpdateOperationsInput | string
+    trackId?: NullableStringFieldUpdateOperationsInput | string | null
+    typeId?: NullableStringFieldUpdateOperationsInput | string | null
     challenges?: NullableIntFieldUpdateOperationsInput | number | null
     wins?: NullableIntFieldUpdateOperationsInput | number | null
     mostRecentSubmission?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -28021,8 +28021,8 @@ export namespace Prisma {
   export type memberStatsUncheckedUpdateManyInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     userId?: BigIntFieldUpdateOperationsInput | bigint | number
-    trackId?: StringFieldUpdateOperationsInput | string
-    typeId?: StringFieldUpdateOperationsInput | string
+    trackId?: NullableStringFieldUpdateOperationsInput | string | null
+    typeId?: NullableStringFieldUpdateOperationsInput | string | null
     challenges?: NullableIntFieldUpdateOperationsInput | number | null
     wins?: NullableIntFieldUpdateOperationsInput | number | null
     mostRecentSubmission?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -32399,8 +32399,8 @@ export namespace Prisma {
 
   export type memberStatsCreateWithoutMemberInput = {
     id?: bigint | number
-    trackId: string
-    typeId: string
+    trackId?: string | null
+    typeId?: string | null
     challenges?: number | null
     wins?: number | null
     mostRecentSubmission?: Date | string | null
@@ -32426,8 +32426,8 @@ export namespace Prisma {
 
   export type memberStatsUncheckedCreateWithoutMemberInput = {
     id?: bigint | number
-    trackId: string
-    typeId: string
+    trackId?: string | null
+    typeId?: string | null
     challenges?: number | null
     wins?: number | null
     mostRecentSubmission?: Date | string | null
@@ -32708,8 +32708,8 @@ export namespace Prisma {
     NOT?: memberStatsScalarWhereInput | memberStatsScalarWhereInput[]
     id?: BigIntFilter<"memberStats"> | bigint | number
     userId?: BigIntFilter<"memberStats"> | bigint | number
-    trackId?: StringFilter<"memberStats"> | string
-    typeId?: StringFilter<"memberStats"> | string
+    trackId?: StringNullableFilter<"memberStats"> | string | null
+    typeId?: StringNullableFilter<"memberStats"> | string | null
     challenges?: IntNullableFilter<"memberStats"> | number | null
     wins?: IntNullableFilter<"memberStats"> | number | null
     mostRecentSubmission?: DateTimeNullableFilter<"memberStats"> | Date | string | null
@@ -35827,8 +35827,8 @@ export namespace Prisma {
 
   export type memberStatsCreateManyMemberInput = {
     id?: bigint | number
-    trackId: string
-    typeId: string
+    trackId?: string | null
+    typeId?: string | null
     challenges?: number | null
     wins?: number | null
     mostRecentSubmission?: Date | string | null
@@ -35947,8 +35947,8 @@ export namespace Prisma {
 
   export type memberStatsUpdateWithoutMemberInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
-    trackId?: StringFieldUpdateOperationsInput | string
-    typeId?: StringFieldUpdateOperationsInput | string
+    trackId?: NullableStringFieldUpdateOperationsInput | string | null
+    typeId?: NullableStringFieldUpdateOperationsInput | string | null
     challenges?: NullableIntFieldUpdateOperationsInput | number | null
     wins?: NullableIntFieldUpdateOperationsInput | number | null
     mostRecentSubmission?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -35974,8 +35974,8 @@ export namespace Prisma {
 
   export type memberStatsUncheckedUpdateWithoutMemberInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
-    trackId?: StringFieldUpdateOperationsInput | string
-    typeId?: StringFieldUpdateOperationsInput | string
+    trackId?: NullableStringFieldUpdateOperationsInput | string | null
+    typeId?: NullableStringFieldUpdateOperationsInput | string | null
     challenges?: NullableIntFieldUpdateOperationsInput | number | null
     wins?: NullableIntFieldUpdateOperationsInput | number | null
     mostRecentSubmission?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -36001,8 +36001,8 @@ export namespace Prisma {
 
   export type memberStatsUncheckedUpdateManyWithoutMemberInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
-    trackId?: StringFieldUpdateOperationsInput | string
-    typeId?: StringFieldUpdateOperationsInput | string
+    trackId?: NullableStringFieldUpdateOperationsInput | string | null
+    typeId?: NullableStringFieldUpdateOperationsInput | string | null
     challenges?: NullableIntFieldUpdateOperationsInput | number | null
     wins?: NullableIntFieldUpdateOperationsInput | number | null
     mostRecentSubmission?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null

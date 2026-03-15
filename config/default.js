@@ -22,6 +22,8 @@ module.exports = {
   VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
   IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
   CHALLENGE_DB_URL: process.env.CHALLENGE_DB_URL,
+  REVIEW_DB_URL: process.env.REVIEW_DB_URL,
+  MM_DB_URL: process.env.MM_DB_URL,
   RESOURCES_DB_URL: process.env.RESOURCES_DB_URL,
   VANILLA_DB_URL: process.env.VANILLA_DB_URL,
 
@@ -75,13 +77,15 @@ module.exports = {
   EMAIL_VERIFY_DISAGREE_URL: process.env.EMAIL_VERIFY_DISAGREE_URL ||
     'http://www.topcoder-dev.com/settings/account/changeEmail?action=cancel',
 
-  // The M2M token scopes names for Member Create, Read, Update, Delete, and All
+  // The M2M token scope names for member CRUD, stats operations, and all-access flows
   SCOPES: {
     MEMBERS: {
       CREATE: process.env.SCOPE_MEMBERS_CREATE || 'create:user_profiles',
       READ: process.env.SCOPE_MEMBERS_READ || 'read:user_profiles',
       UPDATE: process.env.SCOPE_MEMBERS_UPDATE || 'update:user_profiles',
       DELETE: process.env.SCOPE_MEMBERS_DELETE || 'delete:user_profiles',
+      STATS_REFRESH: process.env.SCOPE_STATS_REFRESH || 'refresh:member_stats',
+      STATS_RERATE: process.env.SCOPE_STATS_RERATE || 'rerate:member_stats',
       ALL: process.env.SCOPE_MEMBERS_ALL || 'all:user_profiles'
     }
   },

@@ -13,6 +13,9 @@ const { Prisma } = prismaManager
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 const prismaHelper = require('../common/prismaHelper')
+const reviewDb = require('../common/reviewDb')
+const { rerateDevTrack } = require('../ratings/developRatingEngine')
+const { rerateMmTrack } = require('../ratings/mmRatingEngine')
 
 const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', 'updatedAt',
   'createdBy', 'updatedBy']
@@ -68,6 +71,20 @@ function toOptionalDate (value) {
     return undefined
   }
   return prismaHelper.convertDate(value)
+}
+
+/**
+ * Normalize request challenge identifiers into the string form documented by the API.
+ * Numeric compatibility inputs are echoed back as strings, while omitted values remain null.
+ * @param {*} value request challenge identifier
+ * @returns {string|null} normalized challenge identifier
+ */
+function normalizeChallengeIdForResponse (value) {
+  if (_.isNil(value)) {
+    return null
+  }
+
+  return String(value)
 }
 
 function resolveTrackId (trackId) {
@@ -226,6 +243,122 @@ function buildUnifiedStatsRecordsFromPayload (payload, isPrivate, options = {}) 
 
   // Last record wins for duplicate (trackId, typeId) keys.
   return _.values(_.keyBy(records, record => `${record.trackId}::${record.typeId}`))
+}
+
+function buildStatsTrackTypeKey (trackId, typeId) {
+  return `${trackId}::${typeId}`
+}
+
+function getReviewDbClientOrThrow () {
+  if (!reviewDb) {
+    throw new Error('REVIEW_DB_URL must be configured to refresh or rerate member stats')
+  }
+
+  return reviewDb
+}
+
+async function fetchReviewChallengeResultsForMember (reviewDbClient, userId) {
+  const result = await reviewDbClient.query(
+    `
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
+      FROM "challengeResult"
+      WHERE "userId" = $1
+      ORDER BY "createdAt" ASC
+    `,
+    [userId.toString()]
+  )
+
+  return result.rows
+}
+
+async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
+  if (!challengeIds || challengeIds.length === 0) {
+    return new Map()
+  }
+
+  const challenges = await challengeClient.challenge.findMany({
+    where: {
+      id: {
+        in: challengeIds
+      }
+    },
+    select: {
+      id: true,
+      endDate: true,
+      track: {
+        select: {
+          name: true
+        }
+      },
+      type: {
+        select: {
+          name: true
+        }
+      },
+      metadata: {
+        where: {
+          name: {
+            in: ['rated', 'isRated', 'unrated']
+          }
+        },
+        select: {
+          name: true,
+          value: true
+        }
+      }
+    }
+  })
+
+  return new Map(challenges.map(challenge => [challenge.id, challenge]))
+}
+
+function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataById) {
+  const aggregateByKey = new Map()
+
+  _.forEach(reviewRows, (row) => {
+    const challenge = challengeMetadataById.get(String(row.challengeId))
+    if (!challenge || !challenge.track || !challenge.type) {
+      return
+    }
+
+    const trackId = resolveTrackId(challenge.track.name)
+    const typeId = resolveTypeId(challenge.type.name)
+    if (!trackId || !typeId) {
+      return
+    }
+
+    const key = buildStatsTrackTypeKey(trackId, typeId)
+    const existing = aggregateByKey.get(key) || {
+      trackId,
+      typeId,
+      challenges: 0,
+      wins: 0,
+      mostRecentSubmission: null,
+      mostRecentEventDate: null
+    }
+
+    existing.challenges += 1
+    if (_.toInteger(row.placement) === 1) {
+      existing.wins += 1
+    }
+
+    const submissionDate = row.createdAt ? new Date(row.createdAt) : null
+    const eventDate = challenge.endDate ? new Date(challenge.endDate) : submissionDate
+
+    if (submissionDate && !Number.isNaN(submissionDate.getTime()) &&
+      (!existing.mostRecentSubmission || submissionDate > existing.mostRecentSubmission)) {
+      existing.mostRecentSubmission = submissionDate
+    }
+
+    if (eventDate && !Number.isNaN(eventDate.getTime()) &&
+      (!existing.mostRecentEventDate || eventDate > existing.mostRecentEventDate)) {
+      existing.mostRecentEventDate = eventDate
+    }
+
+    aggregateByKey.set(key, existing)
+  })
+
+  return Array.from(aggregateByKey.values())
 }
 
 function getDistributionRangeKey (rangeStart) {
@@ -626,6 +759,7 @@ function getUniqueTrackTypePairs (records) {
  * Recompute the mostRecent marker for each affected (trackId, typeId) pair.
  * Exactly one row per pair is marked as mostRecent=true when rows exist.
  * The latest row's newRating is aligned with the current memberStats rating when available.
+ * The latest row's oldRating is aligned with the prior history event for the same pair.
  *
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId user id
@@ -669,9 +803,22 @@ async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
           rating: true
         }
       })
+      const previous = await tx.memberStatsHistory.findFirst({
+        where: {
+          userId,
+          trackId: pair.trackId,
+          typeId: pair.typeId
+        },
+        orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
+        skip: 1,
+        select: {
+          newRating: true
+        }
+      })
 
       const latestUpdateData = {
         mostRecent: true,
+        oldRating: previous ? previous.newRating : null,
         updatedBy: operatorId
       }
       if (currentStats) {
@@ -1446,6 +1593,166 @@ partiallyUpdateMemberStats.schema = {
 }
 
 /**
+ * Refresh unified memberStats aggregates for a member from review-api challenge results.
+ * Challenge metadata is resolved from challenge-api so counts and timestamps are
+ * grouped by the existing unified track/type identifiers used in memberStats.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {Object} data optional payload echoed in the summary response with a string challengeId
+ * @returns {Object} summary describing the refresh work that was completed
+ * @throws {errors.ForbiddenError} if the caller is not allowed to manage the member
+ */
+async function refreshMemberStats (currentUser, handle, data) {
+  const payload = data || {}
+  const member = await helper.getMemberByHandle(handle)
+  if (!helper.canManageMember(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to update the member stats.')
+  }
+
+  const operatorId = currentUser.userId || currentUser.sub
+  const reviewDbClient = getReviewDbClientOrThrow()
+  const challengeClient = prismaManager.getChallengesClient()
+  const reviewRows = await fetchReviewChallengeResultsForMember(reviewDbClient, member.userId)
+
+  if (reviewRows.length === 0) {
+    return {
+      handle,
+      refreshed: true,
+      challengeId: normalizeChallengeIdForResponse(payload.challengeId),
+      challengeResultsProcessed: 0,
+      statsUpdated: 0
+    }
+  }
+
+  const challengeMetadataById = await fetchChallengeMetadataMap(
+    challengeClient,
+    _.uniq(_.map(reviewRows, row => String(row.challengeId)))
+  )
+  const aggregateRows = buildAggregatedStatsFromReviewResults(reviewRows, challengeMetadataById)
+
+  if (aggregateRows.length > 0) {
+    await prisma.$transaction(async (tx) => {
+      for (const aggregateRow of aggregateRows) {
+        await tx.memberStats.upsert({
+          where: {
+            userId_trackId_typeId: {
+              userId: member.userId,
+              trackId: aggregateRow.trackId,
+              typeId: aggregateRow.typeId
+            }
+          },
+          create: {
+            userId: member.userId,
+            trackId: aggregateRow.trackId,
+            typeId: aggregateRow.typeId,
+            challenges: aggregateRow.challenges,
+            wins: aggregateRow.wins,
+            mostRecentSubmission: aggregateRow.mostRecentSubmission,
+            mostRecentEventDate: aggregateRow.mostRecentEventDate,
+            isPrivate: false,
+            createdBy: operatorId,
+            updatedBy: operatorId
+          },
+          update: {
+            challenges: aggregateRow.challenges,
+            wins: aggregateRow.wins,
+            mostRecentSubmission: aggregateRow.mostRecentSubmission,
+            mostRecentEventDate: aggregateRow.mostRecentEventDate,
+            isPrivate: false,
+            updatedBy: operatorId
+          }
+        })
+      }
+
+      await refreshMostRecentHistoryFlags(tx, member.userId, aggregateRows, operatorId)
+    })
+  }
+
+  return {
+    handle,
+    refreshed: true,
+    challengeId: normalizeChallengeIdForResponse(payload.challengeId),
+    challengeResultsProcessed: reviewRows.length,
+    statsUpdated: aggregateRows.length
+  }
+}
+
+refreshMemberStats.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required(),
+  data: Joi.object().keys({
+    challengeId: Joi.alternatives().try(Joi.string().uuid(), Joi.number().integer().strict())
+  })
+}
+
+/**
+ * Trigger a DEVELOPMENT / Challenge or DATA_SCIENCE / MARATHON_MATCH re-rating pass
+ * beginning with the supplied challenge. The relevant review-api results are
+ * reprocessed in chronological order and persisted into the existing unified
+ * rating tables for the member.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} handle the member handle
+ * @param {Object} data the rerate payload whose challengeId is echoed back as a string
+ * @returns {Object} summary describing the rerate work that was completed
+ * @throws {errors.ForbiddenError} if the caller is not allowed to manage the member
+ */
+async function rerateMemberStats (currentUser, handle, data) {
+  const payload = data || {}
+  const member = await helper.getMemberByHandle(handle)
+  if (!helper.canManageMember(currentUser, member)) {
+    throw new errors.ForbiddenError('You are not allowed to update the member stats.')
+  }
+
+  const trackId = resolveTrackId(payload.trackId || TRACK_NAMES.DEVELOP)
+  const typeId = resolveTypeId(payload.typeId || TYPE_NAMES.CHALLENGE)
+  const challengeClient = prismaManager.getChallengesClient()
+  const reviewDbClient = getReviewDbClientOrThrow()
+
+  let result
+  if (trackId === TRACK_NAMES.DEVELOP && typeId === TYPE_NAMES.CHALLENGE) {
+    result = await rerateDevTrack(
+      prisma,
+      challengeClient,
+      reviewDbClient,
+      member.userId,
+      payload.challengeId
+    )
+  } else if (trackId === TRACK_NAMES.DATA_SCIENCE && typeId === TYPE_NAMES.MARATHON_MATCH) {
+    result = await rerateMmTrack(
+      prisma,
+      challengeClient,
+      prismaManager.getMmClient(),
+      reviewDbClient,
+      member.userId,
+      payload.challengeId
+    )
+  } else {
+    throw new errors.BadRequestError('Only DEVELOP / Challenge and DATA_SCIENCE / MARATHON_MATCH rerates are currently supported.')
+  }
+
+  return {
+    handle,
+    rerated: true,
+    challengeId: normalizeChallengeIdForResponse(payload.challengeId),
+    trackId,
+    typeId,
+    challengesRerated: Math.max(result.challengesProcessed - 1, 0),
+    challengesProcessed: result.challengesProcessed,
+    ratingsUpdated: result.ratingsUpdated
+  }
+}
+
+rerateMemberStats.schema = {
+  currentUser: Joi.any(),
+  handle: Joi.string().required(),
+  data: Joi.object().keys({
+    challengeId: Joi.alternatives().try(Joi.string().uuid(), Joi.number().integer().strict()).required(),
+    trackId: Joi.string().valid(TRACK_NAMES.DEVELOP, TRACK_NAMES.DATA_SCIENCE).insensitive(),
+    typeId: Joi.string().valid(TYPE_NAMES.CHALLENGE, TYPE_NAMES.MARATHON_MATCH).insensitive()
+  }).required()
+}
+
+/**
  * Get member skills.
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
@@ -1701,6 +2008,8 @@ module.exports = {
   getMemberStats,
   createMemberStats,
   partiallyUpdateMemberStats,
+  refreshMemberStats,
+  rerateMemberStats,
   getMemberSkills,
   createMemberSkills,
   partiallyUpdateMemberSkills,
