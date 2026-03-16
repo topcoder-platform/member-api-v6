@@ -154,5 +154,6 @@ async function stripUnauthorizedCopilotEmails (currentUser, members) {
 module.exports = {
   shouldLimitCopilotEmailAccess,
   canCopilotAccessMemberEmail,
+  hasTalentManagerRole,
   stripUnauthorizedCopilotEmails
 }
