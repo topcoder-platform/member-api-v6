@@ -163,6 +163,7 @@ function hasSensitiveDataRole (authUser) {
   const allowedRolesLower = constants.SENSITIVE_DATA_ROLES.map(r => r.toLowerCase())
   logger.debug(`Checking if user ${authUser.handle} has sensitive data role: ${JSON.stringify(authUser.roles)}`)
   logger.debug(`Allowed roles: ${JSON.stringify(allowedRolesLower)}`)
+  logger.debug(`Result: ${authUser.roles.some(r => allowedRolesLower.includes(r.toLowerCase()))}`)
   return authUser.roles.some(r => allowedRolesLower.includes(r.toLowerCase()))
 }
 
