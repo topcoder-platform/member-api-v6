@@ -14,6 +14,14 @@ function hasCopilotRole (currentUser) {
   return helper.checkIfExists(['copilot'], currentUser.roles)
 }
 
+function hasTalentManagerRole (currentUser) {
+  if (!currentUser || !currentUser.roles) {
+    return false
+  }
+
+  return helper.checkIfExists(['talent manager'], currentUser.roles)
+}
+
 function shouldLimitCopilotEmailAccess (currentUser) {
   if (!currentUser || currentUser.isMachine) {
     return false
@@ -23,7 +31,7 @@ function shouldLimitCopilotEmailAccess (currentUser) {
     return false
   }
 
-  return hasCopilotRole(currentUser)
+  return hasCopilotRole(currentUser) || hasTalentManagerRole(currentUser)
 }
 
 function normalizeUserId (userId) {
@@ -101,7 +109,7 @@ async function getCopilotAccessibleMemberIdSet (currentUser, memberUserIds) {
   return accessibleMemberIds
 }
 
-async function canCopilotAccessMemberEmail (currentUser, memberUserId) {
+async function canAccessMemberEmail (currentUser, memberUserId) {
   if (!shouldLimitCopilotEmailAccess(currentUser)) {
     return true
   }
@@ -145,6 +153,6 @@ async function stripUnauthorizedCopilotEmails (currentUser, members) {
 
 module.exports = {
   shouldLimitCopilotEmailAccess,
-  canCopilotAccessMemberEmail,
+  canAccessMemberEmail,
   stripUnauthorizedCopilotEmails
 }
