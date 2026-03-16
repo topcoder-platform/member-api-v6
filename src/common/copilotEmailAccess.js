@@ -31,7 +31,7 @@ function shouldLimitCopilotEmailAccess (currentUser) {
     return false
   }
 
-  return hasCopilotRole(currentUser) || hasTalentManagerRole(currentUser)
+  return hasCopilotRole(currentUser)
 }
 
 function normalizeUserId (userId) {
@@ -109,7 +109,7 @@ async function getCopilotAccessibleMemberIdSet (currentUser, memberUserIds) {
   return accessibleMemberIds
 }
 
-async function canAccessMemberEmail (currentUser, memberUserId) {
+async function canCopilotAccessMemberEmail (currentUser, memberUserId) {
   if (!shouldLimitCopilotEmailAccess(currentUser)) {
     return true
   }
@@ -153,6 +153,6 @@ async function stripUnauthorizedCopilotEmails (currentUser, members) {
 
 module.exports = {
   shouldLimitCopilotEmailAccess,
-  canAccessMemberEmail,
+  canCopilotAccessMemberEmail,
   stripUnauthorizedCopilotEmails
 }

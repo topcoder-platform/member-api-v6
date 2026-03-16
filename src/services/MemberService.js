@@ -349,11 +349,12 @@ async function getMember (currentUser, handle, query) {
 
   // Copilots can only see member email when they share at least one challenge resource.
   if (response.email !== undefined) {
-    const canAccessMemberEmail = await copilotEmailAccess.canAccessMemberEmail(
+    const canAccessMemberEmail = await copilotEmailAccess.canCopilotAccessMemberEmail(
       currentUser,
       member.userId
     )
-    if (!canAccessMemberEmail) {
+    const isTalentManager = helper.hasTalentManagerRole(currentUser)
+    if (!canAccessMemberEmail && !isTalentManager) {
       delete response.email
     }
   }
