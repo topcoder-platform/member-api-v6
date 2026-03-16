@@ -353,7 +353,7 @@ async function getMember (currentUser, handle, query) {
       currentUser,
       member.userId
     )
-    const isTalentManager = helper.hasTalentManagerRole(currentUser)
+    const isTalentManager = copilotEmailAccess.hasTalentManagerRole(currentUser)
     if (!canAccessMemberEmail && !isTalentManager) {
       delete response.email
     }
