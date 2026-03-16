@@ -47,6 +47,7 @@ require('dotenv').config()
 
 const { getMembersClient, getChallengesClient } = require('../common/prisma')
 const reviewDb = require('../common/reviewDb')
+const { assertChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 
 const DEFAULT_ACTOR = process.env.UPDATED_BY || process.env.CREATED_BY || 'stats-migration'
@@ -319,11 +320,11 @@ async function initializeLegacyLookupCache (challengesClient) {
 
   const [trackRows, typeRows] = await Promise.all([
     challengesClient.$queryRaw`
-      SELECT "id", "name", "abbreviation"
+      SELECT "id", "name", "abbreviation", "legacyId"
       FROM "ChallengeTrack"
     `,
     challengesClient.$queryRaw`
-      SELECT "id", "name", "abbreviation", "isTask"
+      SELECT "id", "name", "abbreviation", "legacyId", "isTask"
       FROM "ChallengeType"
     `
   ])
@@ -334,6 +335,7 @@ async function initializeLegacyLookupCache (challengesClient) {
   trackRows.forEach((row) => {
     addLookupEntry(trackIdsByName, row.name, row.id)
     addLookupEntry(trackIdsByName, row.abbreviation, row.id)
+    addLookupEntry(trackIdsByName, row.legacyId, row.id)
     addLookupEntry(trackIdsByName, resolveTrackName(row.name), row.id)
     addLookupEntry(trackIdsByName, resolveTrackName(row.abbreviation), row.id)
   })
@@ -341,6 +343,7 @@ async function initializeLegacyLookupCache (challengesClient) {
   typeRows.forEach((row) => {
     addLookupEntry(typeIdsByName, row.name, row.id)
     addLookupEntry(typeIdsByName, row.abbreviation, row.id)
+    addLookupEntry(typeIdsByName, row.legacyId, row.id)
     addLookupEntry(typeIdsByName, resolveTypeName(row.name), row.id)
     addLookupEntry(typeIdsByName, resolveTypeName(row.abbreviation), row.id)
 
@@ -1410,6 +1413,10 @@ async function main () {
 
     if (!options.csvOnly && (!options.skipRatings || !options.skipHistory)) {
       await initializeLegacyLookupCache(challengesClient)
+    }
+
+    if (!options.csvOnly && !options.skipRatings) {
+      await assertChallengeResultRelation(reviewDb)
     }
 
     const userIds = await getUserIds(challengesClient, options)

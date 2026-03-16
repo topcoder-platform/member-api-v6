@@ -14,6 +14,7 @@ const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
 const prismaHelper = require('../common/prismaHelper')
 const reviewDb = require('../common/reviewDb')
+const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const { rerateMmTrack } = require('../ratings/mmRatingEngine')
 
@@ -258,10 +259,11 @@ function getReviewDbClientOrThrow () {
 }
 
 async function fetchReviewChallengeResultsForMember (reviewDbClient, userId) {
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
       SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
-      FROM "challengeResult"
+      FROM ${challengeResultRelation}
       WHERE "userId" = $1
       ORDER BY "createdAt" ASC
     `,

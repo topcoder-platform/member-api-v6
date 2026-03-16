@@ -239,6 +239,12 @@ function createReviewDbClient (rows) {
 
   return {
     async query (sql, params) {
+      if (sql.includes('pg_catalog.pg_class')) {
+        return {
+          rows: [{ schemaName: 'public' }]
+        }
+      }
+
       if (sql.includes('WHERE "userId" = $1')) {
         return {
           rows: resultRows

@@ -10,6 +10,7 @@
 'use strict'
 
 const errors = require('../common/errors')
+const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
 
 const TRACK_ID = 'DEVELOP'
@@ -188,10 +189,11 @@ function normalizeScore (row) {
 }
 
 async function fetchReviewResultsForUser (reviewDbClient, userId) {
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
       SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
-      FROM "challengeResult"
+      FROM ${challengeResultRelation}
       WHERE "userId" = $1
       ORDER BY "createdAt" ASC
     `,
@@ -202,10 +204,11 @@ async function fetchReviewResultsForUser (reviewDbClient, userId) {
 }
 
 async function fetchParticipantsForChallenge (reviewDbClient, challengeId) {
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
       SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
-      FROM "challengeResult"
+      FROM ${challengeResultRelation}
       WHERE "challengeId" = $1
         AND "rated" = true
       ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC

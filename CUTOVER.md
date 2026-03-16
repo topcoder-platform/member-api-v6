@@ -35,8 +35,86 @@ Recommended rollout:
 
 ## Operational Runbook
 
-- Full backfill: `node src/scripts/recalculateMemberStats.js`
-- Parity check: `node src/scripts/verifyStatsMigration.js --samples 50`
-- Re-rate a member from a specific challenge: `POST /members/{handle}/stats/rerate` with `{ "challengeId": "...", "trackId": "...", "typeId": "..." }`
-- Trigger stats refresh after a challenge: `POST /members/{handle}/stats/refresh` with `{ "challengeId": "..." }`
-- Expected parity thresholds: zero rating/rank mismatches; zero history-order violations; zero `mostRecent` violation groups.
+### 1. Pre-flight checklist
+
+- Confirm all three database env vars are set: `DATABASE_URL`, `CHALLENGES_DB_URL`, `REVIEW_DB_URL`
+- Confirm `REVIEW_DB_URL` points to the review-api database that contains `challengeResult`; this is separate from the member Prisma schema deployment
+- Confirm the `challenge-api-v6` migration that adds hidden legacy challenge types has been deployed so legacy subtracks such as `ARCHITECTURE`, `ASSEMBLY_COMPETITION`, and `SRM` can be resolved during stats backfill
+- Confirm `STATS_READ_SOURCE=legacy` is set so reads stay on legacy tables during backfill
+- Confirm `member-api-v6` is running and `/members/health` returns 200
+
+### 2. Phase A - Full backfill (run once, idempotent)
+
+| Step | Command | Notes |
+|---|---|---|
+| A1 | `node src/scripts/recalculateMemberStats.js` | Full backfill of all users; writes `memberStats` + `memberStatsHistory`; preserves existing rating/rank fields |
+| A2 | `node src/scripts/recalculateMemberStats.js --skip-history` | Re-run aggregate stats only if history is already seeded |
+| A3 | `node src/scripts/recalculateMemberStats.js --user-id <userId>` | Single-user backfill for spot checks |
+| A4 | `node src/scripts/recalculateMemberStats.js --track-id <uuid>` | Scope backfill to one track |
+| A5 | `node src/scripts/recalculateMemberStats.js --csv-only --csv-path /tmp/stats.csv` | Dry-run CSV output without writing to DB |
+
+- If the script exits before processing users with `REVIEW_DB_URL does not expose challengeResult`, the configured review database is missing the review-api table. Deploy `review-api-v6` migrations or update `REVIEW_DB_URL` to the correct database before retrying.
+
+### 3. Phase B - Parity validation (run before switching read source)
+
+| Step | Command | Pass threshold |
+|---|---|---|
+| B1 | `node src/scripts/verifyStatsMigration.js --samples 50` | Zero `rating-mismatch`, zero `history-order`, zero `mostRecent` violation groups |
+| B2 | `node src/scripts/verifyStatsMigration.js --samples 50` | Repeat on a second random sample batch; same thresholds |
+| B3 | `node src/scripts/verifyStatsMigration.js --samples 1` | Manual review of JSON output for a known high-activity member against a specific userId (edit script or use `--user-id` if added) |
+
+- `verifyStatsMigration.js` clamps `--samples` to a maximum of `50`; rerun the command with `--samples 50` if you want additional random-user coverage.
+
+### 4. Phase C - Switch read source
+
+- Set `STATS_READ_SOURCE=unified` in environment and redeploy `member-api-v6`
+- Verify `GET /members/:handle/stats` returns correct data for 3-5 known members
+- Verify `GET /members/:handle/stats/history` returns ordered history with correct `mostRecent` flags
+
+### 5. Phase D - Ratings re-run (Development track)
+
+| Step | Endpoint | Body | Notes |
+|---|---|---|---|
+| D1 | `POST /members/:handle/stats/rerate` | `{ "challengeId": "<earliest-dev-challenge-uuid>", "trackId": "DEVELOP", "typeId": "Challenge" }` | Use the earliest Development/Challenge `challengeId` for a full-history rerate |
+| D2 | `POST /members/:handle/stats/rerate` | `{ "challengeId": "<starting-dev-challenge-uuid>", "trackId": "DEVELOP", "typeId": "Challenge" }` | Re-rates Development/Challenge data from a specific challenge forward |
+| D3 | `POST /members/:handle/stats/rerate` | `{ "challengeId": "<starting-mm-challenge-uuid>", "trackId": "DATA_SCIENCE", "typeId": "MARATHON_MATCH" }` | Use the earliest Marathon Match `challengeId` for full history, or a later one for a partial rerate |
+
+- Auth: Bearer token with `rerate:member_stats` scope, or admin JWT
+- `challengeId` is required for rerates; use the earliest applicable challenge when you need a full-history rerate.
+- `trackId` and `typeId` are API enum names, not DB UUIDs.
+
+### 6. Phase E - Stats refresh after a challenge
+
+| Step | Endpoint | Body | Notes |
+|---|---|---|---|
+| E1 | `POST /members/:handle/stats/refresh` | `{ "challengeId": "<uuid>" }` | Recomputes aggregate stats; callable by autopilot-v6 via M2M |
+
+- Auth: Bearer token with `refresh:member_stats` scope, or admin JWT
+
+### 7. Phase F - Reports cutover
+
+- Confirm `reports-api-v6` SQL queries reference unified tables (`memberStats`, `memberStatsHistory`, `memberMaxRating`)
+- Run a sample report for a known member and compare output against legacy report output
+- Confirm `mm-stats.sql` and `recent-member-data.sql` return non-null rating values
+
+### 8. Phase G - Rollback procedure
+
+If parity checks fail after switching to `unified`:
+
+1. Set `STATS_READ_SOURCE=legacy` and redeploy - reads immediately fall back to legacy tables; no data loss
+2. Investigate violations reported by `verifyStatsMigration.js` output
+3. Re-run backfill for affected users: `node src/scripts/recalculateMemberStats.js --user-id <userId>`
+4. Re-run parity check: `node src/scripts/verifyStatsMigration.js --samples 50`
+5. Switch back to `unified` only after zero violations
+
+### 9. Go/No-Go evidence gates (required before removing `STATS_READ_SOURCE` flag)
+
+- [ ] Two `verifyStatsMigration.js --samples 50` runs report zero errors across all violation categories
+- [ ] `memberStatsHistory mostRecent violation groups` = 0
+- [ ] Non-null rating/rank rows in `memberStats` >= non-null rows in legacy tables (verified by script output)
+- [ ] `GET /members/:handle/stats` response shape is identical to legacy for 5 sampled members
+- [ ] `GET /members/:handle/stats/history` returns correct chronological order for 5 sampled members
+- [ ] At least one challenge-end `POST /stats/refresh` call succeeded via autopilot-v6 M2M token
+- [ ] At least one `POST /stats/rerate` call succeeded for a Development track member
+- [ ] At least one `POST /stats/rerate` call succeeded for a Marathon Match member
+- [ ] Reports API returns non-null ratings for known rated members
