@@ -9,7 +9,6 @@ const config = require('config')
 const busApi = require('topcoder-bus-api-wrapper')
 const querystring = require('querystring')
 const request = require('request')
-const logger = require('../common/logger')
 const prisma = require('./prisma').getClient()
 
 // Color schema for Ratings
@@ -161,9 +160,6 @@ function hasSensitiveDataRole (authUser) {
   }
 
   const allowedRolesLower = constants.SENSITIVE_DATA_ROLES.map(r => r.toLowerCase())
-  logger.debug(`Checking if user ${authUser.handle} has sensitive data role: ${JSON.stringify(authUser.roles)}`)
-  logger.debug(`Allowed roles: ${JSON.stringify(allowedRolesLower)}`)
-  logger.debug(`Result: ${authUser.roles.some(r => allowedRolesLower.includes(r.toLowerCase()))}`)
   return authUser.roles.some(r => allowedRolesLower.includes(r.toLowerCase()))
 }
 
