@@ -8,6 +8,9 @@ const AUTOCOMPLETE_ROLES = ['copilot', 'administrator', 'admin', 'Connect Copilo
 
 const ROLES_NAMES_MAP = {
   TALENT_MANAGER: 'Talent Manager',
+  PROJECT_MANAGER: 'Project Manager',
+  COPILOT: 'copilot',
+  ADMINISTRATOR: 'administrator'
 }
 
 const EVENT_ORIGINATOR = 'topcoder-member-api'
