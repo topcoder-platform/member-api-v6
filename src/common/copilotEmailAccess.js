@@ -2,6 +2,7 @@ const _ = require('lodash')
 const helper = require('./helper')
 const logger = require('./logger')
 const prismaManager = require('./prisma')
+const { ROLES_NAMES_MAP } = require('./constants')
 
 const resourcesPrisma = prismaManager.getResourcesClient()
 const COPILOT_RESOURCE_ROLE_NAME_LOWER = 'copilot'
@@ -19,7 +20,7 @@ function hasTalentManagerRole (currentUser) {
     return false
   }
 
-  return helper.checkIfExists(['talent manager'], currentUser.roles)
+  return helper.checkIfExists([ROLES_NAMES_MAP.TALENT_MANAGER], currentUser.roles)
 }
 
 function shouldLimitCopilotEmailAccess (currentUser) {
