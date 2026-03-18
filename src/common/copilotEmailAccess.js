@@ -2,7 +2,7 @@ const _ = require('lodash')
 const helper = require('./helper')
 const logger = require('./logger')
 const prismaManager = require('./prisma')
-const { ROLES_NAMES_MAP } = require('./constants')
+const { ROLES_NAMES_MAP } = require('../../app-constants')
 
 const resourcesPrisma = prismaManager.getResourcesClient()
 const COPILOT_RESOURCE_ROLE_NAME_LOWER = 'copilot'
