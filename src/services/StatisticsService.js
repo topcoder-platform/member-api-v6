@@ -17,6 +17,17 @@ const reviewDb = require('../common/reviewDb')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const { rerateMmTrack } = require('../ratings/mmRatingEngine')
+const {
+  TRACK_NAMES,
+  TYPE_NAMES,
+  getCanonicalTrackName,
+  getCanonicalTypeName,
+  loadChallengeDimensionLookup,
+  resolveTrackIdFromLookup,
+  resolveTypeIdFromLookup,
+  resolveTrackNameFromLookup,
+  resolveTypeNameFromLookup
+} = require('../common/statsDimensionHelper')
 
 const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', 'updatedAt',
   'createdBy', 'updatedBy']
@@ -29,21 +40,6 @@ const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxR
   'challenges', 'wins', 'DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT', 'createdAt',
   'updatedAt', 'createdBy', 'updatedBy']
 
-const TRACK_NAMES = {
-  DEVELOP: 'DEVELOP',
-  DESIGN: 'DESIGN',
-  DATA_SCIENCE: 'DATA_SCIENCE',
-  COPILOT: 'COPILOT'
-}
-
-const TYPE_NAMES = {
-  CHALLENGE: 'Challenge',
-  FIRST2FINISH: 'First2Finish',
-  TASK: 'Task',
-  SRM: 'SRM',
-  MARATHON_MATCH: 'MARATHON_MATCH'
-}
-
 const LEGACY_STATS_READ_SOURCE = 'legacy'
 const SUPPORTED_STATS_READ_SOURCES = ['unified', LEGACY_STATS_READ_SOURCE]
 const DISTRIBUTION_RANGES = _.range(0, 4000, 100)
@@ -52,6 +48,16 @@ if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
   logger.warn(`Invalid STATS_READ_SOURCE='${config.STATS_READ_SOURCE}'. Falling back to 'unified'.`)
 }
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
+
+/**
+ * Join Prisma SQL condition fragments with a literal AND separator.
+ * Prisma joins with a Prisma.sql separator stringify that separator to [object Object].
+ * @param {Array<Object>} conditions Prisma SQL condition fragments
+ * @returns {Object} joined Prisma SQL fragment
+ */
+function joinSqlConditions (conditions) {
+  return Prisma.join(conditions, ' AND ')
+}
 
 function toOptionalInt (value) {
   if (_.isNil(value) || value === '') {
@@ -88,67 +94,52 @@ function normalizeChallengeIdForResponse (value) {
   return String(value)
 }
 
-function resolveTrackId (trackId) {
-  if (_.isNil(trackId)) {
-    return undefined
+let challengeDimensionLookupPromise
+
+/**
+ * Load the shared challenge track/type lookup used by unified stats reads and writes.
+ * The lookup translates between stored UUID ids and the canonical API labels used
+ * by request payloads, filters, and response builders.
+ * @returns {Promise<Object>} cached challenge dimension lookup
+ */
+async function getChallengeDimensionLookup () {
+  if (!challengeDimensionLookupPromise) {
+    challengeDimensionLookupPromise = loadChallengeDimensionLookup(prismaManager.getChallengesClient())
   }
-  const normalized = String(trackId).trim().toUpperCase()
-  if (!normalized) {
-    return undefined
-  }
-  if (normalized.includes('DATA') && normalized.includes('SCIENCE')) {
-    return TRACK_NAMES.DATA_SCIENCE
-  }
-  if (normalized.includes('DEVELOP') || normalized === 'DEV') {
-    return TRACK_NAMES.DEVELOP
-  }
-  if (normalized.includes('DESIGN') || normalized === 'DES') {
-    return TRACK_NAMES.DESIGN
-  }
-  if (normalized.includes('COPILOT')) {
-    return TRACK_NAMES.COPILOT
-  }
-  return trackId
+
+  return challengeDimensionLookupPromise
 }
 
-function resolveTypeId (typeId) {
-  if (_.isNil(typeId)) {
-    return undefined
-  }
-  const normalized = String(typeId).trim().toUpperCase()
-  if (!normalized) {
-    return undefined
-  }
-  if (normalized.includes('MARATHON')) {
-    return TYPE_NAMES.MARATHON_MATCH
-  }
-  if (normalized.includes('FIRST') || normalized.includes('F2F')) {
-    return TYPE_NAMES.FIRST2FINISH
-  }
-  if (normalized.includes('TASK')) {
-    return TYPE_NAMES.TASK
-  }
-  if (normalized.includes('SRM')) {
-    return TYPE_NAMES.SRM
-  }
-  if (normalized.includes('CHALLENGE')) {
-    return TYPE_NAMES.CHALLENGE
-  }
-  return typeId
+/**
+ * Normalize a track label into the canonical API name used by rerate endpoints.
+ * @param {*} trackId raw track label
+ * @returns {string|undefined} canonical track name when recognized
+ */
+function resolveTrackName (trackId) {
+  return getCanonicalTrackName(trackId)
+}
+
+/**
+ * Normalize a type label into the canonical API name used by rerate endpoints.
+ * @param {*} typeId raw type label
+ * @returns {string|undefined} canonical type name when recognized
+ */
+function resolveTypeName (typeId) {
+  return getCanonicalTypeName(typeId)
 }
 
 function isLegacyMaxRatingPayload (value) {
   return _.isPlainObject(value) && !_.isNil(value.rating) && !_.isNil(value.ratingColor)
 }
 
-function normalizeUnifiedRecord (record, isPrivate) {
+function normalizeUnifiedRecord (record, isPrivate, dimensionLookup) {
   if (!record || !record.trackId || !record.typeId) {
     return null
   }
 
   const normalized = _.omitBy({
-    trackId: resolveTrackId(record.trackId),
-    typeId: resolveTypeId(record.typeId),
+    trackId: resolveTrackIdFromLookup(dimensionLookup, record.trackId),
+    typeId: resolveTypeIdFromLookup(dimensionLookup, record.typeId),
     challenges: toOptionalInt(record.challenges),
     wins: toOptionalInt(record.wins),
     mostRecentSubmission: toOptionalDate(record.mostRecentSubmission),
@@ -175,14 +166,14 @@ function normalizeUnifiedRecord (record, isPrivate) {
   return normalized
 }
 
-function pushUnifiedRecord (collection, record, isPrivate) {
-  const normalized = normalizeUnifiedRecord(record, isPrivate)
+function pushUnifiedRecord (collection, record, isPrivate, dimensionLookup) {
+  const normalized = normalizeUnifiedRecord(record, isPrivate, dimensionLookup)
   if (normalized) {
     collection.push(normalized)
   }
 }
 
-function buildUnifiedStatsRecordsFromPayload (payload, isPrivate, options = {}) {
+function buildUnifiedStatsRecordsFromPayload (payload, isPrivate, dimensionLookup, options = {}) {
   const data = payload || {}
   const records = []
   const isPartial = !!options.partial
@@ -210,19 +201,19 @@ function buildUnifiedStatsRecordsFromPayload (payload, isPrivate, options = {}) 
   }
 
   if (rootPayload.trackId && rootPayload.typeId) {
-    pushUnifiedRecord(records, rootPayload, isPrivate)
+    pushUnifiedRecord(records, rootPayload, isPrivate, dimensionLookup)
   }
 
   if (_.isArray(data.records)) {
     _.forEach(data.records, (record) => {
-      pushUnifiedRecord(records, record, isPrivate)
+      pushUnifiedRecord(records, record, isPrivate, dimensionLookup)
     })
   }
 
   if (!isPartial && records.length === 0 && (!_.isNil(data.challenges) || !_.isNil(data.wins))) {
     pushUnifiedRecord(records, {
-      trackId: resolveTrackId(data.trackId || TRACK_NAMES.DEVELOP),
-      typeId: resolveTypeId(data.typeId || TYPE_NAMES.CHALLENGE),
+      trackId: data.trackId || TRACK_NAMES.DEVELOP,
+      typeId: data.typeId || TYPE_NAMES.CHALLENGE,
       challenges: data.challenges,
       wins: data.wins,
       mostRecentSubmission: data.mostRecentSubmission,
@@ -239,7 +230,7 @@ function buildUnifiedStatsRecordsFromPayload (payload, isPrivate, options = {}) 
       minRating: data.minRating,
       topFiveFinishes: data.topFiveFinishes,
       topTenFinishes: data.topTenFinishes
-    }, isPrivate)
+    }, isPrivate, dimensionLookup)
   }
 
   // Last record wins for duplicate (trackId, typeId) keys.
@@ -286,6 +277,8 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
     },
     select: {
       id: true,
+      trackId: true,
+      typeId: true,
       endDate: true,
       track: {
         select: {
@@ -319,12 +312,12 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
 
   _.forEach(reviewRows, (row) => {
     const challenge = challengeMetadataById.get(String(row.challengeId))
-    if (!challenge || !challenge.track || !challenge.type) {
+    if (!challenge || !challenge.trackId || !challenge.typeId) {
       return
     }
 
-    const trackId = resolveTrackId(challenge.track.name)
-    const typeId = resolveTypeId(challenge.type.name)
+    const trackId = String(challenge.trackId)
+    const typeId = String(challenge.typeId)
     if (!trackId || !typeId) {
       return
     }
@@ -464,7 +457,7 @@ async function getLegacyDistribution (query, fields) {
   }
 
   const whereClause = whereConditions.length > 0
-    ? Prisma.sql`WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}`
+    ? Prisma.sql`WHERE ${joinSqlConditions(whereConditions)}`
     : Prisma.empty
 
   const items = await prisma.$queryRaw`
@@ -674,7 +667,7 @@ async function getLegacyHistoryStatsRow (userId, groupId) {
   const historyRows = await prisma.$queryRaw`
     SELECT *
     FROM "members"."memberHistoryStats"
-    WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}
+    WHERE ${joinSqlConditions(whereConditions)}
     ORDER BY "id" ASC
     LIMIT 1
   `
@@ -708,12 +701,12 @@ async function getLegacyHistoryStatsRow (userId, groupId) {
   return history
 }
 
-function buildUnifiedHistoryRecordsFromPayload (payload) {
+function buildUnifiedHistoryRecordsFromPayload (payload, dimensionLookup) {
   const data = payload || {}
   const records = []
   const pushHistoryRecord = (item, fallbackTrackId, fallbackTypeId) => {
-    const trackId = resolveTrackId(item.trackId || fallbackTrackId)
-    const typeId = resolveTypeId(item.typeId || fallbackTypeId)
+    const trackId = resolveTrackIdFromLookup(dimensionLookup, item.trackId || fallbackTrackId)
+    const typeId = resolveTypeIdFromLookup(dimensionLookup, item.typeId || fallbackTypeId)
     if (!trackId || !typeId) {
       return
     }
@@ -748,6 +741,40 @@ function buildUnifiedHistoryRecordsFromPayload (payload) {
   }
 
   return _.values(_.keyBy(records, record => `${record.trackId}::${record.typeId}::${record.challengeId}`))
+}
+
+/**
+ * Attach resolved canonical track/type labels to unified stats rows before response building.
+ * @param {Array<Object>} rows unified stats or history rows from the database
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Array<Object>} rows annotated with trackName and typeName
+ */
+function annotateUnifiedDimensionRows (rows, dimensionLookup) {
+  return _.map(rows || [], row => ({
+    ...row,
+    trackName: resolveTrackNameFromLookup(dimensionLookup, row.trackId),
+    typeName: resolveTypeNameFromLookup(dimensionLookup, row.typeId)
+  }))
+}
+
+/**
+ * Resolve optional unified stats filter parameters into stored UUID ids.
+ * A missing filter remains undefined; an invalid non-empty filter resolves to undefined
+ * with its corresponding has* flag still true so callers can short-circuit to no results.
+ * @param {Object} query request query params
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Object} resolved filter payload
+ */
+function resolveUnifiedDimensionFilters (query, dimensionLookup) {
+  const hasTrackFilter = !_.isNil(query.trackId) && String(query.trackId).trim() !== ''
+  const hasTypeFilter = !_.isNil(query.typeId) && String(query.typeId).trim() !== ''
+
+  return {
+    hasTrackFilter,
+    hasTypeFilter,
+    trackId: hasTrackFilter ? resolveTrackIdFromLookup(dimensionLookup, query.trackId) : undefined,
+    typeId: hasTypeFilter ? resolveTypeIdFromLookup(dimensionLookup, query.typeId) : undefined
+  }
 }
 
 function getUniqueTrackTypePairs (records) {
@@ -889,8 +916,15 @@ async function getDistribution (query) {
   }
 
   logger.info(`Calculating distribution on-the-fly for track='${query.track || ''}' subTrack='${query.subTrack || ''}'`)
-  const trackId = resolveTrackId(query.track)
-  const typeId = resolveTypeId(query.subTrack)
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const hasTrackFilter = !_.isNil(query.track) && String(query.track).trim() !== ''
+  const hasTypeFilter = !_.isNil(query.subTrack) && String(query.subTrack).trim() !== ''
+  const trackId = hasTrackFilter ? resolveTrackIdFromLookup(dimensionLookup, query.track) : undefined
+  const typeId = hasTypeFilter ? resolveTypeIdFromLookup(dimensionLookup, query.subTrack) : undefined
+
+  if ((hasTrackFilter && !trackId) || (hasTypeFilter && !typeId)) {
+    throw new errors.NotFoundError('No member distribution statistics is found.')
+  }
 
   const whereConditions = [Prisma.sql`"rating" IS NOT NULL`]
   if (trackId) {
@@ -905,7 +939,7 @@ async function getDistribution (query) {
       (FLOOR("rating" / 100.0)::int * 100) AS "rangeStart",
       COUNT(*)::int AS "count"
     FROM "members"."memberStats"
-    WHERE ${Prisma.join(whereConditions, Prisma.sql` AND `)}
+    WHERE ${joinSqlConditions(whereConditions)}
     GROUP BY (FLOOR("rating" / 100.0)::int * 100)
     ORDER BY "rangeStart" ASC
   `
@@ -967,11 +1001,17 @@ async function getHistoryStats (currentUser, handle, query) {
     }
     result = _.map(overallStat, t => buildLegacyStatsHistoryResponse(member, t, fields))
   } else {
+    const dimensionLookup = await getChallengeDimensionLookup()
     const where = {
       userId: member.userId
     }
-    const trackId = resolveTrackId(query.trackId)
-    const typeId = resolveTypeId(query.typeId)
+    const { hasTrackFilter, hasTypeFilter, trackId, typeId } = resolveUnifiedDimensionFilters(query, dimensionLookup)
+    if (hasTrackFilter && !trackId) {
+      return []
+    }
+    if (hasTypeFilter && !typeId) {
+      return []
+    }
     if (trackId) {
       where.trackId = trackId
     }
@@ -986,8 +1026,9 @@ async function getHistoryStats (currentUser, handle, query) {
 
     const overallStat = []
     if (historyRows.length > 0) {
+      const annotatedRows = annotateUnifiedDimensionRows(historyRows, dimensionLookup)
       _.forEach(groupIds, (groupId) => {
-        const scopedRows = _.map(historyRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
+        const scopedRows = _.map(annotatedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
         overallStat.push(scopedRows)
       })
     }
@@ -1034,7 +1075,8 @@ async function createHistoryStats (currentUser, handle, data) {
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
   const operatorId = currentUser.userId || currentUser.sub
-  const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data)
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data, dimensionLookup)
   if (!unifiedHistoryRecords || unifiedHistoryRecords.length === 0) {
     throw new errors.BadRequestError('No valid history records provided for unified history stats.')
   }
@@ -1080,7 +1122,10 @@ async function createHistoryStats (currentUser, handle, data) {
     orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
-  const scopedRows = _.map(createdRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
+  const scopedRows = _.map(annotateUnifiedDimensionRows(createdRows, dimensionLookup), row => ({
+    ...row,
+    groupId: _.toNumber(groupIds[0])
+  }))
   let result = prismaHelper.buildUnifiedStatsHistoryResponse(member, scopedRows, HISTORY_STATS_FIELDS)
   if (!helper.canManageMember(currentUser, member)) {
     result = _.omit(result, config.STATISTICS_SECURE_FIELDS)
@@ -1150,7 +1195,8 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
   const operatorId = currentUser.userId || currentUser.sub
-  const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data)
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data, dimensionLookup)
   if (!unifiedHistoryRecords || unifiedHistoryRecords.length === 0) {
     throw new errors.BadRequestError('No valid history records provided for unified history stats.')
   }
@@ -1201,7 +1247,10 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
     orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
-  const scopedRows = _.map(updatedRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
+  const scopedRows = _.map(annotateUnifiedDimensionRows(updatedRows, dimensionLookup), row => ({
+    ...row,
+    groupId: _.toNumber(groupIds[0])
+  }))
   let result = prismaHelper.buildUnifiedStatsHistoryResponse(member, scopedRows, HISTORY_STATS_FIELDS)
   if (!helper.canManageMember(currentUser, member)) {
     result = _.omit(result, config.STATISTICS_SECURE_FIELDS)
@@ -1271,8 +1320,14 @@ async function getMemberStats (currentUser, handle, query, throwError) {
       }
     }
   } else {
-    const trackId = resolveTrackId(query.trackId)
-    const typeId = resolveTypeId(query.typeId)
+    const dimensionLookup = await getChallengeDimensionLookup()
+    const { hasTrackFilter, hasTypeFilter, trackId, typeId } = resolveUnifiedDimensionFilters(query, dimensionLookup)
+    if (hasTrackFilter && !trackId) {
+      return []
+    }
+    if (hasTypeFilter && !typeId) {
+      return []
+    }
     for (const groupId of groupIds) {
       const where = {
         userId: member.userId,
@@ -1291,7 +1346,10 @@ async function getMemberStats (currentUser, handle, query, throwError) {
       })
 
       if (unifiedStats && unifiedStats.length > 0) {
-        const scopedStats = _.map(unifiedStats, stat => ({ ...stat, groupId: _.toNumber(groupId) }))
+        const scopedStats = _.map(annotateUnifiedDimensionRows(unifiedStats, dimensionLookup), stat => ({
+          ...stat,
+          groupId: _.toNumber(groupId)
+        }))
         stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
       }
     }
@@ -1342,7 +1400,8 @@ async function createMemberStats (currentUser, handle, data) {
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
   const isPrivate = groupIds[0] !== config.PUBLIC_GROUP_ID
   const rawData = _.cloneDeep(data)
-  const unifiedRecords = buildUnifiedStatsRecordsFromPayload(rawData, isPrivate)
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const unifiedRecords = buildUnifiedStatsRecordsFromPayload(rawData, isPrivate, dimensionLookup)
   const legacyMaxRatingData = isLegacyMaxRatingPayload(rawData.maxRating) ? rawData.maxRating : null
 
   let existingStat
@@ -1389,7 +1448,10 @@ async function createMemberStats (currentUser, handle, data) {
     where: { userId: member.userId, isPrivate },
     include: prismaHelper.unifiedStatsIncludeParams
   })
-  const scopedStats = _.map(allStats, stat => ({ ...stat, groupId: _.toNumber(groupIds[0]) }))
+  const scopedStats = _.map(annotateUnifiedDimensionRows(allStats, dimensionLookup), stat => ({
+    ...stat,
+    groupId: _.toNumber(groupIds[0])
+  }))
   let result = prismaHelper.buildUnifiedStatsResponse(member, scopedStats, MEMBER_STATS_FIELDS)
   if (!helper.canManageMember(currentUser, member)) {
     result = _.omit(result, config.STATISTICS_SECURE_FIELDS)
@@ -1480,7 +1542,8 @@ async function partiallyUpdateMemberStats (currentUser, handle, data) {
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
   const isPrivate = groupIds[0] !== config.PUBLIC_GROUP_ID
   const rawData = _.cloneDeep(data)
-  const unifiedRecords = buildUnifiedStatsRecordsFromPayload(rawData, isPrivate, { partial: true })
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const unifiedRecords = buildUnifiedStatsRecordsFromPayload(rawData, isPrivate, dimensionLookup, { partial: true })
   const legacyMaxRatingData = isLegacyMaxRatingPayload(rawData.maxRating) ? rawData.maxRating : null
 
   if ((!unifiedRecords || unifiedRecords.length === 0) && !legacyMaxRatingData) {
@@ -1526,7 +1589,10 @@ async function partiallyUpdateMemberStats (currentUser, handle, data) {
     where: { userId: member.userId, isPrivate },
     include: prismaHelper.unifiedStatsIncludeParams
   })
-  const scopedRows = _.map(updatedRows, row => ({ ...row, groupId: _.toNumber(groupIds[0]) }))
+  const scopedRows = _.map(annotateUnifiedDimensionRows(updatedRows, dimensionLookup), row => ({
+    ...row,
+    groupId: _.toNumber(groupIds[0])
+  }))
   let result = prismaHelper.buildUnifiedStatsResponse(member, scopedRows, MEMBER_STATS_FIELDS)
   if (legacyMaxRatingData) {
     result.maxRating = {
@@ -1705,8 +1771,8 @@ async function rerateMemberStats (currentUser, handle, data) {
     throw new errors.ForbiddenError('You are not allowed to update the member stats.')
   }
 
-  const trackId = resolveTrackId(payload.trackId || TRACK_NAMES.DEVELOP)
-  const typeId = resolveTypeId(payload.typeId || TYPE_NAMES.CHALLENGE)
+  const trackId = resolveTrackName(payload.trackId || TRACK_NAMES.DEVELOP)
+  const typeId = resolveTypeName(payload.typeId || TYPE_NAMES.CHALLENGE)
   const challengeClient = prismaManager.getChallengesClient()
   const reviewDbClient = getReviewDbClientOrThrow()
 

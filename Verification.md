@@ -65,7 +65,7 @@ There are some changes to prisma schema.
 - Required env vars:
   - `DATABASE_URL` for the member database
   - `CHALLENGES_DB_URL` for the challenges database
-  - `REVIEW_DB_URL` for the review database
+  - `REVIEW_DB_URL` for the review database; `recalculateMemberStats.js` now reads review-api `challengeResult` rows during aggregate backfill, not just during rerates
 - Challenge catalog prerequisite:
   - Deploy the `challenge-api-v6` migration that seeds hidden legacy `ChallengeType` rows for historical subtracks like `ARCHITECTURE`, `ASSEMBLY_COMPETITION`, and `SRM`
 - Optional toggle:

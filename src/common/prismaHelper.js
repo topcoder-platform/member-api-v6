@@ -1,6 +1,10 @@
 const _ = require('lodash')
 const helper = require('./helper')
 const errors = require('./errors')
+const {
+  getCanonicalTrackName,
+  getCanonicalTypeName
+} = require('./statsDimensionHelper')
 
 const designBasicFields = [
   'name', 'numInquiries', 'submissions', 'passedScreening', 'avgPlacement',
@@ -45,62 +49,14 @@ const auditFields = [
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
 ]
 
-const unifiedTrackMap = {
-  DEVELOP: 'DEVELOP',
-  DESIGN: 'DESIGN',
-  DATA_SCIENCE: 'DATA_SCIENCE',
-  COPILOT: 'COPILOT'
-}
-
-const unifiedTypeMap = {
-  CHALLENGE: 'Challenge',
-  FIRST2FINISH: 'First2Finish',
-  TASK: 'Task',
-  SRM: 'SRM',
-  MARATHON_MATCH: 'MARATHON_MATCH'
-}
-
 function getUnifiedTrackName (trackId) {
-  const normalized = String(trackId || '').toUpperCase().trim()
-  if (unifiedTrackMap[normalized]) {
-    return unifiedTrackMap[normalized]
-  }
-  if (normalized.includes('DATA') && normalized.includes('SCIENCE')) {
-    return 'DATA_SCIENCE'
-  }
-  if (normalized.includes('DEVELOP') || normalized === 'DEV') {
-    return 'DEVELOP'
-  }
-  if (normalized.includes('DESIGN') || normalized === 'DES') {
-    return 'DESIGN'
-  }
-  if (normalized.includes('COPILOT')) {
-    return 'COPILOT'
-  }
-  return normalized
+  const canonical = getCanonicalTrackName(trackId)
+  return canonical || String(trackId || '').toUpperCase().trim()
 }
 
 function getUnifiedTypeName (typeId) {
-  const normalized = String(typeId || '').toUpperCase().trim()
-  if (unifiedTypeMap[normalized]) {
-    return unifiedTypeMap[normalized]
-  }
-  if (normalized.includes('MARATHON')) {
-    return 'MARATHON_MATCH'
-  }
-  if (normalized.includes('FIRST') || normalized.includes('F2F')) {
-    return 'First2Finish'
-  }
-  if (normalized.includes('TASK')) {
-    return 'Task'
-  }
-  if (normalized.includes('SRM')) {
-    return 'SRM'
-  }
-  if (normalized.includes('CHALLENGE')) {
-    return 'Challenge'
-  }
-  return typeId
+  const canonical = getCanonicalTypeName(typeId)
+  return canonical || typeId
 }
 
 function toUnixTime (value) {
@@ -412,7 +368,15 @@ function buildStatsResponse (member, statsData, fields) {
  */
 function buildUnifiedStatsResponse (member, statsData, fields) {
   const rows = _.isArray(statsData) ? statsData : [statsData]
-  const validRows = _.filter(rows, row => !_.isNil(row))
+  const validRows = _.chain(rows)
+    .filter(row => !_.isNil(row))
+    .map(row => ({
+      ...row,
+      resolvedTrackName: getUnifiedTrackName(row.trackName || row.trackId),
+      resolvedTypeName: getUnifiedTypeName(row.typeName || row.typeId)
+    }))
+    .filter(row => _.includes(['DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT'], row.resolvedTrackName))
+    .value()
   const item = {
     userId: helper.bigIntToNumber(member.userId),
     handle: member.handle,
@@ -426,8 +390,8 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
   }
 
   _.forEach(validRows, (row) => {
-    const trackName = getUnifiedTrackName(row.trackId)
-    const typeName = getUnifiedTypeName(row.typeId)
+    const trackName = row.resolvedTrackName
+    const typeName = row.resolvedTypeName
     if (trackName === 'DEVELOP') {
       if (!item.DEVELOP) {
         item.DEVELOP = {
@@ -564,7 +528,15 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
  */
 function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
   const rows = _.isArray(historyStats) ? historyStats : [historyStats]
-  const validRows = _.filter(rows, row => !_.isNil(row))
+  const validRows = _.chain(rows)
+    .filter(row => !_.isNil(row))
+    .map(row => ({
+      ...row,
+      resolvedTrackName: getUnifiedTrackName(row.trackName || row.trackId),
+      resolvedTypeName: getUnifiedTypeName(row.typeName || row.typeId)
+    }))
+    .filter(row => _.includes(['DEVELOP', 'DATA_SCIENCE'], row.resolvedTrackName))
+    .value()
   const first = _.head(validRows) || {}
   const item = {
     userId: helper.bigIntToNumber(member.userId),
@@ -573,7 +545,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
     handleLower: member.handleLower
   }
 
-  const groupedByTrackType = _.groupBy(validRows, row => `${getUnifiedTrackName(row.trackId)}::${getUnifiedTypeName(row.typeId)}`)
+  const groupedByTrackType = _.groupBy(validRows, row => `${row.resolvedTrackName}::${row.resolvedTypeName}`)
   _.forEach(groupedByTrackType, (trackHistory, key) => {
     const [trackName, typeName] = key.split('::')
     if (trackName === 'DEVELOP') {

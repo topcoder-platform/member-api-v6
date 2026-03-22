@@ -47,13 +47,18 @@ Recommended rollout:
 
 | Step | Command | Notes |
 |---|---|---|
-| A1 | `node src/scripts/recalculateMemberStats.js` | Full backfill of all users; writes `memberStats` + `memberStatsHistory`; preserves existing rating/rank fields |
-| A2 | `node src/scripts/recalculateMemberStats.js --skip-history` | Re-run aggregate stats only if history is already seeded |
+| A1 | `node src/scripts/recalculateMemberStats.js` | Full backfill of all users; writes `memberStats` + `memberStatsHistory`; starts aggregate rows from legacy stats tables when present, supplements them with newer review-api `challengeResult` rows, falls back to review-api `challengeResult` or `ChallengeWinner` when legacy rows do not exist, preserves existing rating/rank fields, processes users with bounded parallelism (`--concurrency`, default `4`), and checkpoints processed user IDs to `./recalculateMemberStats.processedUserIds.json` after each completed batch |
+| A1a | `node src/scripts/recalculateMemberStats.js --skip-rerate` | Recommended for the initial full load when total runtime matters; still backfills legacy rating/rank fields but skips the expensive Development rerate replay so rerates can be run separately in Phase D |
+| A2 | `node src/scripts/recalculateMemberStats.js --skip-history` | Re-run aggregate stats only if history is already seeded; full-user runs replace stale public unified-only rows for migrated members while leaving legacy-backed parents intact |
 | A3 | `node src/scripts/recalculateMemberStats.js --user-id <userId>` | Single-user backfill for spot checks |
-| A4 | `node src/scripts/recalculateMemberStats.js --track-id <uuid>` | Scope backfill to one track |
+| A4 | `node src/scripts/recalculateMemberStats.js --track-id <uuid-or-name>` | Scope backfill to one track |
+| A4a | `node src/scripts/recalculateMemberStats.js --concurrency 8` | Increase per-batch user parallelism when the database can tolerate higher read/write load |
+| A4b | `node src/scripts/recalculateMemberStats.js --processed-user-ids-path /tmp/recalculateMemberStats.processedUserIds.json` | Write the processed-user checkpoint file to a custom path for long-running validation batches |
 | A5 | `node src/scripts/recalculateMemberStats.js --csv-only --csv-path /tmp/stats.csv` | Dry-run CSV output without writing to DB |
 
 - If the script exits before processing users with `REVIEW_DB_URL does not expose challengeResult`, the configured review database is missing the review-api table. Deploy `review-api-v6` migrations or update `REVIEW_DB_URL` to the correct database before retrying.
+- For large environments, prefer `--skip-rerate` during the bulk backfill and run the Development rerate pass separately afterward. The rerate replay is usually the longest phase by a wide margin because it replays rated challenge history one challenge at a time.
+- The script logs per-batch timing breakdowns for preload queries, aggregate generation, stats/history writes, rerates, and checkpoint writes, plus slow-user samples for the aggregate/history/rerate phases.
 
 ### 3. Phase B - Parity validation (run before switching read source)
 
