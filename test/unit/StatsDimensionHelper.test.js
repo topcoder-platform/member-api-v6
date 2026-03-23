@@ -79,4 +79,34 @@ describe('stats dimension helper unit tests', () => {
     should.not.exist(result.DESIGN)
     should.not.exist(result.DATA_SCIENCE)
   })
+
+  it('buildUnifiedStatsResponse should preserve legacy develop response shape when rating fields are absent', () => {
+    const result = prismaHelper.buildUnifiedStatsResponse(
+      {
+        userId: global.BigInt(15391415),
+        handle: 'winterflame',
+        handleLower: 'winterflame',
+        maxRating: null
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-dev-id',
+          typeId: 'type-arch-id',
+          trackName: TRACK_NAMES.DEVELOP,
+          typeName: 'ARCHITECTURE',
+          challenges: 62,
+          wins: null,
+          mostRecentSubmission: null,
+          mostRecentEventDate: null
+        }
+      ]
+    )
+
+    result.groupId.should.equal(1)
+    should.exist(result.DEVELOP)
+    result.DEVELOP.subTracks.should.have.length(1)
+    result.DEVELOP.subTracks[0].submissions.should.deep.equal({})
+    result.DEVELOP.subTracks[0].rank.should.deep.equal({})
+  })
 })

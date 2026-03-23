@@ -377,8 +377,10 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
     }))
     .filter(row => _.includes(['DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT'], row.resolvedTrackName))
     .value()
+  const first = _.head(validRows) || {}
   const item = {
     userId: helper.bigIntToNumber(member.userId),
+    groupId: _.isNil(first.groupId) ? undefined : helper.bigIntToNumber(first.groupId),
     handle: member.handle,
     handleLower: member.handleLower,
     challenges: _.sumBy(validRows, row => toNumber(row.challenges)),
@@ -409,7 +411,8 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
         challenges: toNumber(row.challenges),
         wins: toNumber(row.wins),
         mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
-        mostRecentEventDate: toUnixTime(row.mostRecentEventDate)
+        mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
+        submissions: {}
       }
       const rank = {}
       if (!_.isNil(row.rating)) {
@@ -433,9 +436,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
       if (!_.isNil(row.minRating)) {
         rank.minRating = row.minRating
       }
-      if (!_.isEmpty(rank)) {
-        subTrackItem.rank = rank
-      }
+      subTrackItem.rank = rank
       item.DEVELOP.subTracks.push(subTrackItem)
     } else if (trackName === 'DESIGN') {
       if (!item.DESIGN) {
