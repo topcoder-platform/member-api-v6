@@ -132,7 +132,7 @@ function convertPrismaToRes (traitData, userId, traitIds = TRAIT_IDS) {
   if (_.includes(traitIds, 'personalization') &&
     !_.isEmpty(traitData.personalization)
   ) {
-     const collectInfo = {}
+    const collectInfo = {}
     _.forEach(traitData.personalization, t => {
       collectInfo[t.key] = t.value
     })

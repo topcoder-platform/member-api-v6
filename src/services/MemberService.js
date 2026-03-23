@@ -46,10 +46,6 @@ const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
 
-const HANDLE_MIN_LENGTH = 3
-const HANDLE_MAX_LENGTH = 64
-const HANDLE_REGEX = /^[-A-Za-z0-9_.`{}[\]]{3,64}$/
-const HANDLE_PUNCTUATION_ONLY_REGEX = /^[-_.{}[\]]+$/
 const SENDGRID_BASE_URL = 'https://api.sendgrid.com'
 const SENDGRID_EMAIL_ACTIVITY_LOOKBACK_DAYS = 30
 const SENDGRID_EMAIL_ACTIVITY_PAGE_SIZE = 100
@@ -111,7 +107,7 @@ function omitMemberAttributes (currentUser, mb) {
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
   const canSeeFullAddress = canManageMember || hasSensitiveDataRole
 
-  if (!canManageMember ) {
+  if (!canManageMember) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
     res = helper.truncateLastName(res)
   }
@@ -142,25 +138,6 @@ function omitMemberAttributes (currentUser, mb) {
   }
 
   return res
-}
-
-function validateHandleRules (handle, rawHandle) {
-  if (handle.length < HANDLE_MIN_LENGTH || handle.length > HANDLE_MAX_LENGTH) {
-    throw new errors.BadRequestError(
-      `Length of Handle in character should be between ${HANDLE_MIN_LENGTH} and ${HANDLE_MAX_LENGTH}.`
-    )
-  }
-  if ((rawHandle || handle).indexOf(' ') !== -1) {
-    throw new errors.BadRequestError('Handle may not contain a space')
-  }
-  if (!HANDLE_REGEX.test(handle)) {
-    throw new errors.BadRequestError(
-      'Handle must be 3-64 characters long and can only contain alphanumeric characters and _.-`[]{} symbols.'
-    )
-  }
-  if (HANDLE_PUNCTUATION_ONLY_REGEX.test(handle)) {
-    throw new errors.BadRequestError('Handle may not contain only punctuation.')
-  }
 }
 
 /**
@@ -587,9 +564,9 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const hasCountry = !!(member.homeCountryCode)
 
   const hasCity = !!(
-    member.addresses
-    && member.addresses.length
-    && member.addresses.some(a => a && a.city && a.city.trim())
+    member.addresses &&
+    member.addresses.length &&
+    member.addresses.some(a => a && a.city && a.city.trim())
   )
 
   // Should have city and country in at least one address
@@ -821,8 +798,6 @@ updateMember.schema = {
     fields: Joi.string()
   }),
   data: Joi.object().keys({
-    handle: Joi.forbidden(),
-    handleLower: Joi.forbidden(),
     handle: Joi.forbidden(),
     handleLower: Joi.forbidden(),
     firstName: Joi.string(),
@@ -1644,11 +1619,11 @@ async function getMemberRoles (userId) {
   }
 }
 
-/** Track enum to display name (wins, submissions, challenges) */
+/** Track enum to display name for member PDF activity stats. */
 const TRACK_DISPLAY_NAMES = {
   DEVELOPMENT: 'Development',
   DESIGN: 'Design',
-  DATA_SCIENCE: 'Data Science',
+  DATA_SCIENCE: 'Competitive Programming',
   QUALITY_ASSURANCE: 'Quality Assurance'
 }
 
@@ -1658,13 +1633,15 @@ const TRACK_DISPLAY_NAMES = {
  * @param {Number} userId member userId
  * @param {Object} challengesPrisma challenges Prisma client
  * @param {Object} resourcesPrisma resources Prisma client
- * @returns {Promise<Array<{ trackName: string, wins: number, submissions: number, challenges: number }>>}
+ * @returns {Promise<Array<{ trackName: string, wins: number, submissions?: number, challenges?: number, rating?: number, competitions?: number }>>}
  */
 async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrisma) {
-  const trackMap = {} // track enum -> { wins, submissions, challenges }
+  const trackMap = {} // track enum -> standard counts or competitive programming counts
 
   try {
-    const numUserId = typeof userId === 'bigint' ? helper.bigIntToNumber(userId) : userId
+    const numUserId = Object.prototype.toString.call(userId) === '[object BigInt]'
+      ? helper.bigIntToNumber(userId)
+      : userId
 
     const winnerRows = await challengesPrisma.ChallengeWinner.findMany({
       where: {
@@ -1679,14 +1656,17 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
     })
 
     for (const w of winnerRows) {
-      const trackEnum = w.challenge?.track?.track
+      const trackEnum = _.get(w, 'challenge.track.track')
       if (!trackEnum) continue
       if (!trackMap[trackEnum]) {
-        trackMap[trackEnum] = { wins: 0, submissions: 0, challenges: 0 }
+        const isCompetitiveProgramming = trackEnum === 'DATA_SCIENCE'
+        trackMap[trackEnum] = isCompetitiveProgramming
+          ? { wins: 0, competitions: 0, rating: undefined }
+          : { wins: 0, submissions: 0, challenges: 0 }
       }
       const row = trackMap[trackEnum]
       if (w.type === 'PLACEMENT') row.wins += 1
-      if (w.type === 'PASSED_REVIEW') row.submissions += 1
+      if (w.type === 'PASSED_REVIEW' && row.submissions !== undefined) row.submissions += 1
     }
 
     // 2) Resources: registrations (distinct challenges) by track
@@ -1708,7 +1688,7 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       })
       const challengeIdToTrack = {}
       for (const c of challenges) {
-        const trackEnum = c.track?.track
+        const trackEnum = _.get(c, 'track.track')
         if (trackEnum) challengeIdToTrack[c.id] = trackEnum
       }
       const challengesPerTrack = {}
@@ -1720,9 +1700,17 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       }
       for (const [trackEnum, count] of Object.entries(challengesPerTrack)) {
         if (!trackMap[trackEnum]) {
-          trackMap[trackEnum] = { wins: 0, submissions: 0, challenges: count }
+          const isCompetitiveProgramming = trackEnum === 'DATA_SCIENCE'
+          trackMap[trackEnum] = isCompetitiveProgramming
+            ? { wins: 0, competitions: count, rating: undefined }
+            : { wins: 0, submissions: 0, challenges: count }
         } else {
-          trackMap[trackEnum].challenges = count
+          if (trackMap[trackEnum].challenges !== undefined) {
+            trackMap[trackEnum].challenges = count
+          }
+          if (trackMap[trackEnum].competitions !== undefined) {
+            trackMap[trackEnum].competitions = count
+          }
         }
       }
     }
@@ -1731,13 +1719,22 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
     for (const [trackEnum, counts] of Object.entries(trackMap)) {
       const trackName = TRACK_DISPLAY_NAMES[trackEnum] || trackEnum
       const hasAny = Object.values(counts).some(v => typeof v === 'number' && v > 0)
-      if (!hasAny) continue
-      statsByTrack.push({
-        trackName,
-        wins: counts.wins ?? 0,
-        submissions: counts.submissions ?? 0,
-        challenges: counts.challenges ?? 0
-      })
+      if (!hasAny && (counts.rating == null || counts.rating === 0)) continue
+      if (trackEnum === 'DATA_SCIENCE') {
+        statsByTrack.push({
+          trackName,
+          rating: counts.rating == null ? 0 : counts.rating,
+          wins: counts.wins == null ? 0 : counts.wins,
+          competitions: counts.competitions == null ? 0 : counts.competitions
+        })
+      } else {
+        statsByTrack.push({
+          trackName,
+          wins: counts.wins == null ? 0 : counts.wins,
+          submissions: counts.submissions == null ? 0 : counts.submissions,
+          challenges: counts.challenges == null ? 0 : counts.challenges
+        })
+      }
     }
     return statsByTrack
   } catch (err) {
@@ -1849,6 +1846,29 @@ async function aggregatePDFData (currentUser, handle) {
     statsByTrack = await fetchMemberStatsByTrack(userId, challengesPrisma, resourcesPrisma)
   } catch (err) {
     logger.warn(`aggregatePDFData: statsByTrack failed for ${handle}: ${err.message}`)
+  }
+
+  // Merge Competitive Programming rating from the stats service into PDF activity data.
+  try {
+    const StatisticsService = require('./StatisticsService')
+    const statsResult = await StatisticsService.getMemberStats(currentUser, handle, {})
+    const statsResponse = Array.isArray(statsResult) && statsResult.length > 0 ? statsResult[0] : null
+    if (statsResponse && statsResponse.DATA_SCIENCE) {
+      const ds = statsResponse.DATA_SCIENCE
+      const rating = (ds.SRM && ds.SRM.rank && ds.SRM.rank.rating != null)
+        ? ds.SRM.rank.rating
+        : (ds.MARATHON_MATCH && ds.MARATHON_MATCH.rank && ds.MARATHON_MATCH.rank.rating != null)
+          ? ds.MARATHON_MATCH.rank.rating
+          : 0
+      const cpEntry = statsByTrack.find(entry => entry.trackName === 'Competitive Programming')
+      if (cpEntry) {
+        cpEntry.rating = rating
+      } else if (rating > 0) {
+        statsByTrack.push({ trackName: 'Competitive Programming', rating, wins: 0, competitions: 0 })
+      }
+    }
+  } catch (err) {
+    logger.warn(`aggregatePDFData: getMemberStats for rating failed for ${handle}: ${err.message}`)
   }
 
   // Fetch certifications and courses
@@ -1995,7 +2015,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
             select: {
               createdAt: true,
               sourceId: true,
-              skillEventType : {
+              skillEventType: {
                 select: { name: true }
               },
               sourceType: {
@@ -2022,16 +2042,19 @@ async function getMemberSkill (currentUser, handle, skillId) {
     // Prepare challenge fetch
     const challengeSources = _.get(skill, 'activity.challenge.sources', [])
     if (challengeSources.length > 0) {
-      const winMap = {challenge_2nd_place: 'challenge_win', challenge_3rd_place: 'challenge_win'};
+      const winMap = { challenge_2nd_place: 'challenge_win', challenge_3rd_place: 'challenge_win' }
       const challengeIds = _.uniqBy(challengeSources, 'sourceId').map(s => s.sourceId)
       const roleMap = new Map()
       challengeSources.forEach(source => {
         if (!roleMap.has(source.sourceId)) {
           roleMap.set(source.sourceId, new Set())
         }
-        roleMap.get(source.sourceId).add(winMap[source.skillEventType.name] ?? source.skillEventType.name);
+        const skillEventName = _.has(winMap, source.skillEventType.name)
+          ? winMap[source.skillEventType.name]
+          : source.skillEventType.name
+        roleMap.get(source.sourceId).add(skillEventName)
       })
-      
+
       fetchPromises.push(
         challengesPrisma.Challenge.findMany({
           where: { id: { in: challengeIds } },

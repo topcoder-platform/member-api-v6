@@ -292,8 +292,11 @@ async function main () {
 
   console.log('\nRunning sampled user comparisons...')
   const sampledUsers = await prisma.$queryRaw`
-    SELECT DISTINCT "userId"
-    FROM "members"."memberStats"
+    SELECT "userId"
+    FROM (
+      SELECT DISTINCT "userId"
+      FROM "members"."memberStats"
+    ) sampled_users
     ORDER BY random()
     LIMIT ${args.samples}
   `
