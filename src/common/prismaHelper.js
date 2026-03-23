@@ -395,6 +395,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
     const trackName = row.resolvedTrackName
     const typeName = row.resolvedTypeName
     if (trackName === 'DEVELOP') {
+      const challengeCount = toNumber(row.challenges)
       if (!item.DEVELOP) {
         item.DEVELOP = {
           challenges: 0,
@@ -408,11 +409,15 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
       const subTrackItem = {
         id: typeName,
         name: typeName,
-        challenges: toNumber(row.challenges),
+        challenges: challengeCount,
         wins: toNumber(row.wins),
         mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
         mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
-        submissions: {}
+        // Unified stats do not persist legacy submission counters, but each counted
+        // development challenge necessarily represents one submission-level result.
+        submissions: {
+          submissions: challengeCount
+        }
       }
       const rank = {}
       if (!_.isNil(row.rating)) {

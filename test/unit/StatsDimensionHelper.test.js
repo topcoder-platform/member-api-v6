@@ -80,7 +80,7 @@ describe('stats dimension helper unit tests', () => {
     should.not.exist(result.DATA_SCIENCE)
   })
 
-  it('buildUnifiedStatsResponse should preserve legacy develop response shape when rating fields are absent', () => {
+  it('buildUnifiedStatsResponse should expose derived unified develop submission counts', () => {
     const result = prismaHelper.buildUnifiedStatsResponse(
       {
         userId: global.BigInt(15391415),
@@ -106,7 +106,41 @@ describe('stats dimension helper unit tests', () => {
     result.groupId.should.equal(1)
     should.exist(result.DEVELOP)
     result.DEVELOP.subTracks.should.have.length(1)
-    result.DEVELOP.subTracks[0].submissions.should.deep.equal({})
+    result.DEVELOP.subTracks[0].submissions.should.deep.equal({ submissions: 62 })
     result.DEVELOP.subTracks[0].rank.should.deep.equal({})
+  })
+
+  it('buildUnifiedStatsHistoryResponse should preserve canonical challenge ids and names', () => {
+    const ratingDate = new Date('2024-01-01T00:00:00.000Z')
+    const result = prismaHelper.buildUnifiedStatsHistoryResponse(
+      {
+        userId: global.BigInt(15391415),
+        handle: 'winterflame',
+        handleLower: 'winterflame'
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-dev-id',
+          typeId: 'type-spec-id',
+          trackName: TRACK_NAMES.DEVELOP,
+          typeName: 'SPECIFICATION',
+          challengeId: '11111111-1111-1111-1111-111111111111',
+          challengeName: 'Specification Challenge',
+          newRating: 1321,
+          oldRating: 1299,
+          eventDate: ratingDate,
+          mostRecent: true
+        }
+      ]
+    )
+
+    result.groupId.should.equal(1)
+    should.exist(result.DEVELOP)
+    result.DEVELOP.subTracks.should.have.length(1)
+    result.DEVELOP.subTracks[0].history.should.have.length(1)
+    result.DEVELOP.subTracks[0].history[0].challengeId.should.equal('11111111-1111-1111-1111-111111111111')
+    result.DEVELOP.subTracks[0].history[0].challengeName.should.equal('Specification Challenge')
+    result.DEVELOP.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
   })
 })

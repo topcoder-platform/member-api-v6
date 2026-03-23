@@ -264,19 +264,52 @@ async function fetchReviewChallengeResultsForMember (reviewDbClient, userId) {
   return result.rows
 }
 
+/**
+ * Load challenge metadata keyed by both canonical UUID id and legacy numeric id.
+ * Unified history rows may still carry legacy challenge identifiers from migrated
+ * data, so callers can resolve names and canonical UUIDs without mutating storage.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Array<*>} challengeIds challenge identifiers from stats/history rows
+ * @returns {Promise<Map<string, Object>>} metadata keyed by UUID and legacy id strings
+ */
 async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
-  if (!challengeIds || challengeIds.length === 0) {
+  const normalizedChallengeIds = _.chain(challengeIds)
+    .map(challengeId => (_.isNil(challengeId) ? null : String(challengeId).trim()))
+    .filter(Boolean)
+    .uniq()
+    .value()
+
+  if (normalizedChallengeIds.length === 0) {
     return new Map()
   }
 
-  const challenges = await challengeClient.challenge.findMany({
-    where: {
-      id: {
-        in: challengeIds
+  const numericChallengeIds = _.chain(normalizedChallengeIds)
+    .filter(challengeId => /^\d+$/.test(challengeId))
+    .map(challengeId => Number(challengeId))
+    .filter(Number.isSafeInteger)
+    .uniq()
+    .value()
+
+  const whereClauses = [{
+    id: {
+      in: normalizedChallengeIds
+    }
+  }]
+
+  if (numericChallengeIds.length > 0) {
+    whereClauses.push({
+      legacyId: {
+        in: numericChallengeIds
       }
-    },
+    })
+  }
+
+  const challenges = await challengeClient.challenge.findMany({
+    where: whereClauses.length === 1 ? whereClauses[0] : { OR: whereClauses },
     select: {
       id: true,
+      legacyId: true,
+      name: true,
       trackId: true,
       typeId: true,
       endDate: true,
@@ -304,7 +337,42 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
     }
   })
 
-  return new Map(challenges.map(challenge => [challenge.id, challenge]))
+  const metadataByChallengeId = new Map()
+  _.forEach(challenges, (challenge) => {
+    metadataByChallengeId.set(String(challenge.id), challenge)
+    if (!_.isNil(challenge.legacyId)) {
+      metadataByChallengeId.set(String(challenge.legacyId), challenge)
+    }
+  })
+
+  return metadataByChallengeId
+}
+
+/**
+ * Attach canonical challenge ids and names to unified history rows before shaping
+ * the response payload consumed by the profiles UI.
+ * @param {Array<Object>} rows unified history rows loaded from members.memberStatsHistory
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by UUID and legacy ids
+ * @returns {Array<Object>} rows enriched with canonical challenge ids and names when available
+ */
+function enrichUnifiedHistoryRowsWithChallengeMetadata (rows, challengeMetadataById) {
+  return _.map(rows || [], (row) => {
+    const challengeId = _.isNil(row.challengeId) ? null : String(row.challengeId).trim()
+    if (!challengeId) {
+      return row
+    }
+
+    const challenge = challengeMetadataById.get(challengeId)
+    if (!challenge) {
+      return row
+    }
+
+    return {
+      ...row,
+      challengeId: String(challenge.id),
+      challengeName: row.challengeName || challenge.name
+    }
+  })
 }
 
 function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataById) {
@@ -1002,6 +1070,7 @@ async function getHistoryStats (currentUser, handle, query) {
     result = _.map(overallStat, t => buildLegacyStatsHistoryResponse(member, t, fields))
   } else {
     const dimensionLookup = await getChallengeDimensionLookup()
+    const challengeClient = prismaManager.getChallengesClient()
     const where = {
       userId: member.userId
     }
@@ -1026,7 +1095,11 @@ async function getHistoryStats (currentUser, handle, query) {
 
     const overallStat = []
     if (historyRows.length > 0) {
-      const annotatedRows = annotateUnifiedDimensionRows(historyRows, dimensionLookup)
+      const challengeMetadataById = await fetchChallengeMetadataMap(challengeClient, _.map(historyRows, row => row.challengeId))
+      const annotatedRows = enrichUnifiedHistoryRowsWithChallengeMetadata(
+        annotateUnifiedDimensionRows(historyRows, dimensionLookup),
+        challengeMetadataById
+      )
       _.forEach(groupIds, (groupId) => {
         const scopedRows = _.map(annotatedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
         overallStat.push(scopedRows)
@@ -1076,6 +1149,7 @@ async function createHistoryStats (currentUser, handle, data) {
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
   const operatorId = currentUser.userId || currentUser.sub
   const dimensionLookup = await getChallengeDimensionLookup()
+  const challengeClient = prismaManager.getChallengesClient()
   const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data, dimensionLookup)
   if (!unifiedHistoryRecords || unifiedHistoryRecords.length === 0) {
     throw new errors.BadRequestError('No valid history records provided for unified history stats.')
@@ -1122,7 +1196,11 @@ async function createHistoryStats (currentUser, handle, data) {
     orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
-  const scopedRows = _.map(annotateUnifiedDimensionRows(createdRows, dimensionLookup), row => ({
+  const challengeMetadataById = await fetchChallengeMetadataMap(challengeClient, _.map(createdRows, row => row.challengeId))
+  const scopedRows = _.map(enrichUnifiedHistoryRowsWithChallengeMetadata(
+    annotateUnifiedDimensionRows(createdRows, dimensionLookup),
+    challengeMetadataById
+  ), row => ({
     ...row,
     groupId: _.toNumber(groupIds[0])
   }))
@@ -1196,6 +1274,7 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, groupIdsArr)
   const operatorId = currentUser.userId || currentUser.sub
   const dimensionLookup = await getChallengeDimensionLookup()
+  const challengeClient = prismaManager.getChallengesClient()
   const unifiedHistoryRecords = buildUnifiedHistoryRecordsFromPayload(data, dimensionLookup)
   if (!unifiedHistoryRecords || unifiedHistoryRecords.length === 0) {
     throw new errors.BadRequestError('No valid history records provided for unified history stats.')
@@ -1247,7 +1326,11 @@ async function partiallyUpdateHistoryStats (currentUser, handle, data) {
     orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
   })
 
-  const scopedRows = _.map(annotateUnifiedDimensionRows(updatedRows, dimensionLookup), row => ({
+  const challengeMetadataById = await fetchChallengeMetadataMap(challengeClient, _.map(updatedRows, row => row.challengeId))
+  const scopedRows = _.map(enrichUnifiedHistoryRowsWithChallengeMetadata(
+    annotateUnifiedDimensionRows(updatedRows, dimensionLookup),
+    challengeMetadataById
+  ), row => ({
     ...row,
     groupId: _.toNumber(groupIds[0])
   }))
