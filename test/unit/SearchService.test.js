@@ -98,4 +98,96 @@ describe('search service unit tests', () => {
       prismaHelper.convertMember = originalConvertMember
     }
   })
+
+  it('autocomplete should place exact handle match first on the first page', async () => {
+    const prisma = prismaManager.getClient()
+    const originalMemberCount = prisma.member.count
+    const originalMemberFindMany = prisma.member.findMany
+    const originalMemberFindFirst = prisma.member.findFirst
+
+    const findManyArgs = []
+    try {
+      prisma.member.count = async () => 3
+      prisma.member.findFirst = async () => ({
+        userId: BigInt(1001),
+        handleLower: 'vinod_a'
+      })
+      prisma.member.findMany = async (args) => {
+        findManyArgs.push(args)
+        return [
+          { userId: BigInt(1002), handleLower: 'vinod_ab' },
+          { userId: BigInt(1003), handleLower: 'vinod_az' }
+        ]
+      }
+
+      const response = await service.autocomplete(
+        { isMachine: true },
+        {
+          term: 'vinod_a',
+          page: 1,
+          perPage: 3,
+          sortOrder: 'desc',
+          fields: 'userId,handleLower'
+        }
+      )
+
+      should.equal(response.total, 3)
+      response.result.map(item => item.handleLower).should.deep.equal(['vinod_a', 'vinod_ab', 'vinod_az'])
+      response.result.map(item => item.userId).should.deep.equal([1001, 1002, 1003])
+      should.equal(findManyArgs[0].where.handleLower.not, 'vinod_a')
+      should.equal(findManyArgs[0].skip, 0)
+      should.equal(findManyArgs[0].take, 2)
+    } finally {
+      prisma.member.count = originalMemberCount
+      prisma.member.findMany = originalMemberFindMany
+      prisma.member.findFirst = originalMemberFindFirst
+    }
+  })
+
+  it('autocomplete should offset non-exact results by one on later pages when exact match exists', async () => {
+    const prisma = prismaManager.getClient()
+    const originalMemberCount = prisma.member.count
+    const originalMemberFindMany = prisma.member.findMany
+    const originalMemberFindFirst = prisma.member.findFirst
+
+    const allNonExact = ['vinod_ab', 'vinod_ac', 'vinod_ad', 'vinod_ae']
+    const findManyArgs = []
+    try {
+      prisma.member.count = async () => 5
+      prisma.member.findFirst = async () => ({
+        userId: BigInt(2001),
+        handleLower: 'vinod_a'
+      })
+      prisma.member.findMany = async (args) => {
+        findManyArgs.push(args)
+        return allNonExact
+          .slice(args.skip, args.skip + args.take)
+          .map((handleLower, index) => ({
+            userId: BigInt(2002 + args.skip + index),
+            handleLower
+          }))
+      }
+
+      const response = await service.autocomplete(
+        { isMachine: true },
+        {
+          term: 'vinod_a',
+          page: 2,
+          perPage: 2,
+          sortOrder: 'asc',
+          fields: 'handleLower'
+        }
+      )
+
+      should.equal(response.total, 5)
+      response.result.map(item => item.handleLower).should.deep.equal(['vinod_ac', 'vinod_ad'])
+      should.equal(findManyArgs[0].where.handleLower.not, 'vinod_a')
+      should.equal(findManyArgs[0].skip, 1)
+      should.equal(findManyArgs[0].take, 2)
+    } finally {
+      prisma.member.count = originalMemberCount
+      prisma.member.findMany = originalMemberFindMany
+      prisma.member.findFirst = originalMemberFindFirst
+    }
+  })
 })

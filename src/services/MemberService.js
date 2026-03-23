@@ -466,7 +466,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs,availableForGigsLastUpdateDate,lastProfileConfirmationDate,updatedAt,addresses' }
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,lastProfileConfirmationDate,updatedAt,addresses' }
   const member = await getMemberData(handle, memberFields)
 
   // Used for calculating the percentComplete
@@ -485,7 +485,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   // TODO: Turn this back on once we have verification flow implemented elsewhere
   // data.verified = false
   data.skills = false
-  data.gigAvailability = false
+  data.engagementAvailability = false
   data.bio = false
   data.workHistory = false
   data.education = false
@@ -494,18 +494,12 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const totalItems = Object.keys(data).length
 
   data.skillsLastUpdateDate = undefined
-  data.gigAvailabilityLastUpdateDate = undefined
+  data.engagementAvailabilityLastUpdateDate = undefined
   data.workHistoryLastUpdateDate = undefined
   data.educationLastUpdateDate = undefined
   data.locationLastUpdateDate = undefined
   data.profileLastUpdateDate = new Date(member.updatedAt).toISOString()
   data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined
-
-  if (member.availableForGigs != null) {
-    completeItems += 1
-    data.gigAvailability = true
-    data.gigAvailabilityLastUpdateDate = member.availableForGigsLastUpdateDate || undefined
-  }
 
   _.forEach(memberTraits, (item) => {
     if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
@@ -519,6 +513,20 @@ async function getProfileCompleteness (currentUser, handle, query) {
       data.workHistory = true
       data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
+
+    if (item.traitId === 'personalization' && item.traits.data.length > 0 && !data.engagementAvailability) {
+      const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork')) || {};
+      const openToWorkData = openToWorkTrait.openToWork;
+      
+      if (openToWorkData && (
+        !openToWorkData.availability ||
+        (openToWorkData.preferredRoles && openToWorkData.preferredRoles.length)
+      )) {
+        completeItems += 1
+        data.engagementAvailability = true
+        data.engagementAvailabilityLastUpdateDate = new Date(item.updatedAt).toISOString()
+      }
+    }
   })
   // Push on the incomplete traits for picking a random toast to show
   if (!data.education) {
@@ -527,8 +535,8 @@ async function getProfileCompleteness (currentUser, handle, query) {
   if (!data.workHistory) {
     showToast.push('workHistory')
   }
-  if (!data.gigAvailability) {
-    showToast.push('gigAvailability')
+  if (!data.engagementAvailability) {
+    showToast.push('engagementAvailability')
   }
 
   // TODO: Do we use the short bio or the "description" field of the member object?
@@ -548,15 +556,23 @@ async function getProfileCompleteness (currentUser, handle, query) {
   //   showToast.push("verified")
   // }
 
-  // Must have at least 3 skills entered
-  if (member.skills && member.skills.length >= 3) {
-    completeItems += 1
-    data.skills = true
+  // Skills section is complete only when member has at least
+  // 1 principal skill and 1 additional skill
+  if (member.skills && member.skills.length > 0) {
+    const principalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') === 'principal').length
+    const additionalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') === 'additional').length
 
-    const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
-      Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
-    ), new Date(0))
-    data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
+    if (principalCount >= 1 && additionalCount >= 1) {
+      completeItems += 1
+      data.skills = true
+
+      const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
+        Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
+      ), new Date(0))
+      data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
+    } else {
+      showToast.push('skills')
+    }
   } else {
     showToast.push('skills')
   }
@@ -1780,29 +1796,32 @@ async function aggregatePDFData (currentUser, handle) {
   // Fetch skills from standardized-skills-api
   const skills = await getMemberSkills(memberData.userId)
 
-  // Separate skills by display mode and verification status
+  // Principal skills: same as before (verified / not verified lists)
   const principalSkills = { verified: [], notVerified: [] }
-  const additionalSkills = { verified: [], notVerified: [] }
-
   skills.forEach(skill => {
-    const isPrincipal = _.get(skill, 'displayMode.name') === 'principal'
+    if (_.get(skill, 'displayMode.name') !== 'principal') return
     const isVerified = _.some(_.get(skill, 'levels', []), level => level.name === 'verified')
     const skillName = skill.name
-
-    if (isPrincipal) {
-      if (isVerified) {
-        principalSkills.verified.push(skillName)
-      } else {
-        principalSkills.notVerified.push(skillName)
-      }
+    if (isVerified) {
+      principalSkills.verified.push(skillName)
     } else {
-      if (isVerified) {
-        additionalSkills.verified.push(skillName)
-      } else {
-        additionalSkills.notVerified.push(skillName)
-      }
+      principalSkills.notVerified.push(skillName)
     }
   })
+
+  // Additional skills: group by category, sort by name, take up to limit per category (env PDF_SKILLS_PER_CATEGORY, default 5)
+  const additionalSkills = skills.filter(skill => _.get(skill, 'displayMode.name') !== 'principal')
+  const skillsPerCategoryLimit = Math.max(1, parseInt(config.PDF_SKILLS_PER_CATEGORY, 10) || 5)
+  const categoryKey = (skill) => (skill.category && skill.category.name) ? skill.category.name : 'Other'
+  const byCategory = _.groupBy(additionalSkills, categoryKey)
+  const skillsByCategory = _.map(byCategory, (skillList, categoryName) => {
+    const names = _.map(skillList, 'name')
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .slice(0, skillsPerCategoryLimit)
+    return { categoryName, skills: names }
+  }).filter(item => item.skills.length > 0)
+  skillsByCategory.sort((a, b) => a.categoryName.localeCompare(b.categoryName, undefined, { sensitivity: 'base' }))
 
   const specialRoles = []
   const roleMap = {
@@ -1933,10 +1952,8 @@ async function aggregatePDFData (currentUser, handle) {
       shortBio: shortBio
     },
     // Skills
-    skills: {
-      principal: principalSkills,
-      additional: additionalSkills
-    },
+    skills: { principal: principalSkills },
+    skillsByCategory,
     // Topcoder activity
     topcoderActivity: {
       specialRole: specialRoles.length > 0 ? `Topcoder Special Role: ${specialRoles.join(', ')}` : null,

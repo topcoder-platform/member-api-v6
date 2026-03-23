@@ -1769,6 +1769,118 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats/refresh':
+    post:
+      x-internal: true
+      tags:
+        - Statistics
+      description: >
+        Refreshes unified member stats for the member from review-api challenge results.
+        `challengeId` is accepted for compatibility and echoed in the response summary.
+        Callable by admin users or M2M tokens with `refresh:member_stats` scope.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: false
+          schema:
+            type: object
+            properties:
+              challengeId:
+                type: string
+                description: Optional UUID or legacy numeric challenge identifier echoed in the response summary.
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/StatsRefreshResult'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats/rerate':
+    post:
+      x-internal: true
+      tags:
+        - Statistics
+      description: >
+        Triggers a re-rating pass for the member starting from the specified challenge.
+        All subsequent challenges in the same track/type are also re-rated to maintain accuracy.
+        Callable by admin users or M2M tokens with `rerate:member_stats` scope.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - challengeId
+            properties:
+              challengeId:
+                type: string
+                description: UUID or legacy numeric challenge identifier that starts the rerate request.
+              trackId:
+                type: string
+                enum:
+                  - DEVELOP
+                  - DATA_SCIENCE
+              typeId:
+                type: string
+                enum:
+                  - Challenge
+                  - MARATHON_MATCH
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/StatsRerateResult'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}/skills':
     get:
       tags:
@@ -2372,6 +2484,47 @@ definitions:
       timePeriodTo:
         type: string
         format: date-time
+  StatsRefreshResult:
+    type: object
+    properties:
+      handle:
+        type: string
+      refreshed:
+        type: boolean
+      challengeId:
+        type: string
+        x-nullable: true
+        description: Optional UUID or legacy numeric challenge identifier echoed as a string in the refresh summary.
+      challengeResultsProcessed:
+        type: integer
+        format: int32
+      statsUpdated:
+        type: integer
+        format: int32
+  StatsRerateResult:
+    type: object
+    properties:
+      handle:
+        type: string
+      rerated:
+        type: boolean
+      challengeId:
+        type: string
+        description: UUID or legacy numeric challenge identifier echoed as a string in the rerate summary.
+      trackId:
+        type: string
+      typeId:
+        type: string
+      challengesRerated:
+        type: integer
+        format: int32
+        description: Number of subsequent challenges rerated after the starting challenge.
+      challengesProcessed:
+        type: integer
+        format: int32
+      ratingsUpdated:
+        type: integer
+        format: int32
   MemberStats:
     type: object
     properties:
