@@ -1,6 +1,10 @@
 const _ = require('lodash')
 const helper = require('./helper')
 const errors = require('./errors')
+const {
+  getCanonicalTrackName,
+  getCanonicalTypeName
+} = require('./statsDimensionHelper')
 
 const designBasicFields = [
   'name', 'numInquiries', 'submissions', 'passedScreening', 'avgPlacement',
@@ -45,62 +49,14 @@ const auditFields = [
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
 ]
 
-const unifiedTrackMap = {
-  DEVELOP: 'DEVELOP',
-  DESIGN: 'DESIGN',
-  DATA_SCIENCE: 'DATA_SCIENCE',
-  COPILOT: 'COPILOT'
-}
-
-const unifiedTypeMap = {
-  CHALLENGE: 'Challenge',
-  FIRST2FINISH: 'First2Finish',
-  TASK: 'Task',
-  SRM: 'SRM',
-  MARATHON_MATCH: 'MARATHON_MATCH'
-}
-
 function getUnifiedTrackName (trackId) {
-  const normalized = String(trackId || '').toUpperCase().trim()
-  if (unifiedTrackMap[normalized]) {
-    return unifiedTrackMap[normalized]
-  }
-  if (normalized.includes('DATA') && normalized.includes('SCIENCE')) {
-    return 'DATA_SCIENCE'
-  }
-  if (normalized.includes('DEVELOP') || normalized === 'DEV') {
-    return 'DEVELOP'
-  }
-  if (normalized.includes('DESIGN') || normalized === 'DES') {
-    return 'DESIGN'
-  }
-  if (normalized.includes('COPILOT')) {
-    return 'COPILOT'
-  }
-  return normalized
+  const canonical = getCanonicalTrackName(trackId)
+  return canonical || String(trackId || '').toUpperCase().trim()
 }
 
 function getUnifiedTypeName (typeId) {
-  const normalized = String(typeId || '').toUpperCase().trim()
-  if (unifiedTypeMap[normalized]) {
-    return unifiedTypeMap[normalized]
-  }
-  if (normalized.includes('MARATHON')) {
-    return 'MARATHON_MATCH'
-  }
-  if (normalized.includes('FIRST') || normalized.includes('F2F')) {
-    return 'First2Finish'
-  }
-  if (normalized.includes('TASK')) {
-    return 'Task'
-  }
-  if (normalized.includes('SRM')) {
-    return 'SRM'
-  }
-  if (normalized.includes('CHALLENGE')) {
-    return 'Challenge'
-  }
-  return typeId
+  const canonical = getCanonicalTypeName(typeId)
+  return canonical || typeId
 }
 
 function toUnixTime (value) {
@@ -125,6 +81,26 @@ function mergeTrackCounters (trackItem, stat) {
   if (eventDate && (!trackItem.mostRecentEventDate || eventDate > trackItem.mostRecentEventDate)) {
     trackItem.mostRecentEventDate = eventDate
   }
+}
+
+/**
+ * Build the maxRating response object while recomputing the rating color from
+ * the canonical color-band helper instead of trusting persisted color data.
+ * @param {Object} maxRating memberMaxRating row
+ * @returns {Object|null} normalized maxRating payload for API responses
+ */
+function buildMaxRatingResponse (maxRating) {
+  if (!maxRating || _.isNil(maxRating.rating)) {
+    return null
+  }
+
+  const rating = toNumber(maxRating.rating)
+  return _.omitBy({
+    rating,
+    track: maxRating.track,
+    subTrack: maxRating.subTrack,
+    ratingColor: helper.getRatingColor(rating)
+  }, _.isNil)
 }
 
 /**
@@ -270,8 +246,9 @@ function buildStatsResponse (member, statsData, fields) {
     challenges: statsData.challenges,
     wins: statsData.wins
   }
-  if (member.maxRating) {
-    item.maxRating = _.pick(member.maxRating, ['rating', 'track', 'subTrack', 'ratingColor'])
+  const maxRating = buildMaxRatingResponse(member.maxRating)
+  if (maxRating) {
+    item.maxRating = maxRating
   }
   if (statsData.design) {
     item.DESIGN = {
@@ -391,7 +368,15 @@ function buildStatsResponse (member, statsData, fields) {
  */
 function buildUnifiedStatsResponse (member, statsData, fields) {
   const rows = _.isArray(statsData) ? statsData : [statsData]
-  const validRows = _.filter(rows, row => !_.isNil(row))
+  const validRows = _.chain(rows)
+    .filter(row => !_.isNil(row))
+    .map(row => ({
+      ...row,
+      resolvedTrackName: getUnifiedTrackName(row.trackName || row.trackId),
+      resolvedTypeName: getUnifiedTypeName(row.typeName || row.typeId)
+    }))
+    .filter(row => _.includes(['DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT'], row.resolvedTrackName))
+    .value()
   const item = {
     userId: helper.bigIntToNumber(member.userId),
     handle: member.handle,
@@ -399,13 +384,14 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
     challenges: _.sumBy(validRows, row => toNumber(row.challenges)),
     wins: _.sumBy(validRows, row => toNumber(row.wins))
   }
-  if (member.maxRating) {
-    item.maxRating = _.pick(member.maxRating, ['rating', 'track', 'subTrack', 'ratingColor'])
+  const maxRating = buildMaxRatingResponse(member.maxRating)
+  if (maxRating) {
+    item.maxRating = maxRating
   }
 
   _.forEach(validRows, (row) => {
-    const trackName = getUnifiedTrackName(row.trackId)
-    const typeName = getUnifiedTypeName(row.typeId)
+    const trackName = row.resolvedTrackName
+    const typeName = row.resolvedTypeName
     if (trackName === 'DEVELOP') {
       if (!item.DEVELOP) {
         item.DEVELOP = {
@@ -542,7 +528,15 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
  */
 function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
   const rows = _.isArray(historyStats) ? historyStats : [historyStats]
-  const validRows = _.filter(rows, row => !_.isNil(row))
+  const validRows = _.chain(rows)
+    .filter(row => !_.isNil(row))
+    .map(row => ({
+      ...row,
+      resolvedTrackName: getUnifiedTrackName(row.trackName || row.trackId),
+      resolvedTypeName: getUnifiedTypeName(row.typeName || row.typeId)
+    }))
+    .filter(row => _.includes(['DEVELOP', 'DATA_SCIENCE'], row.resolvedTrackName))
+    .value()
   const first = _.head(validRows) || {}
   const item = {
     userId: helper.bigIntToNumber(member.userId),
@@ -551,7 +545,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
     handleLower: member.handleLower
   }
 
-  const groupedByTrackType = _.groupBy(validRows, row => `${getUnifiedTrackName(row.trackId)}::${getUnifiedTypeName(row.typeId)}`)
+  const groupedByTrackType = _.groupBy(validRows, row => `${row.resolvedTrackName}::${row.resolvedTypeName}`)
   _.forEach(groupedByTrackType, (trackHistory, key) => {
     const [trackName, typeName] = key.split('::')
     if (trackName === 'DEVELOP') {
@@ -561,19 +555,26 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
       item.DEVELOP.subTracks.push({
         id: typeName,
         name: typeName,
-        history: _.map(trackHistory, h => _.omitBy({
-          challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
-          ratingDate: h.eventDate ? h.eventDate.getTime() : null,
-          mostRecent: !!h.mostRecent,
-          oldRating: h.oldRating,
-          newRating: h.newRating,
-          oldGlobalRank: h.oldGlobalRank,
-          newGlobalRank: h.newGlobalRank,
-          oldCountryRank: h.oldCountryRank,
-          newCountryRank: h.newCountryRank,
-          oldSchoolRank: h.oldSchoolRank,
-          newSchoolRank: h.newSchoolRank
-        }, _.isNil))
+        history: _.map(trackHistory, h => {
+          const historyDate = h.ratingDate || h.date || h.eventDate
+          return _.omitBy({
+            challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
+            challengeName: h.challengeName,
+            placement: h.placement,
+            percentile: h.percentile,
+            rating: _.isNil(h.rating) ? h.newRating : h.rating,
+            newRating: h.newRating,
+            ratingDate: historyDate ? historyDate.getTime() : null,
+            mostRecent: !!h.mostRecent,
+            oldRating: h.oldRating,
+            oldGlobalRank: h.oldGlobalRank,
+            newGlobalRank: h.newGlobalRank,
+            oldCountryRank: h.oldCountryRank,
+            newCountryRank: h.newCountryRank,
+            oldSchoolRank: h.oldSchoolRank,
+            newSchoolRank: h.newSchoolRank
+          }, _.isNil)
+        })
       })
     } else if (trackName === 'DATA_SCIENCE') {
       if (!item.DATA_SCIENCE) {
@@ -582,19 +583,27 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
       if (!item.DATA_SCIENCE[typeName]) {
         item.DATA_SCIENCE[typeName] = {}
       }
-      item.DATA_SCIENCE[typeName].history = _.map(trackHistory, h => _.omitBy({
-        challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
-        date: h.eventDate ? h.eventDate.getTime() : null,
-        mostRecent: !!h.mostRecent,
-        oldRating: h.oldRating,
-        newRating: h.newRating,
-        oldGlobalRank: h.oldGlobalRank,
-        newGlobalRank: h.newGlobalRank,
-        oldCountryRank: h.oldCountryRank,
-        newCountryRank: h.newCountryRank,
-        oldSchoolRank: h.oldSchoolRank,
-        newSchoolRank: h.newSchoolRank
-      }, _.isNil))
+      item.DATA_SCIENCE[typeName].history = _.map(trackHistory, h => {
+        const historyDate = h.ratingDate || h.date || h.eventDate
+        return _.omitBy({
+          challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
+          challengeName: h.challengeName,
+          date: historyDate ? historyDate.getTime() : null,
+          ratingDate: historyDate ? historyDate.getTime() : null,
+          rating: _.isNil(h.rating) ? h.newRating : h.rating,
+          newRating: h.newRating,
+          placement: h.placement,
+          percentile: h.percentile,
+          mostRecent: !!h.mostRecent,
+          oldRating: h.oldRating,
+          oldGlobalRank: h.oldGlobalRank,
+          newGlobalRank: h.newGlobalRank,
+          oldCountryRank: h.oldCountryRank,
+          newCountryRank: h.newCountryRank,
+          oldSchoolRank: h.oldSchoolRank,
+          newSchoolRank: h.newSchoolRank
+        }, _.isNil)
+      })
     }
   })
 

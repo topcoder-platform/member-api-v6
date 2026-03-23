@@ -74,6 +74,28 @@ async function partiallyUpdateMemberStats (req, res) {
 }
 
 /**
+ * Refresh memberStats and memberStatsHistory for the specified member.
+ * Callable by admin users or M2M tokens with the refresh:member_stats scope.
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function refreshMemberStats (req, res) {
+  const result = await service.refreshMemberStats(req.authUser, req.params.handle, req.body)
+  res.send(result)
+}
+
+/**
+ * Trigger a re-rating pass for the specified member from the requested challenge onward.
+ * Callable by admin users or M2M tokens with the rerate:member_stats scope.
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function rerateMemberStats (req, res) {
+  const result = await service.rerateMemberStats(req.authUser, req.params.handle, req.body)
+  res.send(result)
+}
+
+/**
  * Get member skills
  * @param {Object} req the request
  * @param {Object} res the response
@@ -121,6 +143,8 @@ module.exports = {
   getMemberStats,
   createMemberStats,
   partiallyUpdateMemberStats,
+  refreshMemberStats,
+  rerateMemberStats,
   getMemberSkills,
   createMemberSkills,
   partiallyUpdateMemberSkills,

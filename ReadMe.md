@@ -190,3 +190,9 @@ npm run test
 
 ## Verification
 Refer to the verification document `Verification.md`
+
+## Migration & Cutover
+
+The stats migration and staged-cutover runbook now lives in [`CUTOVER.md`](./CUTOVER.md).
+
+Use `STATS_READ_SOURCE=unified` for the unified `memberStats` / `memberStatsHistory` read path and `STATS_READ_SOURCE=legacy` only as a staged rollback switch during parity validation.
