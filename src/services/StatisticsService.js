@@ -1307,9 +1307,16 @@ partiallyUpdateHistoryStats.schema = {
  * @returns {Array} member statistics
  */
 async function getUnifiedMemberStats (member, groupIds, query, fields) {
-  const trackId = resolveTrackId(query.trackId)
-  const typeId = resolveTypeId(query.typeId)
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const { hasTrackFilter, hasTypeFilter, trackId, typeId } = resolveUnifiedDimensionFilters(query, dimensionLookup)
   const stats = []
+
+  if (hasTrackFilter && !trackId) {
+    return stats
+  }
+  if (hasTypeFilter && !typeId) {
+    return stats
+  }
 
   for (const groupId of groupIds) {
     const where = {
@@ -1329,7 +1336,10 @@ async function getUnifiedMemberStats (member, groupIds, query, fields) {
     })
 
     if (unifiedStats && unifiedStats.length > 0) {
-      const scopedStats = _.map(unifiedStats, stat => ({ ...stat, groupId: _.toNumber(groupId) }))
+      const scopedStats = _.map(annotateUnifiedDimensionRows(unifiedStats, dimensionLookup), stat => ({
+        ...stat,
+        groupId: _.toNumber(groupId)
+      }))
       stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
     }
   }
@@ -1368,7 +1378,7 @@ async function getMemberStats (currentUser, handle, query, throwError) {
   const member = await helper.getMemberByHandle(handle)
 
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, query.groupIds)
-  let stats
+  let stats = []
   if (USE_LEGACY_STATS_READS) {
     stats = await getLegacyMemberStats(member, groupIds, fields)
     if (stats.length === 0) {

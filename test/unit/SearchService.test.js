@@ -2,6 +2,8 @@
  * Unit tests of search service.
  */
 
+/* global BigInt */
+
 require('../../app-bootstrap')
 const chai = require('chai')
 
