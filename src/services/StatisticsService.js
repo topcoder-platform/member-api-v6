@@ -302,6 +302,15 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
         in: numericChallengeIds
       }
     })
+    whereClauses.push({
+      legacyRecord: {
+        is: {
+          legacySystemId: {
+            in: numericChallengeIds
+          }
+        }
+      }
+    })
   }
 
   const challenges = await challengeClient.challenge.findMany({
@@ -333,6 +342,11 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
           name: true,
           value: true
         }
+      },
+      legacyRecord: {
+        select: {
+          legacySystemId: true
+        }
       }
     }
   })
@@ -342,6 +356,9 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
     metadataByChallengeId.set(String(challenge.id), challenge)
     if (!_.isNil(challenge.legacyId)) {
       metadataByChallengeId.set(String(challenge.legacyId), challenge)
+    }
+    if (!_.isNil(_.get(challenge, 'legacyRecord.legacySystemId'))) {
+      metadataByChallengeId.set(String(challenge.legacyRecord.legacySystemId), challenge)
     }
   })
 
