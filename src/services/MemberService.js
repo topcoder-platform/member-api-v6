@@ -33,7 +33,6 @@ const academyPrisma = prismaManager.getAcademyClient()
 const resourcesPrisma = prismaManager.getResourcesClient()
 const engagementsPrisma = prismaManager.getEngagementsClient()
 const profilePDFService = require('./ProfilePDFService')
-const StatisticsService = require('./StatisticsService')
 const request = require('request')
 const axios = require('axios')
 const cityTimezones = require('city-timezones')
@@ -110,12 +109,18 @@ function omitMemberAttributes (currentUser, mb) {
     currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
   const canSeeIdentityVerified = isM2M || hasSensitiveDataRole || isSelf
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
+  const canSeeFullAddress = canManageMember || hasSensitiveDataRole
 
-  if (!canManageMember) {
+  if (!canManageMember ) {
     res = _.omit(res, config.MEMBER_SECURE_FIELDS)
-    res = helper.secureMemberAddressData(res)
     res = helper.truncateLastName(res)
   }
+
+  // Show full address to admins and TMs
+  if (!canSeeFullAddress) {
+    res = helper.secureMemberAddressData(res)
+  }
+
   if (!canManageMember && !hasSensitiveDataRole) {
     res = _.omit(res, config.COMMUNICATION_SECURE_FIELDS)
     if (res.phones) {
@@ -484,7 +489,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,availableForGigs,availableForGigsLastUpdateDate,lastProfileConfirmationDate,updatedAt,addresses' }
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,lastProfileConfirmationDate,updatedAt,addresses' }
   const member = await getMemberData(handle, memberFields)
 
   // Used for calculating the percentComplete
@@ -503,9 +508,8 @@ async function getProfileCompleteness (currentUser, handle, query) {
   // TODO: Turn this back on once we have verification flow implemented elsewhere
   // data.verified = false
   data.skills = false
-  data.gigAvailability = false
+  data.engagementAvailability = false
   data.bio = false
-  data.profilePicture = false
   data.workHistory = false
   data.education = false
   data.location = false
@@ -513,18 +517,12 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const totalItems = Object.keys(data).length
 
   data.skillsLastUpdateDate = undefined
-  data.gigAvailabilityLastUpdateDate = undefined
+  data.engagementAvailabilityLastUpdateDate = undefined
   data.workHistoryLastUpdateDate = undefined
   data.educationLastUpdateDate = undefined
   data.locationLastUpdateDate = undefined
   data.profileLastUpdateDate = new Date(member.updatedAt).toISOString()
   data.lastProfileConfirmationDate = member.lastProfileConfirmationDate ? new Date(member.lastProfileConfirmationDate).toISOString() : undefined
-
-  if (member.availableForGigs != null) {
-    completeItems += 1
-    data.gigAvailability = true
-    data.gigAvailabilityLastUpdateDate = member.availableForGigsLastUpdateDate || undefined
-  }
 
   _.forEach(memberTraits, (item) => {
     if (item.traitId === 'education' && item.traits.data.length > 0 && !data.education) {
@@ -538,6 +536,20 @@ async function getProfileCompleteness (currentUser, handle, query) {
       data.workHistory = true
       data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
+
+    if (item.traitId === 'personalization' && item.traits.data.length > 0 && !data.engagementAvailability) {
+      const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork')) || {};
+      const openToWorkData = openToWorkTrait.openToWork;
+      
+      if (openToWorkData && (
+        !openToWorkData.availability ||
+        (openToWorkData.preferredRoles && openToWorkData.preferredRoles.length)
+      )) {
+        completeItems += 1
+        data.engagementAvailability = true
+        data.engagementAvailabilityLastUpdateDate = new Date(item.updatedAt).toISOString()
+      }
+    }
   })
   // Push on the incomplete traits for picking a random toast to show
   if (!data.education) {
@@ -546,8 +558,8 @@ async function getProfileCompleteness (currentUser, handle, query) {
   if (!data.workHistory) {
     showToast.push('workHistory')
   }
-  if (!data.gigAvailability) {
-    showToast.push('gigAvailability')
+  if (!data.engagementAvailability) {
+    showToast.push('engagementAvailability')
   }
 
   // TODO: Do we use the short bio or the "description" field of the member object?
@@ -567,27 +579,37 @@ async function getProfileCompleteness (currentUser, handle, query) {
   //   showToast.push("verified")
   // }
 
-  // Must have at least 3 skills entered
-  if (member.skills && member.skills.length >= 3) {
-    completeItems += 1
-    data.skills = true
+  // Skills section is complete only when member has at least
+  // 1 principal skill and 1 additional skill
+  if (member.skills && member.skills.length > 0) {
+    const principalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') === 'principal').length
+    const additionalCount = member.skills.filter(skill => _.get(skill, 'displayMode.name') === 'additional').length
 
-    const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
-      Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
-    ), new Date(0))
-    data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
+    if (principalCount >= 1 && additionalCount >= 1) {
+      completeItems += 1
+      data.skills = true
+
+      const lastUpdateAt = member.skills.reduce((LastUpdateAt, skill) => (
+        Math.max(LastUpdateAt, (skill.updatedAt || skill.createdAt).getTime())
+      ), new Date(0))
+      data.skillsLastUpdateDate = new Date(lastUpdateAt).toISOString()
+    } else {
+      showToast.push('skills')
+    }
   } else {
     showToast.push('skills')
   }
 
-  if (member.photoURL) {
-    completeItems += 1
-    data.profilePicture = true
-  } else {
-    showToast.push('profilePicture')
-  }
+  const hasCountry = !!(member.homeCountryCode)
 
-  if (member.addresses && member.addresses.length) {
+  const hasCity = !!(
+    member.addresses
+    && member.addresses.length
+    && member.addresses.some(a => a && a.city && a.city.trim())
+  )
+
+  // Should have city and country in at least one address
+  if (hasCity && hasCountry) {
     completeItems += 1
     data.location = true
 
@@ -691,6 +713,9 @@ async function updateMember (currentUser, handle, query, data) {
     if (!Array.isArray(data.phones)) {
       throw new errors.BadRequestError('phones must be an array')
     }
+
+    const seen = new Set()
+
     for (const phone of data.phones) {
       if (!phone.type || typeof phone.type !== 'string') {
         throw new errors.BadRequestError('Each phone must have a type (string)')
@@ -701,6 +726,14 @@ async function updateMember (currentUser, handle, query, data) {
       if (!phoneRegex.test(phone.number)) {
         throw new errors.BadRequestError(`Phone number "${phone.number}" is not in valid E.164 format (must start with + followed by 1-15 digits)`)
       }
+      const number = phone.number.trim()
+      phone.number = number
+
+      // only block duplicates within the payload
+      if (seen.has(number)) {
+        throw new errors.BadRequestError(`Duplicate phone number "${number}" is not allowed.`)
+      }
+      seen.add(number)
     }
   }
 
@@ -1627,11 +1660,11 @@ async function getMemberRoles (userId) {
   }
 }
 
-/** Track enum to display name (for standard tracks: wins, submissions, challenges) */
+/** Track enum to display name (wins, submissions, challenges) */
 const TRACK_DISPLAY_NAMES = {
   DEVELOPMENT: 'Development',
   DESIGN: 'Design',
-  DATA_SCIENCE: 'Competitive Programming',
+  DATA_SCIENCE: 'Data Science',
   QUALITY_ASSURANCE: 'Quality Assurance'
 }
 
@@ -1641,17 +1674,19 @@ const TRACK_DISPLAY_NAMES = {
  * @param {Number} userId member userId
  * @param {Object} challengesPrisma challenges Prisma client
  * @param {Object} resourcesPrisma resources Prisma client
- * @returns {Promise<Array<{ trackName: string, wins: number, submissions: number, challenges: number, rating?: number, competitions?: number }>>}
+ * @returns {Promise<Array<{ trackName: string, wins: number, submissions: number, challenges: number }>>}
  */
 async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrisma) {
-  const trackMap = {} // track enum -> { wins, submissions, challenges } or { rating, wins, competitions } for DATA_SCIENCE
+  const trackMap = {} // track enum -> { wins, submissions, challenges }
 
   try {
     const numUserId = typeof userId === 'bigint' ? helper.bigIntToNumber(userId) : userId
 
-    // 1) ChallengeWinner: wins (and submissions if same table) by track
-    const winners = await challengesPrisma.ChallengeWinner.findMany({
-      where: { userId: numUserId },
+    const winnerRows = await challengesPrisma.ChallengeWinner.findMany({
+      where: {
+        userId: numUserId,
+        type: { in: ['PLACEMENT', 'PASSED_REVIEW'] }
+      },
       include: {
         challenge: {
           include: { track: true }
@@ -1659,18 +1694,15 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       }
     })
 
-    for (const w of winners) {
+    for (const w of winnerRows) {
       const trackEnum = w.challenge?.track?.track
       if (!trackEnum) continue
       if (!trackMap[trackEnum]) {
-        const isDataScience = trackEnum === 'DATA_SCIENCE'
-        trackMap[trackEnum] = isDataScience
-          ? { wins: 0, competitions: 0, rating: undefined }
-          : { wins: 0, submissions: 0, challenges: 0 }
+        trackMap[trackEnum] = { wins: 0, submissions: 0, challenges: 0 }
       }
       const row = trackMap[trackEnum]
-      if (row.wins !== undefined) row.wins += 1
-      if (row.submissions !== undefined) row.submissions += 1
+      if (w.type === 'PLACEMENT') row.wins += 1
+      if (w.type === 'PASSED_REVIEW') row.submissions += 1
     }
 
     // 2) Resources: registrations (distinct challenges) by track
@@ -1704,13 +1736,9 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
       }
       for (const [trackEnum, count] of Object.entries(challengesPerTrack)) {
         if (!trackMap[trackEnum]) {
-          const isDataScience = trackEnum === 'DATA_SCIENCE'
-          trackMap[trackEnum] = isDataScience
-            ? { wins: 0, competitions: count, rating: undefined }
-            : { wins: 0, submissions: 0, challenges: count }
+          trackMap[trackEnum] = { wins: 0, submissions: 0, challenges: count }
         } else {
-          if (trackMap[trackEnum].challenges !== undefined) trackMap[trackEnum].challenges = count
-          if (trackMap[trackEnum].competitions !== undefined) trackMap[trackEnum].competitions = count
+          trackMap[trackEnum].challenges = count
         }
       }
     }
@@ -1719,22 +1747,13 @@ async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrism
     for (const [trackEnum, counts] of Object.entries(trackMap)) {
       const trackName = TRACK_DISPLAY_NAMES[trackEnum] || trackEnum
       const hasAny = Object.values(counts).some(v => typeof v === 'number' && v > 0)
-      if (!hasAny && (counts.rating == null || counts.rating === 0)) continue
-      if (trackEnum === 'DATA_SCIENCE') {
-        statsByTrack.push({
-          trackName,
-          rating: counts.rating ?? 0,
-          wins: counts.wins ?? 0,
-          competitions: counts.competitions ?? 0
-        })
-      } else {
-        statsByTrack.push({
-          trackName,
-          wins: counts.wins ?? 0,
-          submissions: counts.submissions ?? 0,
-          challenges: counts.challenges ?? 0
-        })
-      }
+      if (!hasAny) continue
+      statsByTrack.push({
+        trackName,
+        wins: counts.wins ?? 0,
+        submissions: counts.submissions ?? 0,
+        challenges: counts.challenges ?? 0
+      })
     }
     return statsByTrack
   } catch (err) {
@@ -1780,29 +1799,32 @@ async function aggregatePDFData (currentUser, handle) {
   // Fetch skills from standardized-skills-api
   const skills = await getMemberSkills(memberData.userId)
 
-  // Separate skills by display mode and verification status
+  // Principal skills: same as before (verified / not verified lists)
   const principalSkills = { verified: [], notVerified: [] }
-  const additionalSkills = { verified: [], notVerified: [] }
-
   skills.forEach(skill => {
-    const isPrincipal = _.get(skill, 'displayMode.name') === 'principal'
+    if (_.get(skill, 'displayMode.name') !== 'principal') return
     const isVerified = _.some(_.get(skill, 'levels', []), level => level.name === 'verified')
     const skillName = skill.name
-
-    if (isPrincipal) {
-      if (isVerified) {
-        principalSkills.verified.push(skillName)
-      } else {
-        principalSkills.notVerified.push(skillName)
-      }
+    if (isVerified) {
+      principalSkills.verified.push(skillName)
     } else {
-      if (isVerified) {
-        additionalSkills.verified.push(skillName)
-      } else {
-        additionalSkills.notVerified.push(skillName)
-      }
+      principalSkills.notVerified.push(skillName)
     }
   })
+
+  // Additional skills: group by category, sort by name, take up to limit per category (env PDF_SKILLS_PER_CATEGORY, default 5)
+  const additionalSkills = skills.filter(skill => _.get(skill, 'displayMode.name') !== 'principal')
+  const skillsPerCategoryLimit = Math.max(1, parseInt(config.PDF_SKILLS_PER_CATEGORY, 10) || 5)
+  const categoryKey = (skill) => (skill.category && skill.category.name) ? skill.category.name : 'Other'
+  const byCategory = _.groupBy(additionalSkills, categoryKey)
+  const skillsByCategory = _.map(byCategory, (skillList, categoryName) => {
+    const names = _.map(skillList, 'name')
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .slice(0, skillsPerCategoryLimit)
+    return { categoryName, skills: names }
+  }).filter(item => item.skills.length > 0)
+  skillsByCategory.sort((a, b) => a.categoryName.localeCompare(b.categoryName, undefined, { sensitivity: 'base' }))
 
   const specialRoles = []
   const roleMap = {
@@ -1846,28 +1868,6 @@ async function aggregatePDFData (currentUser, handle) {
     statsByTrack = await fetchMemberStatsByTrack(userId, challengesPrisma, resourcesPrisma)
   } catch (err) {
     logger.warn(`aggregatePDFData: statsByTrack failed for ${handle}: ${err.message}`)
-  }
-
-  // Merge Competitive Programming rating from stats endpoint (same source as GET /members/:handle/stats)
-  try {
-    const statsResult = await StatisticsService.getMemberStats(currentUser, handle, {})
-    const statsResponse = Array.isArray(statsResult) && statsResult.length > 0 ? statsResult[0] : null
-    if (statsResponse && statsResponse.DATA_SCIENCE) {
-      const ds = statsResponse.DATA_SCIENCE
-      const rating = (ds.SRM && ds.SRM.rank && ds.SRM.rank.rating != null)
-        ? ds.SRM.rank.rating
-        : (ds.MARATHON_MATCH && ds.MARATHON_MATCH.rank && ds.MARATHON_MATCH.rank.rating != null)
-          ? ds.MARATHON_MATCH.rank.rating
-          : 0
-      const cpEntry = statsByTrack.find(e => e.trackName === 'Competitive Programming')
-      if (cpEntry) {
-        cpEntry.rating = rating
-      } else if (rating > 0) {
-        statsByTrack.push({ trackName: 'Competitive Programming', rating, wins: 0, competitions: 0 })
-      }
-    }
-  } catch (err) {
-    logger.warn(`aggregatePDFData: getMemberStats for rating failed for ${handle}: ${err.message}`)
   }
 
   // Fetch certifications and courses
@@ -1932,10 +1932,8 @@ async function aggregatePDFData (currentUser, handle) {
       shortBio: shortBio
     },
     // Skills
-    skills: {
-      principal: principalSkills,
-      additional: additionalSkills
-    },
+    skills: { principal: principalSkills },
+    skillsByCategory,
     // Topcoder activity
     topcoderActivity: {
       specialRole: specialRoles.length > 0 ? `Topcoder Special Role: ${specialRoles.join(', ')}` : null,

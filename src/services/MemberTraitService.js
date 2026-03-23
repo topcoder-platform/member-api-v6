@@ -203,13 +203,13 @@ async function getTraits (currentUser, handle, query) {
   const traitIds = helper.parseCommaSeparatedString(query.traitIds, TRAIT_IDS) || TRAIT_IDS
   const fields = helper.parseCommaSeparatedString(query.fields, TRAIT_FIELDS) || TRAIT_FIELDS
 
-  const hasAutocompleteRole = helper.hasAutocompleteRole(currentUser)
-  const isAdminOrM2M = currentUser && (currentUser.isMachine || helper.hasAdminRole(currentUser))
+  const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
+  const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
     currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
 
   // can read private personalisation info on a member
-  const canReadPrivate = isAdminOrM2M || hasAutocompleteRole || isSelf
+  const canReadPrivate = isM2M || hasSensitiveDataRole || isSelf
 
   const personalizationFilter = canReadPrivate
     ? {}
@@ -223,6 +223,23 @@ async function getTraits (currentUser, handle, query) {
   // keep only those of given trait ids
   if (traitIds) {
     result = _.filter(result, (item) => _.includes(traitIds, item.traitId))
+  }
+  // links in personalization are only for the profile owner (self)
+  if (!isSelf) {
+    _.forEach(result, (item) => {
+      if (item.traitId === 'personalization' && item.traits && item.traits.data) {
+        _.forEach(item.traits.data, (dataEntry) => {
+          delete dataEntry.links
+          delete dataEntry.availableForGigs
+          if (Array.isArray(dataEntry.personalization)) {
+            _.forEach(dataEntry.personalization, (each) => {
+              delete each.links
+              delete each.availableForGigs
+            })
+          }
+        })
+      }
+    })
   }
   // convert date time for traits data
   _.filter(result, (item) => _.forEach(item.traits.data, function (value) {
