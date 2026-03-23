@@ -265,6 +265,42 @@ async function fetchReviewChallengeResultsForMember (reviewDbClient, userId) {
 }
 
 /**
+ * Load placement winners for one member from challenge-api.
+ * These rows provide a fallback history source for unrated tracks such as
+ * First2Finish when review-api results are unavailable.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {BigInt} userId member user id
+ * @returns {Promise<Array<Object>>} placement winner rows with embedded challenge metadata
+ */
+async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
+  try {
+    return await challengeClient.ChallengeWinner.findMany({
+      where: {
+        userId: helper.bigIntToNumber(userId),
+        type: 'PLACEMENT'
+      },
+      select: {
+        challengeId: true,
+        placement: true,
+        createdAt: true,
+        challenge: {
+          select: {
+            id: true,
+            name: true,
+            trackId: true,
+            typeId: true,
+            endDate: true
+          }
+        }
+      }
+    })
+  } catch (error) {
+    logger.warn(`Unable to load challenge winner fallback rows for userId=${userId.toString()}: ${error.message}`)
+    return []
+  }
+}
+
+/**
  * Load challenge metadata keyed by both canonical UUID id and legacy numeric id.
  * Unified history rows may still carry legacy challenge identifiers from migrated
  * data, so callers can resolve names and canonical UUIDs without mutating storage.
@@ -439,6 +475,228 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
   })
 
   return Array.from(aggregateByKey.values())
+}
+
+/**
+ * Check whether the unified history response should surface the supplied track.
+ * The public history contract currently exposes only DEVELOPMENT and DATA_SCIENCE groups.
+ * @param {string|undefined} trackName canonical track label
+ * @returns {boolean} true when the track should be included in history responses
+ */
+function isSupportedUnifiedHistoryTrack (trackName) {
+  return _.includes([TRACK_NAMES.DEVELOP, TRACK_NAMES.DATA_SCIENCE], trackName)
+}
+
+/**
+ * Identify aggregate track/type pairs that are visible in memberStats but missing from
+ * memberStatsHistory for the current request scope.
+ * @param {Array<Object>} aggregateRows unified memberStats rows for one member
+ * @param {Array<Object>} historyRows unified memberStatsHistory rows for one member
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Set<string>} missing track/type pair keys
+ */
+function getMissingUnifiedHistoryPairKeys (aggregateRows, historyRows, dimensionLookup) {
+  const persistedPairKeys = new Set(
+    _.map(historyRows || [], row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+  )
+
+  return new Set(
+    _.chain(annotateUnifiedDimensionRows(aggregateRows || [], dimensionLookup))
+      .filter(row => isSupportedUnifiedHistoryTrack(row.trackName))
+      .map(row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+      .uniq()
+      .filter(pairKey => !persistedPairKeys.has(pairKey))
+      .value()
+  )
+}
+
+/**
+ * Build transient unified history rows from review-api challenge results for aggregate
+ * track/type pairs that do not yet have authoritative memberStatsHistory rows.
+ * These fallback rows preserve challenge cards for non-rated tracks such as First2Finish
+ * until a persistent backfill is written.
+ * @param {Array<Object>} reviewRows review-api challenge results for the member
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by UUID and legacy ids
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @param {Set<string>} missingPairKeys track/type pairs that should be synthesized
+ * @returns {Array<Object>} transient unified history rows ordered per pair
+ */
+function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadataById, dimensionLookup, missingPairKeys) {
+  const fallbackRowsByChallengeKey = new Map()
+
+  _.forEach(reviewRows || [], (row) => {
+    const challenge = challengeMetadataById.get(String(row.challengeId))
+    if (!challenge || !challenge.trackId || !challenge.typeId) {
+      return
+    }
+
+    const trackId = String(challenge.trackId)
+    const typeId = String(challenge.typeId)
+    const pairKey = buildStatsTrackTypeKey(trackId, typeId)
+    if (missingPairKeys && missingPairKeys.size > 0 && !missingPairKeys.has(pairKey)) {
+      return
+    }
+
+    const trackName = resolveTrackNameFromLookup(dimensionLookup, trackId)
+    if (!isSupportedUnifiedHistoryTrack(trackName)) {
+      return
+    }
+
+    const typeName = resolveTypeNameFromLookup(dimensionLookup, typeId)
+    const eventDate = toOptionalDate(challenge.endDate || row.createdAt)
+    if (!eventDate) {
+      return
+    }
+
+    const createdAt = toOptionalDate(row.createdAt) || eventDate
+    const placement = toOptionalInt(row.placement)
+    const challengeId = String(challenge.id)
+    const challengeKey = `${pairKey}::${challengeId}`
+    const existing = fallbackRowsByChallengeKey.get(challengeKey)
+
+    if (existing && createdAt <= existing.createdAt) {
+      return
+    }
+
+    fallbackRowsByChallengeKey.set(challengeKey, {
+      trackId,
+      typeId,
+      trackName,
+      typeName,
+      challengeId,
+      challengeName: challenge.name || null,
+      eventDate,
+      placement: Number.isInteger(placement) ? placement : undefined,
+      createdAt
+    })
+  })
+
+  const fallbackRows = []
+  const rowsByPairKey = _.groupBy(Array.from(fallbackRowsByChallengeKey.values()), row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+
+  _.forEach(rowsByPairKey, (pairRows) => {
+    const orderedRows = _.orderBy(pairRows, [
+      row => row.eventDate.getTime(),
+      row => row.createdAt.getTime(),
+      row => row.challengeId
+    ], ['desc', 'desc', 'desc'])
+
+    _.forEach(orderedRows, (row, index) => {
+      fallbackRows.push(_.omit({
+        ...row,
+        mostRecent: index === 0
+      }, ['createdAt']))
+    })
+  })
+
+  return fallbackRows
+}
+
+/**
+ * Build transient unified history rows from challenge winner placements.
+ * This fallback is used when review-api does not expose challengeResult rows for
+ * a member but challenge-api still records the member's placements.
+ * @param {Array<Object>} winnerRows placement winner rows with embedded challenge metadata
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @param {Set<string>} missingPairKeys track/type pairs that should be synthesized
+ * @returns {Array<Object>} transient unified history rows ordered per pair
+ */
+function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLookup, missingPairKeys) {
+  const fallbackRowsByChallengeKey = new Map()
+
+  _.forEach(winnerRows || [], (row) => {
+    const challenge = row.challenge
+    if (!challenge || !challenge.trackId || !challenge.typeId) {
+      return
+    }
+
+    const trackId = String(challenge.trackId)
+    const typeId = String(challenge.typeId)
+    const pairKey = buildStatsTrackTypeKey(trackId, typeId)
+    if (missingPairKeys && missingPairKeys.size > 0 && !missingPairKeys.has(pairKey)) {
+      return
+    }
+
+    const trackName = resolveTrackNameFromLookup(dimensionLookup, trackId)
+    if (!isSupportedUnifiedHistoryTrack(trackName)) {
+      return
+    }
+
+    const typeName = resolveTypeNameFromLookup(dimensionLookup, typeId)
+    const eventDate = toOptionalDate(challenge.endDate || row.createdAt)
+    if (!eventDate) {
+      return
+    }
+
+    const createdAt = toOptionalDate(row.createdAt) || eventDate
+    const placement = toOptionalInt(row.placement)
+    const challengeId = String(challenge.id || row.challengeId)
+    const challengeKey = `${pairKey}::${challengeId}`
+    const existing = fallbackRowsByChallengeKey.get(challengeKey)
+
+    if (existing && createdAt <= existing.createdAt) {
+      return
+    }
+
+    fallbackRowsByChallengeKey.set(challengeKey, {
+      trackId,
+      typeId,
+      trackName,
+      typeName,
+      challengeId,
+      challengeName: challenge.name || null,
+      eventDate,
+      placement: Number.isInteger(placement) ? placement : undefined,
+      createdAt
+    })
+  })
+
+  const fallbackRows = []
+  const rowsByPairKey = _.groupBy(Array.from(fallbackRowsByChallengeKey.values()), row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+
+  _.forEach(rowsByPairKey, (pairRows) => {
+    const orderedRows = _.orderBy(pairRows, [
+      row => row.eventDate.getTime(),
+      row => row.createdAt.getTime(),
+      row => row.challengeId
+    ], ['desc', 'desc', 'desc'])
+
+    _.forEach(orderedRows, (row, index) => {
+      fallbackRows.push(_.omit({
+        ...row,
+        mostRecent: index === 0
+      }, ['createdAt']))
+    })
+  })
+
+  return fallbackRows
+}
+
+/**
+ * Remove track/type pairs from the pending fallback set once rows have been synthesized.
+ * @param {Set<string>} pairKeys pending track/type pairs
+ * @param {Array<Object>} rows synthesized history rows
+ * @returns {Set<string>} unresolved pair keys
+ */
+function getUnresolvedHistoryPairKeys (pairKeys, rows) {
+  const unresolvedPairKeys = new Set(pairKeys || [])
+  _.forEach(rows || [], (row) => {
+    unresolvedPairKeys.delete(buildStatsTrackTypeKey(row.trackId, row.typeId))
+  })
+  return unresolvedPairKeys
+}
+
+/**
+ * Apply the stable ordering expected by the unified history response builders.
+ * @param {Array<Object>} rows persisted and/or transient history rows
+ * @returns {Array<Object>} rows ordered by mostRecent and event recency
+ */
+function orderUnifiedHistoryRows (rows) {
+  return _.orderBy(rows || [], [
+    row => (row.mostRecent ? 1 : 0),
+    row => (row.eventDate ? row.eventDate.getTime() : 0),
+    row => row.challengeId
+  ], ['desc', 'desc', 'desc'])
 }
 
 function getDistributionRangeKey (rangeStart) {
@@ -1030,7 +1288,31 @@ async function getDistribution (query) {
   `
 
   if (!rows || rows.length === 0) {
-    throw new errors.NotFoundError('No member distribution statistics is found.')
+    const matchingStatsRow = await prisma.memberStats.findFirst({
+      where: _.omitBy({
+        trackId,
+        typeId
+      }, _.isUndefined),
+      select: {
+        id: true
+      }
+    })
+
+    if (!matchingStatsRow) {
+      throw new errors.NotFoundError('No member distribution statistics is found.')
+    }
+
+    let emptyResult = {
+      track: query.track,
+      subTrack: query.subTrack,
+      distribution: createEmptyDistribution()
+    }
+
+    if (fields) {
+      emptyResult = _.pick(emptyResult, fields)
+    }
+
+    return emptyResult
   }
 
   const distribution = createEmptyDistribution()
@@ -1109,16 +1391,58 @@ async function getHistoryStats (currentUser, handle, query) {
       where,
       orderBy: [{ mostRecent: 'desc' }, { eventDate: 'desc' }]
     })
+    const aggregateRows = await prisma.memberStats.findMany({
+      where,
+      select: {
+        trackId: true,
+        typeId: true
+      }
+    })
 
     const overallStat = []
-    if (historyRows.length > 0) {
-      const challengeMetadataById = await fetchChallengeMetadataMap(challengeClient, _.map(historyRows, row => row.challengeId))
-      const annotatedRows = enrichUnifiedHistoryRowsWithChallengeMetadata(
+    const missingPairKeys = getMissingUnifiedHistoryPairKeys(aggregateRows, historyRows, dimensionLookup)
+
+    if (historyRows.length > 0 || missingPairKeys.size > 0) {
+      let reviewRows = []
+      let unresolvedPairKeys = new Set(missingPairKeys)
+      if (unresolvedPairKeys.size > 0 && reviewDb) {
+        reviewRows = await fetchReviewChallengeResultsForMember(reviewDb, member.userId)
+      }
+
+      const challengeMetadataById = await fetchChallengeMetadataMap(
+        challengeClient,
+        _.uniq(_.map(historyRows, row => row.challengeId).concat(_.map(reviewRows, row => row.challengeId)))
+      )
+
+      let annotatedRows = enrichUnifiedHistoryRowsWithChallengeMetadata(
         annotateUnifiedDimensionRows(historyRows, dimensionLookup),
         challengeMetadataById
       )
+
+      if (unresolvedPairKeys.size > 0 && reviewRows.length > 0) {
+        const reviewFallbackRows = buildFallbackHistoryRowsFromReviewResults(
+          reviewRows,
+          challengeMetadataById,
+          dimensionLookup,
+          unresolvedPairKeys
+        )
+        annotatedRows = annotatedRows.concat(reviewFallbackRows)
+        unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, reviewFallbackRows)
+      }
+
+      if (unresolvedPairKeys.size > 0) {
+        const winnerRows = await fetchChallengeWinnerResultsForMember(challengeClient, member.userId)
+        const winnerFallbackRows = buildFallbackHistoryRowsFromChallengeWinners(
+          winnerRows,
+          dimensionLookup,
+          unresolvedPairKeys
+        )
+        annotatedRows = annotatedRows.concat(winnerFallbackRows)
+      }
+
+      const orderedRows = orderUnifiedHistoryRows(annotatedRows)
       _.forEach(groupIds, (groupId) => {
-        const scopedRows = _.map(annotatedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
+        const scopedRows = _.map(orderedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
         overallStat.push(scopedRows)
       })
     }
@@ -1245,9 +1569,9 @@ createHistoryStats.schema = {
     newCountryRank: Joi.number(),
     oldSchoolRank: Joi.number(),
     newSchoolRank: Joi.number(),
-    eventDate: Joi.positive(),
-    date: Joi.positive(),
-    ratingDate: Joi.positive(),
+    eventDate: Joi.number().positive(),
+    date: Joi.number().positive(),
+    ratingDate: Joi.number().positive(),
     history: Joi.array().items(Joi.object().keys({
       trackId: Joi.string(),
       typeId: Joi.string(),
@@ -1261,9 +1585,9 @@ createHistoryStats.schema = {
       newCountryRank: Joi.number(),
       oldSchoolRank: Joi.number(),
       newSchoolRank: Joi.number(),
-      eventDate: Joi.positive(),
-      date: Joi.positive(),
-      ratingDate: Joi.positive()
+      eventDate: Joi.number().positive(),
+      date: Joi.number().positive(),
+      ratingDate: Joi.number().positive()
     }))
   }).required()
 }
@@ -1375,9 +1699,9 @@ partiallyUpdateHistoryStats.schema = {
     newCountryRank: Joi.number(),
     oldSchoolRank: Joi.number(),
     newSchoolRank: Joi.number(),
-    eventDate: Joi.positive(),
-    date: Joi.positive(),
-    ratingDate: Joi.positive(),
+    eventDate: Joi.number().positive(),
+    date: Joi.number().positive(),
+    ratingDate: Joi.number().positive(),
     history: Joi.array().items(Joi.object().keys({
       trackId: Joi.string(),
       typeId: Joi.string(),
@@ -1391,9 +1715,9 @@ partiallyUpdateHistoryStats.schema = {
       newCountryRank: Joi.number(),
       oldSchoolRank: Joi.number(),
       newSchoolRank: Joi.number(),
-      eventDate: Joi.positive(),
-      date: Joi.positive(),
-      ratingDate: Joi.positive()
+      eventDate: Joi.number().positive(),
+      date: Joi.number().positive(),
+      ratingDate: Joi.number().positive()
     }))
   }).required()
 }
@@ -1638,10 +1962,10 @@ createMemberStats.schema = {
     groupId: Joi.string(),
     trackId: Joi.string(),
     typeId: Joi.string(),
-    challenges: Joi.positive(),
-    wins: Joi.positive(),
-    mostRecentSubmission: Joi.positive(),
-    mostRecentEventDate: Joi.positive(),
+    challenges: Joi.number().positive(),
+    wins: Joi.number().positive(),
+    mostRecentSubmission: Joi.number().positive(),
+    mostRecentEventDate: Joi.number().positive(),
     rating: Joi.number(),
     avgRank: Joi.number(),
     avgNumSubmissions: Joi.number(),
@@ -1658,8 +1982,8 @@ createMemberStats.schema = {
       typeId: Joi.string().required(),
       challenges: Joi.number(),
       wins: Joi.number(),
-      mostRecentSubmission: Joi.positive(),
-      mostRecentEventDate: Joi.positive(),
+      mostRecentSubmission: Joi.number().positive(),
+      mostRecentEventDate: Joi.number().positive(),
       rating: Joi.number(),
       avgRank: Joi.number(),
       avgNumSubmissions: Joi.number(),
@@ -1675,7 +1999,7 @@ createMemberStats.schema = {
     })),
     maxRating: Joi.alternatives().try(
       Joi.object().keys({
-        rating: Joi.positive().required(),
+        rating: Joi.number().positive().required(),
         track: Joi.string(),
         subTrack: Joi.string(),
         ratingColor: Joi.string().required()
@@ -1779,10 +2103,10 @@ partiallyUpdateMemberStats.schema = {
     groupId: Joi.string(),
     trackId: Joi.string(),
     typeId: Joi.string(),
-    challenges: Joi.positive(),
-    wins: Joi.positive(),
-    mostRecentSubmission: Joi.positive(),
-    mostRecentEventDate: Joi.positive(),
+    challenges: Joi.number().positive(),
+    wins: Joi.number().positive(),
+    mostRecentSubmission: Joi.number().positive(),
+    mostRecentEventDate: Joi.number().positive(),
     rating: Joi.number(),
     avgRank: Joi.number(),
     avgNumSubmissions: Joi.number(),
@@ -1799,8 +2123,8 @@ partiallyUpdateMemberStats.schema = {
       typeId: Joi.string().required(),
       challenges: Joi.number(),
       wins: Joi.number(),
-      mostRecentSubmission: Joi.positive(),
-      mostRecentEventDate: Joi.positive(),
+      mostRecentSubmission: Joi.number().positive(),
+      mostRecentEventDate: Joi.number().positive(),
       rating: Joi.number(),
       avgRank: Joi.number(),
       avgNumSubmissions: Joi.number(),
@@ -1816,7 +2140,7 @@ partiallyUpdateMemberStats.schema = {
     })),
     maxRating: Joi.alternatives().try(
       Joi.object().keys({
-        rating: Joi.positive().required(),
+        rating: Joi.number().positive().required(),
         track: Joi.string(),
         subTrack: Joi.string(),
         ratingColor: Joi.string().required()
