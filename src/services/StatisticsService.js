@@ -601,6 +601,23 @@ function isSupportedUnifiedHistoryTrack (trackName) {
 }
 
 /**
+ * Identify aggregate track/type pairs that are visible in memberStats for the
+ * current request scope.
+ * @param {Array<Object>} aggregateRows unified memberStats rows for one member
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Set<string>} visible track/type pair keys
+ */
+function getVisibleUnifiedHistoryPairKeys (aggregateRows, dimensionLookup) {
+  return new Set(
+    _.chain(annotateUnifiedDimensionRows(aggregateRows || [], dimensionLookup))
+      .filter(row => isSupportedUnifiedHistoryTrack(row.trackName))
+      .map(row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+      .uniq()
+      .value()
+  )
+}
+
+/**
  * Identify aggregate track/type pairs that are visible in memberStats but missing from
  * memberStatsHistory for the current request scope.
  * @param {Array<Object>} aggregateRows unified memberStats rows for one member
@@ -614,10 +631,7 @@ function getMissingUnifiedHistoryPairKeys (aggregateRows, historyRows, dimension
   )
 
   return new Set(
-    _.chain(annotateUnifiedDimensionRows(aggregateRows || [], dimensionLookup))
-      .filter(row => isSupportedUnifiedHistoryTrack(row.trackName))
-      .map(row => buildStatsTrackTypeKey(row.trackId, row.typeId))
-      .uniq()
+    _.chain(Array.from(getVisibleUnifiedHistoryPairKeys(aggregateRows, dimensionLookup)))
       .filter(pairKey => !persistedPairKeys.has(pairKey))
       .value()
   )
@@ -646,7 +660,7 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
     const trackId = String(challenge.trackId)
     const typeId = String(challenge.typeId)
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
-    if (missingPairKeys && missingPairKeys.size > 0 && !missingPairKeys.has(pairKey)) {
+    if (missingPairKeys && !missingPairKeys.has(pairKey)) {
       return
     }
 
@@ -726,7 +740,7 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
     const trackId = String(challenge.trackId)
     const typeId = String(challenge.typeId)
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
-    if (missingPairKeys && missingPairKeys.size > 0 && !missingPairKeys.has(pairKey)) {
+    if (missingPairKeys && !missingPairKeys.has(pairKey)) {
       return
     }
 
@@ -797,6 +811,33 @@ function getUnresolvedHistoryPairKeys (pairKeys, rows) {
     unresolvedPairKeys.delete(buildStatsTrackTypeKey(row.trackId, row.typeId))
   })
   return unresolvedPairKeys
+}
+
+function buildHistoryChallengeKey (row) {
+  return `${buildStatsTrackTypeKey(row.trackId, row.typeId)}::${row.challengeId}`
+}
+
+/**
+ * Merge synthesized history rows without duplicating existing challenge cards.
+ * @param {Array<Object>} existingRows persisted and/or synthesized history rows
+ * @param {Array<Object>} fallbackRows synthesized candidate rows
+ * @returns {Array<Object>} merged history rows
+ */
+function mergeMissingHistoryRows (existingRows, fallbackRows) {
+  const mergedRows = existingRows ? existingRows.slice() : []
+  const existingKeys = new Set(_.map(mergedRows, row => buildHistoryChallengeKey(row)))
+
+  _.forEach(fallbackRows || [], (row) => {
+    const key = buildHistoryChallengeKey(row)
+    if (existingKeys.has(key)) {
+      return
+    }
+
+    existingKeys.add(key)
+    mergedRows.push(row)
+  })
+
+  return mergedRows
 }
 
 /**
@@ -1513,6 +1554,7 @@ async function getHistoryStats (currentUser, handle, query) {
     })
 
     const overallStat = []
+    const visiblePairKeys = getVisibleUnifiedHistoryPairKeys(aggregateRows, dimensionLookup)
     const missingPairKeys = getMissingUnifiedHistoryPairKeys(aggregateRows, historyRows, dimensionLookup)
 
     if (historyRows.length > 0 || missingPairKeys.size > 0) {
@@ -1542,7 +1584,7 @@ async function getHistoryStats (currentUser, handle, query) {
           dimensionLookup,
           unresolvedPairKeys
         )
-        annotatedRows = annotatedRows.concat(reviewFallbackRows)
+        annotatedRows = mergeMissingHistoryRows(annotatedRows, reviewFallbackRows)
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, reviewFallbackRows)
       }
 
@@ -1550,15 +1592,19 @@ async function getHistoryStats (currentUser, handle, query) {
         const winnerRows = await fetchChallengeWinnerResultsForMember(challengeClient, member.userId)
 
         annotatedRows = mergeHistoryPlacementsFromChallengeWinners(annotatedRows, winnerRows)
-
-        if (unresolvedPairKeys.size > 0) {
-          const winnerFallbackRows = buildFallbackHistoryRowsFromChallengeWinners(
-            winnerRows,
-            dimensionLookup,
-            unresolvedPairKeys
+        const winnerFallbackPairKeys = new Set(
+          Array.from(visiblePairKeys).concat(
+            _.map(annotatedRows, row => buildStatsTrackTypeKey(row.trackId, row.typeId))
           )
-          annotatedRows = annotatedRows.concat(winnerFallbackRows)
-        }
+        )
+
+        const winnerFallbackRows = buildFallbackHistoryRowsFromChallengeWinners(
+          winnerRows,
+          dimensionLookup,
+          winnerFallbackPairKeys
+        )
+        annotatedRows = mergeMissingHistoryRows(annotatedRows, winnerFallbackRows)
+        unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, winnerFallbackRows)
       }
 
       const orderedRows = orderUnifiedHistoryRows(annotatedRows)

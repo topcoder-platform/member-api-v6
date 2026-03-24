@@ -42,7 +42,9 @@
  *   which maps to Design + First2Finish.
  * - mostRecentSubmission uses review-api challengeResult timestamps whenever review rows
  *   are present for the target user and track/type.
- * - memberStatsHistory is seeded from memberDevelopHistoryStats and memberDataScienceHistoryStats.
+ * - memberStatsHistory is seeded from legacy history tables and supplemented with
+ *   completed review-api challengeResult and ChallengeWinner rows when newer
+ *   challenges never existed in the legacy history source tables.
  * - memberStatsHistory.mostRecent is recalculated from latest eventDate per (userId, trackId, typeId).
  * - memberStatsHistory.newRating on the mostRecent row is synchronized from memberStats.rating.
  * - --skip-history skips the legacy history backfill pass.
@@ -85,6 +87,7 @@ const UPDATED_BY = process.env.UPDATED_BY || DEFAULT_ACTOR
 const USER_BATCH_SIZE = 100
 const DEFAULT_CONCURRENCY = 4
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'recalculateMemberStats.processedUserIds.json'
+const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 const NULL_PRESERVED_STAT_FIELDS = [
   'rating',
   'avgRank',
@@ -851,7 +854,8 @@ async function fetchChallengeMetadataMap (challengesClient, challengeIds) {
         id: true,
         trackId: true,
         typeId: true,
-        endDate: true
+        endDate: true,
+        status: true
       }
     })
 
@@ -1645,11 +1649,11 @@ async function fetchLegacyRatingFieldsByUserIds (membersClient, userIds, legacyI
 }
 
 /**
- * Keep the latest event payload for duplicate legacy history keys.
- * @param {Map<string, Object>} lookup keyed legacy history lookup
+ * Keep the latest event payload for duplicate unified history keys.
+ * @param {Map<string, Object>} lookup keyed unified history lookup
  * @param {Object} row candidate history row
  */
-function mergeLegacyHistoryRow (lookup, row) {
+function mergeHistoryRow (lookup, row) {
   const key = buildTrackTypeKey(row.trackId, row.typeId) + `::${row.challengeId}`
   const existing = lookup.get(key)
 
@@ -1663,118 +1667,22 @@ function mergeLegacyHistoryRow (lookup, row) {
   }
 }
 
+function isCompletedChallengeStatus (value) {
+  return String(value || '').trim().toUpperCase() === COMPLETED_CHALLENGE_STATUS
+}
+
 /**
- * Seed unified memberStatsHistory from the legacy history tables for one member.
- * This function is used by the migration script after unified memberStats writes complete.
- * Reruns only refresh the fields that are authoritative in the legacy history source rows.
+ * Persist normalized unified history rows for one user.
+ * Existing rows are matched by (userId, trackId, typeId, challengeId).
  * @param {Object} membersClient prisma members client
  * @param {BigInt} userId member user id
- * @param {Object} [options] history backfill options
+ * @param {Array<Object>} historyRows normalized rows to update or insert
+ * @param {Object} [options] history write options
  * @param {boolean} [options.refreshMostRecent=true] whether to recompute mostRecent after writes
- * @returns {Object} summary with upserted row count and refreshed mostRecent row count
- * @throws {Error} if the legacy challenge lookup cache is not initialized
+ * @returns {Promise<Object>} summary with upserted row count and refreshed mostRecent row count
  */
-async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
-  if (!legacyLookupCache) {
-    throw new Error('Legacy challenge lookup cache is not initialized')
-  }
-
-  const parentRows = await membersClient.$queryRaw`
-    SELECT "id"
-    FROM "members"."memberHistoryStats"
-    WHERE "userId" = ${userId}
-    ORDER BY "id" ASC
-  `
-
-  if (!parentRows || parentRows.length === 0) {
-    return {
-      upserted: 0,
-      refreshed: options.refreshMostRecent === false
-        ? 0
-        : await refreshHistoryMostRecentFlagsForUsers(membersClient, [userId])
-    }
-  }
-
-  const historyStatsIds = parentRows.map((row) => normalizeBigInt(row.id, 'history stats id').toString())
-  const idsSql = historyStatsIds.join(', ')
-
-  const [developRows, dataScienceRows] = await Promise.all([
-    membersClient.$queryRawUnsafe(
-      `
-      SELECT
-        "challengeId",
-        "ratingDate",
-        "newRating",
-        "subTrack",
-        "subTrackId"
-      FROM "members"."memberDevelopHistoryStats"
-      WHERE "historyStatsId" IN (${idsSql})
-      ORDER BY "subTrackId" ASC, "ratingDate" DESC, "id" DESC
-      `
-    ),
-    membersClient.$queryRawUnsafe(
-      `
-      SELECT
-        "challengeId",
-        "date",
-        "rating",
-        "subTrack",
-        "subTrackId"
-      FROM "members"."memberDataScienceHistoryStats"
-      WHERE "historyStatsId" IN (${idsSql})
-      ORDER BY "subTrack" ASC, "date" DESC, "id" DESC
-      `
-    )
-  ])
-
-  const legacyHistoryLookup = new Map()
-
-  developRows.forEach((row) => {
-    const typeId = resolveChallengeTypeId(row.subTrack, row.subTrackId)
-    if (!typeId) {
-      logWarn(`Skipping legacy develop history row for user ${userId.toString()} and subTrack ${row.subTrack || row.subTrackId}`)
-      return
-    }
-
-    const eventDate = row.ratingDate ? new Date(row.ratingDate) : null
-    if (!eventDate || Number.isNaN(eventDate.getTime())) {
-      return
-    }
-
-    mergeLegacyHistoryRow(legacyHistoryLookup, {
-      userId,
-      trackId: legacyLookupCache.trackIds.DEVELOP,
-      typeId,
-      challengeId: String(row.challengeId),
-      eventDate,
-      newRating: toOptionalInt(row.newRating)
-    })
-  })
-
-  dataScienceRows.forEach((row) => {
-    const typeId = resolveChallengeTypeId(row.subTrack, row.subTrackId)
-    if (!typeId) {
-      logWarn(`Skipping legacy data science history row for user ${userId.toString()} and subTrack ${row.subTrack || row.subTrackId}`)
-      return
-    }
-
-    const eventDate = row.date ? new Date(row.date) : null
-    if (!eventDate || Number.isNaN(eventDate.getTime())) {
-      return
-    }
-
-    mergeLegacyHistoryRow(legacyHistoryLookup, {
-      userId,
-      trackId: legacyLookupCache.trackIds.DATA_SCIENCE,
-      typeId,
-      challengeId: String(row.challengeId),
-      eventDate,
-      newRating: toOptionalInt(row.rating)
-    })
-  })
-
-  const historyRows = Array.from(legacyHistoryLookup.values())
-  if (historyRows.length === 0) {
+async function upsertHistoryRows (membersClient, userId, historyRows, options = {}) {
+  if (!historyRows || historyRows.length === 0) {
     return {
       upserted: 0,
       refreshed: options.refreshMostRecent === false
@@ -1845,6 +1753,278 @@ async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
     upserted: historyRows.length,
     refreshed
   }
+}
+
+/**
+ * Seed unified memberStatsHistory from the legacy history tables for one member.
+ * This function is used by the migration script after unified memberStats writes complete.
+ * Reruns only refresh the fields that are authoritative in the legacy history source rows.
+ * @param {Object} membersClient prisma members client
+ * @param {BigInt} userId member user id
+ * @param {Object} [options] history backfill options
+ * @param {boolean} [options.refreshMostRecent=true] whether to recompute mostRecent after writes
+ * @returns {Object} summary with upserted row count and refreshed mostRecent row count
+ * @throws {Error} if the legacy challenge lookup cache is not initialized
+ */
+async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
+  if (!legacyLookupCache) {
+    throw new Error('Legacy challenge lookup cache is not initialized')
+  }
+
+  const parentRows = await membersClient.$queryRaw`
+    SELECT "id"
+    FROM "members"."memberHistoryStats"
+    WHERE "userId" = ${userId}
+    ORDER BY "id" ASC
+  `
+
+  if (!parentRows || parentRows.length === 0) {
+    return upsertHistoryRows(membersClient, userId, [], options)
+  }
+
+  const historyStatsIds = parentRows.map((row) => normalizeBigInt(row.id, 'history stats id').toString())
+  const idsSql = historyStatsIds.join(', ')
+
+  const [developRows, dataScienceRows] = await Promise.all([
+    membersClient.$queryRawUnsafe(
+      `
+      SELECT
+        "challengeId",
+        "ratingDate",
+        "newRating",
+        "subTrack",
+        "subTrackId"
+      FROM "members"."memberDevelopHistoryStats"
+      WHERE "historyStatsId" IN (${idsSql})
+      ORDER BY "subTrackId" ASC, "ratingDate" DESC, "id" DESC
+      `
+    ),
+    membersClient.$queryRawUnsafe(
+      `
+      SELECT
+        "challengeId",
+        "date",
+        "rating",
+        "subTrack",
+        "subTrackId"
+      FROM "members"."memberDataScienceHistoryStats"
+      WHERE "historyStatsId" IN (${idsSql})
+      ORDER BY "subTrack" ASC, "date" DESC, "id" DESC
+      `
+    )
+  ])
+
+  const legacyHistoryLookup = new Map()
+
+  developRows.forEach((row) => {
+    const typeId = resolveChallengeTypeId(row.subTrack, row.subTrackId)
+    if (!typeId) {
+      logWarn(`Skipping legacy develop history row for user ${userId.toString()} and subTrack ${row.subTrack || row.subTrackId}`)
+      return
+    }
+
+    const eventDate = row.ratingDate ? new Date(row.ratingDate) : null
+    if (!eventDate || Number.isNaN(eventDate.getTime())) {
+      return
+    }
+
+    mergeHistoryRow(legacyHistoryLookup, {
+      userId,
+      trackId: legacyLookupCache.trackIds.DEVELOP,
+      typeId,
+      challengeId: String(row.challengeId),
+      eventDate,
+      newRating: toOptionalInt(row.newRating)
+    })
+  })
+
+  dataScienceRows.forEach((row) => {
+    const typeId = resolveChallengeTypeId(row.subTrack, row.subTrackId)
+    if (!typeId) {
+      logWarn(`Skipping legacy data science history row for user ${userId.toString()} and subTrack ${row.subTrack || row.subTrackId}`)
+      return
+    }
+
+    const eventDate = row.date ? new Date(row.date) : null
+    if (!eventDate || Number.isNaN(eventDate.getTime())) {
+      return
+    }
+
+    mergeHistoryRow(legacyHistoryLookup, {
+      userId,
+      trackId: legacyLookupCache.trackIds.DATA_SCIENCE,
+      typeId,
+      challengeId: String(row.challengeId),
+      eventDate,
+      newRating: toOptionalInt(row.rating)
+    })
+  })
+
+  return upsertHistoryRows(membersClient, userId, Array.from(legacyHistoryLookup.values()), options)
+}
+
+/**
+ * Load completed placement winner rows for one member so history can be seeded
+ * when a completed challenge never appeared in the legacy history tables.
+ * @param {Object} challengesClient prisma challenges client
+ * @param {BigInt} userId member user id
+ * @param {Object} [options] optional track/type filters
+ * @returns {Promise<Array<Object>>} placement winner rows with embedded challenge metadata
+ */
+async function fetchChallengeWinnerRowsForUser (challengesClient, userId, options = {}) {
+  const { whereSql, params } = buildFilterQuery(options, userId)
+  const rows = await challengesClient.$queryRawUnsafe(
+    `
+    SELECT
+      cw."challengeId" AS "challengeId",
+      cw."createdAt" AS "createdAt",
+      c.id AS "canonicalChallengeId",
+      c."trackId" AS "trackId",
+      c."typeId" AS "typeId",
+      c.status AS status,
+      c."endDate" AS "endDate"
+    FROM "ChallengeWinner" cw
+    INNER JOIN "Challenge" c ON c.id = cw."challengeId"
+    WHERE ${whereSql}
+      AND cw."type" = 'PLACEMENT'
+      AND UPPER(COALESCE(c.status, '')) = '${COMPLETED_CHALLENGE_STATUS}'
+    ORDER BY cw."createdAt" ASC, cw."challengeId" ASC
+    `,
+    ...params
+  )
+
+  return rows.map((row) => ({
+    challengeId: String(row.challengeId),
+    createdAt: row.createdAt ? new Date(row.createdAt) : null,
+    challenge: {
+      id: String(row.canonicalChallengeId || row.challengeId),
+      trackId: row.trackId ? String(row.trackId) : null,
+      typeId: row.typeId ? String(row.typeId) : null,
+      status: row.status,
+      endDate: row.endDate ? new Date(row.endDate) : null
+    }
+  }))
+}
+
+/**
+ * Normalize completed review-api and ChallengeWinner rows into unified history rows.
+ * review-api rows are used when available, while placement winners fill gaps for
+ * completed challenges that never reached challengeResult.
+ * @param {BigInt} userId member user id
+ * @param {Array<Object>} reviewRows raw review-api challengeResult rows
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by challenge id
+ * @param {Array<Object>} winnerRows completed placement winner rows
+ * @param {Object} [options] optional track/type filters
+ * @returns {Array<Object>} normalized unified history rows
+ */
+function buildSupplementalHistoryRowsFromCompletedChallenges (
+  userId,
+  reviewRows,
+  challengeMetadataById,
+  winnerRows,
+  options = {}
+) {
+  const historyLookup = new Map()
+
+  ;(reviewRows || []).forEach((row) => {
+    const challenge = challengeMetadataById.get(String(row.challengeId))
+    if (!challenge || !challenge.id || !challenge.trackId || !challenge.typeId || !isCompletedChallengeStatus(challenge.status)) {
+      return
+    }
+
+    const trackId = String(challenge.trackId)
+    const typeId = String(challenge.typeId)
+    if ((options.trackId && trackId !== options.trackId) || (options.typeId && typeId !== options.typeId)) {
+      return
+    }
+
+    const eventDate = toOptionalDate(challenge.endDate) || toOptionalDate(row.createdAt)
+    if (!eventDate) {
+      return
+    }
+
+    mergeHistoryRow(historyLookup, {
+      userId,
+      trackId,
+      typeId,
+      challengeId: String(challenge.id),
+      eventDate,
+      newRating: null
+    })
+  })
+
+  ;(winnerRows || []).forEach((row) => {
+    const challenge = row.challenge || null
+    if (!challenge || !challenge.id || !challenge.trackId || !challenge.typeId || !isCompletedChallengeStatus(challenge.status)) {
+      return
+    }
+
+    const trackId = String(challenge.trackId)
+    const typeId = String(challenge.typeId)
+    if ((options.trackId && trackId !== options.trackId) || (options.typeId && typeId !== options.typeId)) {
+      return
+    }
+
+    const eventDate = toOptionalDate(challenge.endDate) || toOptionalDate(row.createdAt)
+    if (!eventDate) {
+      return
+    }
+
+    mergeHistoryRow(historyLookup, {
+      userId,
+      trackId,
+      typeId,
+      challengeId: String(challenge.id),
+      eventDate,
+      newRating: null
+    })
+  })
+
+  return Array.from(historyLookup.values())
+}
+
+/**
+ * Seed unified memberStatsHistory from completed non-legacy challenge sources.
+ * This supplements legacy history so newer completed challenges still surface
+ * when they were never written to legacy history tables.
+ * @param {Object} membersClient prisma members client
+ * @param {Object} challengesClient prisma challenges client
+ * @param {Object|null} reviewDbClient raw pg review database client
+ * @param {BigInt} userId member user id
+ * @param {Object} [options] history backfill options
+ * @param {boolean} [options.refreshMostRecent=true] whether to recompute mostRecent after writes
+ * @param {string|null} [options.trackId] optional track filter
+ * @param {string|null} [options.typeId] optional type filter
+ * @returns {Promise<Object>} summary with upserted row count and refreshed mostRecent row count
+ */
+async function backfillHistoryFromCompletedChallenges (
+  membersClient,
+  challengesClient,
+  reviewDbClient,
+  userId,
+  options = {}
+) {
+  const [reviewRows, winnerRows] = await Promise.all([
+    reviewDbClient ? fetchReviewChallengeResultsForUser(reviewDbClient, userId) : Promise.resolve([]),
+    challengesClient ? fetchChallengeWinnerRowsForUser(challengesClient, userId, options) : Promise.resolve([])
+  ])
+
+  const challengeMetadataById = reviewRows.length > 0
+    ? await fetchChallengeMetadataMap(
+      challengesClient,
+      reviewRows.map((row) => row.challengeId)
+    )
+    : new Map()
+
+  const historyRows = buildSupplementalHistoryRowsFromCompletedChallenges(
+    userId,
+    reviewRows,
+    challengeMetadataById,
+    winnerRows,
+    options
+  )
+
+  return upsertHistoryRows(membersClient, userId, historyRows, options)
 }
 
 /**
@@ -3175,11 +3355,22 @@ async function main () {
           } = await measureAsyncStep(async () => (
             mapWithConcurrency(existingBatchUserIds, options.concurrency, async (userId) => {
               const historyStartedAt = startTimer()
-              const historyResult = await backfillHistoryFromLegacy(membersClient, userId, { refreshMostRecent: false })
+              const legacyHistoryResult = await backfillHistoryFromLegacy(membersClient, userId, { refreshMostRecent: false })
+              const supplementalHistoryResult = await backfillHistoryFromCompletedChallenges(
+                membersClient,
+                challengesClient,
+                reviewDb,
+                userId,
+                {
+                  refreshMostRecent: false,
+                  trackId: options.trackId,
+                  typeId: options.typeId
+                }
+              )
               return {
                 userId,
-                upserted: historyResult.upserted,
-                refreshed: historyResult.refreshed,
+                upserted: legacyHistoryResult.upserted + supplementalHistoryResult.upserted,
+                refreshed: legacyHistoryResult.refreshed + supplementalHistoryResult.refreshed,
                 durationMs: getElapsedMilliseconds(historyStartedAt)
               }
             })
@@ -3315,6 +3506,7 @@ module.exports = {
   fetchLegacyRatingFields,
   writeStatsToDatabase,
   backfillHistoryFromLegacy,
+  backfillHistoryFromCompletedChallenges,
   refreshHistoryMostRecentFlagsForUsers,
   mapWithConcurrency,
   toCsvValue,
@@ -3322,5 +3514,6 @@ module.exports = {
   buildCsvWriter,
   buildProcessedUserIdsWriter,
   resolveLegacyDesignTypeId,
-  buildAggregatedStatsFromReviewResults
+  buildAggregatedStatsFromReviewResults,
+  buildSupplementalHistoryRowsFromCompletedChallenges
 }

@@ -189,6 +189,74 @@ describe('recalculateMemberStats unit tests', () => {
     rawQueries[1].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
   })
 
+  it('should supplement history rows from completed review and winner challenges', async () => {
+    const transactionCalls = []
+    const membersClient = {
+      memberStatsHistory: {
+        findMany: async () => []
+      },
+      $executeRawUnsafe: (sql, ...params) => ({ action: 'executeRawUnsafe', sql, params }),
+      $transaction: async (queries) => {
+        transactionCalls.push(queries)
+      }
+    }
+
+    const challengesClient = {
+      challenge: {
+        findMany: async () => [{
+          id: 'challenge-review',
+          trackId: 'track-design-id',
+          typeId: 'type-ch-id',
+          endDate: '2024-03-02T00:00:00.000Z',
+          status: 'COMPLETED'
+        }]
+      },
+      $queryRawUnsafe: async () => [{
+        challengeId: 'challenge-winner',
+        createdAt: '2024-03-03T00:00:00.000Z',
+        canonicalChallengeId: 'challenge-winner',
+        trackId: 'track-design-id',
+        typeId: 'type-ch-id',
+        status: 'COMPLETED',
+        endDate: '2024-03-04T00:00:00.000Z'
+      }]
+    }
+
+    const reviewDbClient = {
+      query: async (sql) => {
+        if (sql.includes('pg_catalog.pg_class')) {
+          return { rows: [{ schemaName: 'reviews' }] }
+        }
+
+        return {
+          rows: [{
+            challengeId: 'challenge-review',
+            userId: '123',
+            placement: 2,
+            createdAt: '2024-03-01T12:00:00.000Z'
+          }]
+        }
+      }
+    }
+
+    const result = await recalculateMemberStats.backfillHistoryFromCompletedChallenges(
+      membersClient,
+      challengesClient,
+      reviewDbClient,
+      global.BigInt(123),
+      { refreshMostRecent: false }
+    )
+
+    result.should.deep.equal({
+      upserted: 2,
+      refreshed: 0
+    })
+    transactionCalls.should.have.length(1)
+    const rawQueries = transactionCalls[0].filter((query) => query.action === 'executeRawUnsafe')
+    rawQueries.should.have.length(1)
+    rawQueries[0].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
+  })
+
   it('should not delete legacy-backed rows during replacement cleanup', async () => {
     const transactionCalls = []
     const membersClient = {

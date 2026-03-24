@@ -706,6 +706,83 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should supplement winner-only challenge cards inside a review-backed pair', async () => {
+    const olderDate = new Date('2025-11-27T05:48:36.899Z')
+    const newerDate = new Date('2025-11-29T05:48:36.899Z')
+    const reviewChallenge = {
+      id: 'review-challenge-uuid',
+      legacyId: null,
+      name: 'Review-backed challenge',
+      status: 'COMPLETED',
+      trackId: 'track-design-id',
+      typeId: 'type-challenge-id',
+      endDate: olderDate,
+      track: { name: 'Design' },
+      type: { name: 'Challenge' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const winnerOnlyChallenge = {
+      id: 'winner-only-challenge-uuid',
+      name: 'Winner-only challenge',
+      status: 'COMPLETED',
+      trackId: 'track-design-id',
+      typeId: 'type-challenge-id',
+      endDate: newerDate
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-design-id',
+            typeId: 'type-challenge-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      },
+      challengeRows: [reviewChallenge],
+      reviewRows: [{
+        challengeId: 'review-challenge-uuid',
+        userId: '88770025',
+        finalScore: 97.5,
+        placement: 2,
+        rated: false,
+        createdAt: new Date('2025-11-27T05:48:36.907Z')
+      }],
+      challengeWinnerRows: [{
+        challengeId: 'review-challenge-uuid',
+        placement: 2,
+        createdAt: new Date('2025-11-27T05:48:36.907Z'),
+        challenge: reviewChallenge
+      }, {
+        challengeId: 'winner-only-challenge-uuid',
+        placement: 1,
+        createdAt: new Date('2025-11-29T05:48:36.907Z'),
+        challenge: winnerOnlyChallenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DESIGN)
+      result[0].DESIGN.subTracks.should.have.length(1)
+      result[0].DESIGN.subTracks[0].history.should.have.length(2)
+      result[0].DESIGN.subTracks[0].history[0].challengeId.should.equal('winner-only-challenge-uuid')
+      result[0].DESIGN.subTracks[0].history[0].challengeName.should.equal('Winner-only challenge')
+      result[0].DESIGN.subTracks[0].history[0].placement.should.equal(1)
+      result[0].DESIGN.subTracks[0].history[0].mostRecent.should.equal(true)
+      result[0].DESIGN.subTracks[0].history[1].challengeId.should.equal('review-challenge-uuid')
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should synthesize missing history from challenge winners when review rows are unavailable', async () => {
     const ratingDate = new Date('2025-11-27T05:48:36.899Z')
     const { service, restore } = loadStatisticsService({

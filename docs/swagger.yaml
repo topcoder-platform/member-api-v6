@@ -1601,7 +1601,7 @@ paths:
       description: >
         Get member history statistics, by default only returns the public Topcoder history statistics.
         Results can be filtered by challenge track and challenge type for more granular historical views.
-        When persisted history rows are missing for a visible track/type pair, challenge cards are synthesized
+        When persisted history rows are missing or incomplete for a visible track/type pair, challenge cards are synthesized
         from available completed challenge-result sources so challenge-level history still appears. Non-completed
         challenges are excluded from the response. Fallback rows may omit
         rating fields when no authoritative rating snapshot exists.
