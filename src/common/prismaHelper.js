@@ -564,10 +564,11 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
         name: typeName,
         history: _.map(trackHistory, h => {
           const historyDate = h.ratingDate || h.date || h.eventDate
+          const placement = _.toInteger(h.placement)
           return _.omitBy({
             challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
             challengeName: h.challengeName,
-            placement: h.placement,
+            placement: Number.isInteger(placement) && placement > 0 ? placement : undefined,
             percentile: h.percentile,
             rating: _.isNil(h.rating) ? h.newRating : h.rating,
             newRating: h.newRating,
@@ -592,6 +593,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
       }
       item.DATA_SCIENCE[typeName].history = _.map(trackHistory, h => {
         const historyDate = h.ratingDate || h.date || h.eventDate
+        const placement = _.toInteger(h.placement)
         return _.omitBy({
           challengeId: _.isFinite(_.toNumber(h.challengeId)) ? _.toNumber(h.challengeId) : h.challengeId,
           challengeName: h.challengeName,
@@ -599,7 +601,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
           ratingDate: historyDate ? historyDate.getTime() : null,
           rating: _.isNil(h.rating) ? h.newRating : h.rating,
           newRating: h.newRating,
-          placement: h.placement,
+          placement: Number.isInteger(placement) && placement > 0 ? placement : undefined,
           percentile: h.percentile,
           mostRecent: !!h.mostRecent,
           oldRating: h.oldRating,

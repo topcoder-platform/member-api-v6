@@ -462,6 +462,85 @@ function enrichUnifiedHistoryRowsWithChallengeMetadata (rows, challengeMetadataB
   })
 }
 
+/**
+ * Normalize placement values so only positive integer rankings are surfaced.
+ * A zero placement is not meaningful in the profile history UI and is treated
+ * as missing data that can be backfilled from challenge winners.
+ * @param {*} value raw placement value
+ * @returns {number|undefined} positive placement when available
+ */
+function toVisiblePlacement (value) {
+  const placement = toOptionalInt(value)
+
+  return Number.isInteger(placement) && placement > 0 ? placement : undefined
+}
+
+/**
+ * Determine whether any history rows are missing a usable placement value.
+ * @param {Array<Object>} rows history rows already shaped for response building
+ * @returns {boolean} true when a row still needs placement enrichment
+ */
+function historyRowsNeedPlacementEnrichment (rows) {
+  return _.some(rows || [], row => !_.isNil(row.challengeId) && !toVisiblePlacement(row.placement))
+}
+
+/**
+ * Build a canonical challengeId -> placement lookup from challenge winner rows.
+ * When duplicate winner rows exist, keep the best available placement.
+ * @param {Array<Object>} winnerRows placement winner rows from challenge-api
+ * @returns {Map<string, number>} canonical challenge placements by challenge id
+ */
+function buildChallengeWinnerPlacementLookup (winnerRows) {
+  const placementByChallengeId = new Map()
+
+  _.forEach(winnerRows || [], (row) => {
+    const placement = toVisiblePlacement(row.placement)
+    const challengeId = _.get(row, 'challenge.id') || row.challengeId
+    const challengeKey = _.isNil(challengeId) ? null : String(challengeId).trim()
+
+    if (!placement || !challengeKey) {
+      return
+    }
+
+    const existingPlacement = placementByChallengeId.get(challengeKey)
+    if (_.isNil(existingPlacement) || placement < existingPlacement) {
+      placementByChallengeId.set(challengeKey, placement)
+    }
+  })
+
+  return placementByChallengeId
+}
+
+/**
+ * Fill missing or zeroed persisted placements from challenge-api winner rows.
+ * This keeps the profile challenge cards accurate while older history rows are
+ * backfilled with authoritative placement data.
+ * @param {Array<Object>} rows persisted and/or synthesized history rows
+ * @param {Array<Object>} winnerRows placement winner rows from challenge-api
+ * @returns {Array<Object>} history rows with corrected placements when available
+ */
+function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
+  const placementByChallengeId = buildChallengeWinnerPlacementLookup(winnerRows)
+
+  if (placementByChallengeId.size === 0) {
+    return rows || []
+  }
+
+  return _.map(rows || [], (row) => {
+    const challengeKey = _.isNil(row.challengeId) ? null : String(row.challengeId).trim()
+    const placement = challengeKey ? placementByChallengeId.get(challengeKey) : undefined
+
+    if (toVisiblePlacement(row.placement) || !placement) {
+      return row
+    }
+
+    return {
+      ...row,
+      placement
+    }
+  })
+}
+
 function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataById) {
   const aggregateByKey = new Map()
 
@@ -583,7 +662,7 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
     }
 
     const createdAt = toOptionalDate(row.createdAt) || eventDate
-    const placement = toOptionalInt(row.placement)
+    const placement = toVisiblePlacement(row.placement)
     const challengeId = String(challenge.id)
     const challengeKey = `${pairKey}::${challengeId}`
     const existing = fallbackRowsByChallengeKey.get(challengeKey)
@@ -600,7 +679,7 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
       challengeId,
       challengeName: challenge.name || null,
       eventDate,
-      placement: Number.isInteger(placement) ? placement : undefined,
+      placement,
       createdAt
     })
   })
@@ -663,7 +742,7 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
     }
 
     const createdAt = toOptionalDate(row.createdAt) || eventDate
-    const placement = toOptionalInt(row.placement)
+    const placement = toVisiblePlacement(row.placement)
     const challengeId = String(challenge.id || row.challengeId)
     const challengeKey = `${pairKey}::${challengeId}`
     const existing = fallbackRowsByChallengeKey.get(challengeKey)
@@ -680,7 +759,7 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
       challengeId,
       challengeName: challenge.name || null,
       eventDate,
-      placement: Number.isInteger(placement) ? placement : undefined,
+      placement,
       createdAt
     })
   })
@@ -1467,14 +1546,19 @@ async function getHistoryStats (currentUser, handle, query) {
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, reviewFallbackRows)
       }
 
-      if (unresolvedPairKeys.size > 0) {
+      if (unresolvedPairKeys.size > 0 || historyRowsNeedPlacementEnrichment(annotatedRows)) {
         const winnerRows = await fetchChallengeWinnerResultsForMember(challengeClient, member.userId)
-        const winnerFallbackRows = buildFallbackHistoryRowsFromChallengeWinners(
-          winnerRows,
-          dimensionLookup,
-          unresolvedPairKeys
-        )
-        annotatedRows = annotatedRows.concat(winnerFallbackRows)
+
+        annotatedRows = mergeHistoryPlacementsFromChallengeWinners(annotatedRows, winnerRows)
+
+        if (unresolvedPairKeys.size > 0) {
+          const winnerFallbackRows = buildFallbackHistoryRowsFromChallengeWinners(
+            winnerRows,
+            dimensionLookup,
+            unresolvedPairKeys
+          )
+          annotatedRows = annotatedRows.concat(winnerFallbackRows)
+        }
       }
 
       const orderedRows = orderUnifiedHistoryRows(annotatedRows)
