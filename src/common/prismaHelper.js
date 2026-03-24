@@ -541,7 +541,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
       resolvedTrackName: getUnifiedTrackName(row.trackName || row.trackId),
       resolvedTypeName: getUnifiedTypeName(row.typeName || row.typeId)
     }))
-    .filter(row => _.includes(['DEVELOP', 'DATA_SCIENCE'], row.resolvedTrackName))
+    .filter(row => _.includes(['DEVELOP', 'DESIGN', 'DATA_SCIENCE'], row.resolvedTrackName))
     .value()
   const first = _.head(validRows) || {}
   const item = {
@@ -554,11 +554,12 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
   const groupedByTrackType = _.groupBy(validRows, row => `${row.resolvedTrackName}::${row.resolvedTypeName}`)
   _.forEach(groupedByTrackType, (trackHistory, key) => {
     const [trackName, typeName] = key.split('::')
-    if (trackName === 'DEVELOP') {
-      if (!item.DEVELOP) {
-        item.DEVELOP = { subTracks: [] }
+    if (trackName === 'DEVELOP' || trackName === 'DESIGN') {
+      const historyTrackName = trackName === 'DESIGN' ? 'DESIGN' : 'DEVELOP'
+      if (!item[historyTrackName]) {
+        item[historyTrackName] = { subTracks: [] }
       }
-      item.DEVELOP.subTracks.push({
+      item[historyTrackName].subTracks.push({
         id: typeName,
         name: typeName,
         history: _.map(trackHistory, h => {

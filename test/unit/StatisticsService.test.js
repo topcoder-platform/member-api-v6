@@ -41,6 +41,7 @@ function restoreModuleCache (originalEntries) {
 function createStatsDimensionHelperStub () {
   const TRACK_NAMES = {
     DEVELOP: 'DEVELOP',
+    DESIGN: 'DESIGN',
     DATA_SCIENCE: 'DATA_SCIENCE'
   }
   const TYPE_NAMES = {
@@ -53,6 +54,7 @@ function createStatsDimensionHelperStub () {
 
   const trackIds = {
     DEVELOP: 'track-dev-id',
+    DESIGN: 'track-design-id',
     DATA_SCIENCE: 'track-ds-id'
   }
   const typeIds = {
@@ -65,6 +67,7 @@ function createStatsDimensionHelperStub () {
 
   const trackNamesById = {
     'track-dev-id': TRACK_NAMES.DEVELOP,
+    'track-design-id': TRACK_NAMES.DESIGN,
     'track-ds-id': TRACK_NAMES.DATA_SCIENCE
   }
   const typeNamesById = {
@@ -123,6 +126,9 @@ function createStatsDimensionHelperStub () {
       const normalized = String(value || '').trim().toUpperCase()
       if (normalized === 'DEVELOP' || normalized === 'DEV' || normalized === 'DEVELOPMENT') {
         return TRACK_NAMES.DEVELOP
+      }
+      if (normalized === 'DESIGN' || normalized === 'DES') {
+        return TRACK_NAMES.DESIGN
       }
       if (normalized === 'DATA_SCIENCE' || normalized === 'DATA SCIENCE' || normalized === 'DS') {
         return TRACK_NAMES.DATA_SCIENCE
@@ -325,6 +331,7 @@ describe('statistics service unit tests', () => {
         id: 'challenge-uuid',
         legacyId: null,
         name: 'F2F challenge',
+        status: 'COMPLETED',
         trackId: 'track-dev-id',
         typeId: 'type-f2f-id',
         endDate: ratingDate,
@@ -362,6 +369,221 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should exclude non-completed challenge results from synthesized history', async () => {
+    const completedDate = new Date('2025-11-27T05:48:36.899Z')
+    const activeDate = new Date('2025-11-28T05:48:36.899Z')
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-dev-id',
+            typeId: 'type-f2f-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      },
+      challengeRows: [{
+        id: 'completed-challenge-uuid',
+        legacyId: null,
+        name: 'Completed challenge',
+        status: 'COMPLETED',
+        trackId: 'track-dev-id',
+        typeId: 'type-f2f-id',
+        endDate: completedDate,
+        track: { name: 'Development' },
+        type: { name: 'First2Finish' },
+        metadata: [],
+        legacyRecord: null
+      }, {
+        id: 'active-challenge-uuid',
+        legacyId: null,
+        name: 'Active challenge',
+        status: 'ACTIVE',
+        trackId: 'track-dev-id',
+        typeId: 'type-f2f-id',
+        endDate: activeDate,
+        track: { name: 'Development' },
+        type: { name: 'First2Finish' },
+        metadata: [],
+        legacyRecord: null
+      }],
+      reviewRows: [{
+        challengeId: 'completed-challenge-uuid',
+        userId: '88770025',
+        finalScore: 97.5,
+        placement: 1,
+        rated: false,
+        createdAt: new Date('2025-11-27T05:48:36.907Z')
+      }, {
+        challengeId: 'active-challenge-uuid',
+        userId: '88770025',
+        finalScore: 0,
+        placement: 0,
+        rated: false,
+        createdAt: new Date('2025-11-28T05:48:36.907Z')
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DEVELOP)
+      result[0].DEVELOP.subTracks.should.have.length(1)
+      result[0].DEVELOP.subTracks[0].history.should.have.length(1)
+      result[0].DEVELOP.subTracks[0].history[0].challengeId.should.equal('completed-challenge-uuid')
+      result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('Completed challenge')
+      result[0].DEVELOP.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('refreshMemberStats should ignore non-completed challenge results', async () => {
+    const upsertCalls = []
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        $transaction: async (runInTransaction) => runInTransaction({
+          memberStats: {
+            upsert: async (args) => {
+              upsertCalls.push(args)
+            },
+            findFirst: async () => null
+          },
+          memberStatsHistory: {
+            updateMany: async () => {},
+            findFirst: async () => null,
+            update: async () => {}
+          }
+        }),
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => []
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      },
+      challengeRows: [{
+        id: 'completed-challenge-uuid',
+        legacyId: null,
+        name: 'Completed challenge',
+        status: 'COMPLETED',
+        trackId: 'track-dev-id',
+        typeId: 'type-challenge-id',
+        endDate: new Date('2025-11-27T05:48:36.899Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        metadata: [],
+        legacyRecord: null
+      }, {
+        id: 'active-challenge-uuid',
+        legacyId: null,
+        name: 'Active challenge',
+        status: 'ACTIVE',
+        trackId: 'track-dev-id',
+        typeId: 'type-challenge-id',
+        endDate: new Date('2025-11-28T05:48:36.899Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        metadata: [],
+        legacyRecord: null
+      }],
+      reviewRows: [{
+        challengeId: 'completed-challenge-uuid',
+        userId: '88770025',
+        finalScore: 100,
+        placement: 1,
+        rated: false,
+        createdAt: new Date('2025-11-27T05:48:36.907Z')
+      }, {
+        challengeId: 'active-challenge-uuid',
+        userId: '88770025',
+        finalScore: 0,
+        placement: 0,
+        rated: false,
+        createdAt: new Date('2025-11-28T05:48:36.907Z')
+      }]
+    })
+
+    try {
+      const result = await service.refreshMemberStats({ userId: 'operator-1' }, 'devtest1400', {})
+
+      result.challengeResultsProcessed.should.equal(2)
+      result.statsUpdated.should.equal(1)
+      upsertCalls.should.have.length(1)
+      upsertCalls[0].create.challenges.should.equal(1)
+      upsertCalls[0].create.wins.should.equal(1)
+      upsertCalls[0].create.trackId.should.equal('track-dev-id')
+      upsertCalls[0].create.typeId.should.equal('type-challenge-id')
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should synthesize missing review history for visible design subtracks', async () => {
+    const ratingDate = new Date('2025-11-27T05:48:36.899Z')
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-design-id',
+            typeId: 'type-challenge-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      },
+      challengeRows: [{
+        id: 'design-challenge-uuid',
+        legacyId: null,
+        name: 'Design challenge',
+        status: 'COMPLETED',
+        trackId: 'track-design-id',
+        typeId: 'type-challenge-id',
+        endDate: ratingDate,
+        track: { name: 'Design' },
+        type: { name: 'Challenge' },
+        metadata: [],
+        legacyRecord: null
+      }],
+      reviewRows: [{
+        challengeId: 'design-challenge-uuid',
+        userId: '88770025',
+        finalScore: 97.5,
+        placement: 1,
+        rated: false,
+        createdAt: new Date('2025-11-27T05:48:36.907Z')
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].groupId.should.equal(10)
+      should.exist(result[0].DESIGN)
+      result[0].DESIGN.subTracks.should.have.length(1)
+      result[0].DESIGN.subTracks[0].name.should.equal('Challenge')
+      result[0].DESIGN.subTracks[0].history.should.have.length(1)
+      result[0].DESIGN.subTracks[0].history[0].challengeId.should.equal('design-challenge-uuid')
+      result[0].DESIGN.subTracks[0].history[0].challengeName.should.equal('Design challenge')
+      result[0].DESIGN.subTracks[0].history[0].placement.should.equal(1)
+      result[0].DESIGN.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
+      result[0].DESIGN.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should synthesize missing history from challenge winners when review rows are unavailable', async () => {
     const ratingDate = new Date('2025-11-27T05:48:36.899Z')
     const { service, restore } = loadStatisticsService({
@@ -387,6 +609,7 @@ describe('statistics service unit tests', () => {
         challenge: {
           id: 'challenge-uuid',
           name: 'Winner fallback challenge',
+          status: 'COMPLETED',
           trackId: 'track-dev-id',
           typeId: 'type-f2f-id',
           endDate: ratingDate

@@ -1411,6 +1411,7 @@ paths:
         - Statistics
       description: >
         Retrieve member statistics, optionally filtered by group, challenge track, and challenge type.
+        Counts sourced from unified challenge results include completed challenges only.
         
         Filtering behavior:
           - `trackId` only: returns all statistics for that track across all types.
@@ -1601,7 +1602,8 @@ paths:
         Get member history statistics, by default only returns the public Topcoder history statistics.
         Results can be filtered by challenge track and challenge type for more granular historical views.
         When persisted history rows are missing for a visible track/type pair, challenge cards are synthesized
-        from available challenge-result sources so challenge-level history still appears. Fallback rows may omit
+        from available completed challenge-result sources so challenge-level history still appears. Non-completed
+        challenges are excluded from the response. Fallback rows may omit
         rating fields when no authoritative rating snapshot exists.
         
         Filtering behavior:
@@ -1778,7 +1780,7 @@ paths:
       tags:
         - Statistics
       description: >
-        Refreshes unified member stats for the member from review-api challenge results.
+        Refreshes unified member stats for the member from completed review-api challenge results.
         `challengeId` is accepted for compatibility and echoed in the response summary.
         Callable by admin users or M2M tokens with `refresh:member_stats` scope.
       security:
@@ -2985,6 +2987,45 @@ definitions:
       handleLower:
         type: string
       DEVELOP:
+        type: object
+        properties:
+          subTracks:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: number
+                  format: int64
+                name:
+                  type: string
+                history:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      challengeId:
+                        type: string
+                        description: Canonical challenge UUID when challenge metadata can be resolved; otherwise the stored legacy identifier.
+                      challengeName:
+                        type: string
+                      ratingDate:
+                        type: string
+                        format: date-time
+                        description: >-
+                          ISO-8601 formatted date times
+                          (YYYY-MM-DDTHH:mm:ss.sssZ)
+                      mostRecent:
+                        type: boolean
+                        description: True if this is the latest history row for the same user, track, and type.
+                      oldRating:
+                        type: number
+                        format: int64
+                      newRating:
+                        type: number
+                        format: int64
+                        description: For mostRecent=true rows, this equals the current member stats rating for the same track/type.
+      DESIGN:
         type: object
         properties:
           subTracks:

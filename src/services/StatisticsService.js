@@ -33,7 +33,7 @@ const DISTRIBUTION_FIELDS = ['track', 'subTrack', 'distribution', 'createdAt', '
   'createdBy', 'updatedBy']
 const DISTRIBUTION_FIELDS_NO_DATE = ['track', 'subTrack', 'distribution']
 
-const HISTORY_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'DEVELOP', 'DATA_SCIENCE',
+const HISTORY_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'DEVELOP', 'DESIGN', 'DATA_SCIENCE',
   'createdAt', 'updatedAt', 'createdBy', 'updatedBy']
 
 const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxRating',
@@ -287,6 +287,7 @@ async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
           select: {
             id: true,
             name: true,
+            status: true,
             trackId: true,
             typeId: true,
             endDate: true
@@ -355,6 +356,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
       id: true,
       legacyId: true,
       name: true,
+      status: true,
       trackId: true,
       typeId: true,
       endDate: true,
@@ -402,6 +404,38 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
 }
 
 /**
+ * Determine whether challenge metadata represents a completed challenge.
+ * @param {Object} challenge challenge metadata row
+ * @returns {boolean} true when the challenge status is COMPLETED
+ */
+function isCompletedChallenge (challenge) {
+  return String(_.get(challenge, 'status') || '').trim().toUpperCase() === 'COMPLETED'
+}
+
+/**
+ * Drop persisted history rows when challenge metadata proves the challenge is not completed.
+ * Rows without matching challenge metadata are kept so legacy history can still surface.
+ * @param {Array<Object>} rows unified history rows
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by UUID and legacy ids
+ * @returns {Array<Object>} history rows limited to completed challenges when status is known
+ */
+function filterUnifiedHistoryRowsToCompletedChallenges (rows, challengeMetadataById) {
+  return _.filter(rows || [], (row) => {
+    const challengeId = _.isNil(row.challengeId) ? null : String(row.challengeId).trim()
+    if (!challengeId) {
+      return true
+    }
+
+    const challenge = challengeMetadataById.get(challengeId)
+    if (!challenge) {
+      return true
+    }
+
+    return isCompletedChallenge(challenge)
+  })
+}
+
+/**
  * Attach canonical challenge ids and names to unified history rows before shaping
  * the response payload consumed by the profiles UI.
  * @param {Array<Object>} rows unified history rows loaded from members.memberStatsHistory
@@ -433,7 +467,7 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
 
   _.forEach(reviewRows, (row) => {
     const challenge = challengeMetadataById.get(String(row.challengeId))
-    if (!challenge || !challenge.trackId || !challenge.typeId) {
+    if (!challenge || !isCompletedChallenge(challenge) || !challenge.trackId || !challenge.typeId) {
       return
     }
 
@@ -479,12 +513,12 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
 
 /**
  * Check whether the unified history response should surface the supplied track.
- * The public history contract currently exposes only DEVELOPMENT and DATA_SCIENCE groups.
+ * The public history contract currently exposes DEVELOPMENT, DESIGN, and DATA_SCIENCE groups.
  * @param {string|undefined} trackName canonical track label
  * @returns {boolean} true when the track should be included in history responses
  */
 function isSupportedUnifiedHistoryTrack (trackName) {
-  return _.includes([TRACK_NAMES.DEVELOP, TRACK_NAMES.DATA_SCIENCE], trackName)
+  return _.includes([TRACK_NAMES.DEVELOP, TRACK_NAMES.DESIGN, TRACK_NAMES.DATA_SCIENCE], trackName)
 }
 
 /**
@@ -511,8 +545,8 @@ function getMissingUnifiedHistoryPairKeys (aggregateRows, historyRows, dimension
 }
 
 /**
- * Build transient unified history rows from review-api challenge results for aggregate
- * track/type pairs that do not yet have authoritative memberStatsHistory rows.
+ * Build transient unified history rows from completed review-api challenge results for
+ * aggregate track/type pairs that do not yet have authoritative memberStatsHistory rows.
  * These fallback rows preserve challenge cards for non-rated tracks such as First2Finish
  * until a persistent backfill is written.
  * @param {Array<Object>} reviewRows review-api challenge results for the member
@@ -526,7 +560,7 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
 
   _.forEach(reviewRows || [], (row) => {
     const challenge = challengeMetadataById.get(String(row.challengeId))
-    if (!challenge || !challenge.trackId || !challenge.typeId) {
+    if (!challenge || !isCompletedChallenge(challenge) || !challenge.trackId || !challenge.typeId) {
       return
     }
 
@@ -593,7 +627,7 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
 }
 
 /**
- * Build transient unified history rows from challenge winner placements.
+ * Build transient unified history rows from completed challenge winner placements.
  * This fallback is used when review-api does not expose challengeResult rows for
  * a member but challenge-api still records the member's placements.
  * @param {Array<Object>} winnerRows placement winner rows with embedded challenge metadata
@@ -606,7 +640,7 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
 
   _.forEach(winnerRows || [], (row) => {
     const challenge = row.challenge
-    if (!challenge || !challenge.trackId || !challenge.typeId) {
+    if (!challenge || !isCompletedChallenge(challenge) || !challenge.trackId || !challenge.typeId) {
       return
     }
 
@@ -1345,7 +1379,7 @@ getDistribution.schema = {
 }
 
 /**
- * Get history statistics.
+ * Get history statistics for completed challenges.
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
  * @returns {Object} the history statistics
@@ -1414,8 +1448,11 @@ async function getHistoryStats (currentUser, handle, query) {
         _.uniq(_.map(historyRows, row => row.challengeId).concat(_.map(reviewRows, row => row.challengeId)))
       )
 
-      let annotatedRows = enrichUnifiedHistoryRowsWithChallengeMetadata(
-        annotateUnifiedDimensionRows(historyRows, dimensionLookup),
+      let annotatedRows = filterUnifiedHistoryRowsToCompletedChallenges(
+        enrichUnifiedHistoryRowsWithChallengeMetadata(
+          annotateUnifiedDimensionRows(historyRows, dimensionLookup),
+          challengeMetadataById
+        ),
         challengeMetadataById
       )
 
@@ -1441,10 +1478,12 @@ async function getHistoryStats (currentUser, handle, query) {
       }
 
       const orderedRows = orderUnifiedHistoryRows(annotatedRows)
-      _.forEach(groupIds, (groupId) => {
-        const scopedRows = _.map(orderedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
-        overallStat.push(scopedRows)
-      })
+      if (orderedRows.length > 0) {
+        _.forEach(groupIds, (groupId) => {
+          const scopedRows = _.map(orderedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
+          overallStat.push(scopedRows)
+        })
+      }
     }
 
     result = _.map(overallStat, rows => prismaHelper.buildUnifiedStatsHistoryResponse(member, rows, fields))
@@ -2151,8 +2190,8 @@ partiallyUpdateMemberStats.schema = {
 }
 
 /**
- * Refresh unified memberStats aggregates for a member from review-api challenge results.
- * Challenge metadata is resolved from challenge-api so counts and timestamps are
+ * Refresh unified memberStats aggregates for a member from completed review-api challenge
+ * results. Challenge metadata is resolved from challenge-api so counts and timestamps are
  * grouped by the existing unified track/type identifiers used in memberStats.
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
