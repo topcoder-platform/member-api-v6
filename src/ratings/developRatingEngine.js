@@ -48,6 +48,11 @@ function normalizeDate (value, fallbackValue) {
   return date
 }
 
+/**
+ * Normalize challenge track/type labels into stable uppercase identifiers.
+ * @param {*} value raw challenge dimension label
+ * @returns {string} normalized identifier
+ */
 function normalizeChallengeDimension (value) {
   return String(value || '')
     .trim()
@@ -55,6 +60,11 @@ function normalizeChallengeDimension (value) {
     .replace(/[\s-]+/g, '_')
 }
 
+/**
+ * Parse a boolean-like value from review rows or metadata payloads.
+ * @param {*} value candidate boolean value
+ * @returns {boolean|undefined} parsed boolean or undefined when indeterminate
+ */
 function parseBooleanLike (value) {
   if (typeof value === 'boolean') {
     return value
@@ -73,6 +83,13 @@ function parseBooleanLike (value) {
   return undefined
 }
 
+/**
+ * Resolve whether challenge metadata marks a challenge as rated.
+ * Missing or indeterminate metadata defaults to rated so legacy backfills with
+ * null review flags can still rerate unless the challenge is explicitly unrated.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge should be rerated
+ */
 function isChallengeRated (challenge) {
   if (!challenge) {
     return false
@@ -307,6 +324,14 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeId) {
   return result.rows
 }
 
+/**
+ * Load challenge metadata required for Development rerating from challenge-api.
+ * Rated metadata is loaded defensively from challenge metadata key/value rows
+ * because the Challenge Prisma model does not expose a dedicated rated field.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Array<string>} challengeIds challenge identifiers
+ * @returns {Promise<Map<string, Object>>} challenge metadata keyed by challenge id
+ */
 async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
   if (!challengeIds || challengeIds.length === 0) {
     return new Map()
@@ -321,8 +346,6 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
     select: {
       id: true,
       endDate: true,
-      isRated: true,
-      rated: true,
       track: {
         select: {
           name: true
