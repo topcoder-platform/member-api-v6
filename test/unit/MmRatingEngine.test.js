@@ -14,6 +14,10 @@ const {
 } = require('../../src/ratings/qubitsAlgorithm')
 
 const should = chai.should()
+const DEVELOP_TRACK_ID = 'track-develop-id'
+const DATA_SCIENCE_TRACK_ID = 'track-data-science-id'
+const CHALLENGE_TYPE_ID = 'type-challenge-id'
+const MARATHON_MATCH_TYPE_ID = 'type-marathon-match-id'
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
@@ -280,6 +284,25 @@ function createMmReviewDbClient (rows) {
 
 function createChallengeClient (metadataById) {
   return {
+    async $queryRaw (strings) {
+      const sql = Array.isArray(strings) ? strings.join('') : String(strings)
+
+      if (sql.includes('FROM "ChallengeTrack"')) {
+        return [
+          { id: DEVELOP_TRACK_ID, name: 'Development', abbreviation: 'DEV', legacyId: null },
+          { id: DATA_SCIENCE_TRACK_ID, name: 'Data Science', abbreviation: 'DS', legacyId: null }
+        ]
+      }
+
+      if (sql.includes('FROM "ChallengeType"')) {
+        return [
+          { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+          { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+        ]
+      }
+
+      throw new Error(`Unexpected challenge lookup query: ${sql}`)
+    },
     challenge: {
       async findMany (args) {
         return args.where.id.in
@@ -453,8 +476,8 @@ describe('marathon match rating engine unit tests', () => {
 
       const statsRow = state.statsRows.find((row) =>
         String(row.userId) === String(targetUserId) &&
-        row.trackId === 'DATA_SCIENCE' &&
-        row.typeId === 'MARATHON_MATCH'
+        row.trackId === DATA_SCIENCE_TRACK_ID &&
+        row.typeId === MARATHON_MATCH_TYPE_ID
       )
       const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
 
@@ -472,8 +495,8 @@ describe('marathon match rating engine unit tests', () => {
         {
           id: toBigInt(1),
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: developPeakChallengeId,
           mostRecent: true,
           oldRating: 2300,
@@ -484,8 +507,8 @@ describe('marathon match rating engine unit tests', () => {
       statsRows: [
         {
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           rating: 2500,
           volatility: 220
         }

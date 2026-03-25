@@ -10,10 +10,15 @@
 'use strict'
 
 const errors = require('../common/errors')
+const {
+  loadChallengeDimensionLookup,
+  resolveTrackIdFromLookup,
+  resolveTypeIdFromLookup
+} = require('../common/statsDimensionHelper')
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
 
-const TRACK_ID = 'DATA_SCIENCE'
-const TYPE_ID = 'MARATHON_MATCH'
+const TRACK_NAME = 'DATA_SCIENCE'
+const TYPE_NAME = 'MARATHON_MATCH'
 const CHALLENGE_TRACK_NAME = 'DATA_SCIENCE'
 const CHALLENGE_TYPE_NAME = 'MARATHON_MATCH'
 const RERATE_ACTOR = 'rerate-mm-stats'
@@ -96,6 +101,26 @@ function cloneState (state) {
  */
 function buildUserStateKey (userId) {
   return String(userId)
+}
+
+/**
+ * Resolve the unified track/type UUIDs used for DATA_SCIENCE / MARATHON_MATCH rows.
+ * @param {Object} challengeClient prisma challenge client
+ * @returns {Promise<{trackId: string, typeId: string}>} resolved unified ids
+ */
+async function resolveUnifiedDimensionIds (challengeClient) {
+  const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
+  const trackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAME)
+  const typeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAME)
+
+  if (!trackId || !typeId) {
+    throw new Error(`Unable to resolve unified dimension ids for ${TRACK_NAME}/${TYPE_NAME}`)
+  }
+
+  return {
+    trackId,
+    typeId
+  }
 }
 
 /**
@@ -571,7 +596,7 @@ function buildTargetHistory (mmResultRows, challengeMetadataById) {
  * @param {Map<string, Array<Object>>} historyByUserId cached history rows per participant
  * @returns {Promise<void>} resolves when the requested history rows are cached
  */
-async function loadParticipantHistoryCache (membersClient, participantIds, historyByUserId) {
+async function loadParticipantHistoryCache (membersClient, participantIds, historyByUserId, dimensionIds) {
   const idsToLoad = participantIds.filter((participantId) => !historyByUserId.has(buildUserStateKey(participantId)))
   if (idsToLoad.length === 0) {
     return
@@ -582,8 +607,8 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       userId: {
         in: idsToLoad
       },
-      trackId: TRACK_ID,
-      typeId: TYPE_ID
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId
     },
     orderBy: [{ userId: 'asc' }, { eventDate: 'asc' }, { id: 'asc' }],
     select: {
@@ -630,13 +655,13 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
  * @param {Map<string, Array<Object>>} historyByUserId cached history rows per participant
  * @returns {Promise<Map<string, Object>>} seed state keyed by participant id
  */
-async function loadParticipantStates (membersClient, participantIds, targetUserId, targetState, challengeEntry, historyByUserId) {
+async function loadParticipantStates (membersClient, participantIds, targetUserId, targetState, challengeEntry, historyByUserId, dimensionIds) {
   const targetStateKey = buildUserStateKey(targetUserId)
   const stateByUserId = new Map()
   const nonTargetParticipantIds = participantIds.filter((participantId) => buildUserStateKey(participantId) !== targetStateKey)
 
   if (nonTargetParticipantIds.length > 0) {
-    await loadParticipantHistoryCache(membersClient, nonTargetParticipantIds, historyByUserId)
+    await loadParticipantHistoryCache(membersClient, nonTargetParticipantIds, historyByUserId, dimensionIds)
   }
 
   participantIds.forEach((participantId) => {
@@ -664,12 +689,12 @@ async function loadParticipantStates (membersClient, participantIds, targetUserI
  * @param {Date} eventDate challenge event date
  * @returns {Promise<void>} resolves when the history row is written
  */
-async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, eventDate) {
+async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, eventDate, dimensionIds) {
   const existingHistory = await tx.memberStatsHistory.findFirst({
     where: {
       userId,
-      trackId: TRACK_ID,
-      typeId: TYPE_ID,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
       challengeId
     },
     select: {
@@ -695,8 +720,8 @@ async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, 
   await tx.memberStatsHistory.create({
     data: {
       userId,
-      trackId: TRACK_ID,
-      typeId: TYPE_ID,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
       challengeId,
       mostRecent: false,
       oldRating,
@@ -751,16 +776,16 @@ async function updateMaxRating (tx, userId, rating) {
     create: {
       userId,
       rating,
-      track: TRACK_ID,
-      subTrack: TYPE_ID,
+      track: TRACK_NAME,
+      subTrack: TYPE_NAME,
       ratingColor: getRatingColor(rating),
       createdBy: RERATE_ACTOR,
       updatedBy: RERATE_ACTOR
     },
     update: {
       rating,
-      track: TRACK_ID,
-      subTrack: TYPE_ID,
+      track: TRACK_NAME,
+      subTrack: TYPE_NAME,
       ratingColor: getRatingColor(rating),
       updatedBy: RERATE_ACTOR
     }
@@ -773,12 +798,12 @@ async function updateMaxRating (tx, userId, rating) {
  * @param {BigInt} userId member identifier
  * @returns {Promise<void>} resolves when history flags are refreshed
  */
-async function refreshMostRecentHistoryFlag (tx, userId) {
+async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
   await tx.memberStatsHistory.updateMany({
     where: {
       userId,
-      trackId: TRACK_ID,
-      typeId: TYPE_ID,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
       mostRecent: true
     },
     data: {
@@ -790,8 +815,8 @@ async function refreshMostRecentHistoryFlag (tx, userId) {
   const latestHistory = await tx.memberStatsHistory.findFirst({
     where: {
       userId,
-      trackId: TRACK_ID,
-      typeId: TYPE_ID
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId
     },
     orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
     select: {
@@ -806,8 +831,8 @@ async function refreshMostRecentHistoryFlag (tx, userId) {
   const currentStats = await tx.memberStats.findFirst({
     where: {
       userId,
-      trackId: TRACK_ID,
-      typeId: TYPE_ID
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId
     },
     select: {
       rating: true
@@ -817,8 +842,8 @@ async function refreshMostRecentHistoryFlag (tx, userId) {
   const previousHistory = await tx.memberStatsHistory.findFirst({
     where: {
       userId,
-      trackId: TRACK_ID,
-      typeId: TYPE_ID
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId
     },
     orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
     skip: 1,
@@ -889,11 +914,13 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     }
   }
 
+  const dimensionIds = await resolveUnifiedDimensionIds(challengeClient)
+
   let startIndex = 0
   if (fromChallengeId) {
     startIndex = targetHistory.findIndex((entry) => entry.challengeId === String(fromChallengeId))
     if (startIndex < 0) {
-      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_ID}/${TYPE_ID} event for this member`)
+      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${TYPE_NAME} event for this member`)
     }
   }
 
@@ -902,7 +929,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
   let recomputedMaxRating = 0
 
   if (startIndex > 0) {
-    await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId)
+    await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
 
     const targetHistoryRows = participantHistoryByUserId.get(buildUserStateKey(normalizedUserId)) || []
     let startSeedIndex = findHistoryIndexForChallenge(targetHistoryRows, targetHistory[startIndex - 1].challengeId)
@@ -936,7 +963,8 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
       normalizedUserId,
       targetState,
       historyEntry,
-      participantHistoryByUserId
+      participantHistoryByUserId,
+      dimensionIds
     )
 
     const targetStateBeforeRun = cloneState(targetState)
@@ -970,14 +998,14 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
         where: {
           userId_trackId_typeId: {
             userId: normalizedUserId,
-            trackId: TRACK_ID,
-            typeId: TYPE_ID
+            trackId: dimensionIds.trackId,
+            typeId: dimensionIds.typeId
           }
         },
         create: {
           userId: normalizedUserId,
-          trackId: TRACK_ID,
-          typeId: TYPE_ID,
+          trackId: dimensionIds.trackId,
+          typeId: dimensionIds.typeId,
           rating: updatedTarget.rating,
           volatility: updatedTarget.volatility,
           createdBy: RERATE_ACTOR,
@@ -996,14 +1024,15 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
         historyEntry.challengeId,
         targetStateBeforeRun.numRatings > 0 ? targetStateBeforeRun.rating : null,
         updatedTarget.rating,
-        historyEntry.eventDate
+        historyEntry.eventDate,
+        dimensionIds
       )
     })
   }
 
   if (ratingsUpdated > 0) {
     await membersClient.$transaction(async (tx) => {
-      await refreshMostRecentHistoryFlag(tx, normalizedUserId)
+      await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
       await updateMaxRating(tx, normalizedUserId, recomputedMaxRating)
     })
   }

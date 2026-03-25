@@ -15,6 +15,10 @@ const {
 } = require('../../src/ratings/qubitsAlgorithm')
 
 const should = chai.should()
+const DEVELOP_TRACK_ID = 'track-develop-id'
+const DATA_SCIENCE_TRACK_ID = 'track-data-science-id'
+const CHALLENGE_TYPE_ID = 'type-challenge-id'
+const MARATHON_MATCH_TYPE_ID = 'type-marathon-match-id'
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
@@ -280,6 +284,25 @@ function createReviewDbClient (rows) {
 
 function createChallengeClient (metadataById) {
   return {
+    async $queryRaw (strings) {
+      const sql = Array.isArray(strings) ? strings.join('') : String(strings)
+
+      if (sql.includes('FROM "ChallengeTrack"')) {
+        return [
+          { id: DEVELOP_TRACK_ID, name: 'Development', abbreviation: 'DEV', legacyId: null },
+          { id: DATA_SCIENCE_TRACK_ID, name: 'Data Science', abbreviation: 'DS', legacyId: null }
+        ]
+      }
+
+      if (sql.includes('FROM "ChallengeType"')) {
+        return [
+          { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+          { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+        ]
+      }
+
+      throw new Error(`Unexpected challenge lookup query: ${sql}`)
+    },
     challenge: {
       async findMany (args) {
         return args.where.id.in
@@ -318,8 +341,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(1),
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeOneId,
           mostRecent: false,
           oldRating: null,
@@ -329,8 +352,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(2),
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeTwoId,
           mostRecent: true,
           oldRating: 1500,
@@ -340,8 +363,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(3),
           userId: opponentUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: opponentSeedChallengeId,
           mostRecent: false,
           oldRating: null,
@@ -351,8 +374,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(4),
           userId: opponentUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeTwoId,
           mostRecent: true,
           oldRating: 1200,
@@ -363,15 +386,15 @@ describe('develop rating engine unit tests', () => {
       statsRows: [
         {
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           rating: 2100,
           volatility: 260
         },
         {
           userId: opponentUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           rating: opponentSnapshotRating,
           volatility: opponentSnapshotVolatility
         }
@@ -479,8 +502,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(11),
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeOneId,
           mostRecent: false,
           oldRating: null,
@@ -490,8 +513,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(12),
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeTwoId,
           mostRecent: false,
           oldRating: 1800,
@@ -501,8 +524,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(13),
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeThreeId,
           mostRecent: true,
           oldRating: 2200,
@@ -512,8 +535,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(14),
           userId: opponentUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: opponentSeedChallengeId,
           mostRecent: false,
           oldRating: null,
@@ -523,8 +546,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(15),
           userId: opponentUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeTwoId,
           mostRecent: false,
           oldRating: 1200,
@@ -534,8 +557,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(16),
           userId: opponentUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           challengeId: challengeThreeId,
           mostRecent: true,
           oldRating: 1300,
@@ -545,8 +568,8 @@ describe('develop rating engine unit tests', () => {
         {
           id: toBigInt(17),
           userId: targetUserId,
-          trackId: 'DATA_SCIENCE',
-          typeId: 'MARATHON_MATCH',
+          trackId: DATA_SCIENCE_TRACK_ID,
+          typeId: MARATHON_MATCH_TYPE_ID,
           challengeId: marathonPeakChallengeId,
           mostRecent: true,
           oldRating: 2100,
@@ -557,8 +580,8 @@ describe('develop rating engine unit tests', () => {
       statsRows: [
         {
           userId: targetUserId,
-          trackId: 'DEVELOP',
-          typeId: 'Challenge',
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
           rating: 2100,
           volatility: 210
         }
