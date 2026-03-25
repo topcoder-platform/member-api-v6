@@ -47,6 +47,8 @@
  *   challenges never existed in the legacy history source tables.
  * - memberStatsHistory.mostRecent is recalculated from latest eventDate per (userId, trackId, typeId).
  * - memberStatsHistory.newRating on the mostRecent row is synchronized from memberStats.rating.
+ * - memberMaxRating is synchronized from the highest current memberStats.rating
+ *   row after each write-mode batch, and stale rows are removed when no current ratings remain.
  * - --skip-history skips the legacy history backfill pass.
  * - --skip-ratings skips the legacy rating/rank enrichment pass and the Qubits rerate backfill.
  * - --skip-rerate skips the expensive Development rerate replay while still preserving
@@ -69,6 +71,7 @@ const path = require('path')
 require('dotenv').config()
 
 const { getMembersClient, getChallengesClient } = require('../common/prisma')
+const helper = require('../common/helper')
 const reviewDb = require('../common/reviewDb')
 const { assertChallengeResultRelation, resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
@@ -78,7 +81,9 @@ const {
   loadChallengeDimensionLookup,
   normalizeLookupKey,
   resolveTrackIdFromLookup,
-  resolveTypeIdFromLookup
+  resolveTrackNameFromLookup,
+  resolveTypeIdFromLookup,
+  resolveTypeNameFromLookup
 } = require('../common/statsDimensionHelper')
 
 const DEFAULT_ACTOR = process.env.UPDATED_BY || process.env.CREATED_BY || 'stats-migration'
@@ -2101,6 +2106,215 @@ function buildMemberStatsWriteData (record, existingRow) {
   return writeData
 }
 
+function toComparableTimestamp (value) {
+  if (!value) {
+    return 0
+  }
+
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+/**
+ * Resolve the memberMaxRating row implied by current memberStats rows.
+ * The stored row should represent the highest current rating across tracks/types,
+ * not a historical peak value from older data imports or rerates.
+ * @param {Array<Object>} statsRows current public memberStats rows for one user
+ * @returns {Object|null} normalized memberMaxRating write payload, or null when no current rating exists
+ */
+function buildCurrentMemberMaxRatingData (statsRows) {
+  if (!legacyLookupCache) {
+    throw new Error('Challenge dimension lookup has not been initialized')
+  }
+
+  if (!statsRows || statsRows.length === 0) {
+    return null
+  }
+
+  let selectedRow = null
+  let selectedKey = null
+
+  statsRows.forEach((row) => {
+    const rating = toOptionalInt(row && row.rating)
+    if (rating === null) {
+      return
+    }
+
+    const candidateKey = buildTrackTypeKey(row.trackId, row.typeId)
+    const candidate = {
+      userId: normalizeBigInt(row.userId, 'user id'),
+      trackId: String(row.trackId),
+      typeId: String(row.typeId),
+      rating,
+      mostRecentEventDate: toComparableTimestamp(row.mostRecentEventDate)
+    }
+
+    if (!selectedRow ||
+      candidate.rating > selectedRow.rating ||
+      (candidate.rating === selectedRow.rating &&
+        candidate.mostRecentEventDate > selectedRow.mostRecentEventDate) ||
+      (candidate.rating === selectedRow.rating &&
+        candidate.mostRecentEventDate === selectedRow.mostRecentEventDate &&
+        candidateKey < selectedKey)) {
+      selectedRow = candidate
+      selectedKey = candidateKey
+    }
+  })
+
+  if (!selectedRow) {
+    return null
+  }
+
+  const track = resolveTrackNameFromLookup(legacyLookupCache, selectedRow.trackId) || selectedRow.trackId
+  const subTrack = resolveTypeNameFromLookup(legacyLookupCache, selectedRow.typeId) || selectedRow.typeId
+
+  return {
+    userId: selectedRow.userId,
+    rating: selectedRow.rating,
+    track,
+    subTrack,
+    ratingColor: helper.getRatingColor(selectedRow.rating)
+  }
+}
+
+/**
+ * Synchronize memberMaxRating rows from the highest current memberStats.rating
+ * value for the specified users. Users with no current rating rows have stale
+ * memberMaxRating rows deleted.
+ * @param {Object} membersClient prisma members client
+ * @param {Array<*>} userIds member user ids to synchronize
+ * @returns {Promise<{ upserted: number, deleted: number }>} write counts
+ */
+async function syncCurrentMemberMaxRatingsForUsers (membersClient, userIds) {
+  if (!userIds || userIds.length === 0) {
+    return { upserted: 0, deleted: 0 }
+  }
+
+  const normalizedUserIds = Array.from(
+    new Set(userIds.map((userId) => normalizeBigInt(userId, 'user id').toString()))
+  ).map((userId) => normalizeBigInt(userId, 'user id'))
+
+  if (normalizedUserIds.length === 0) {
+    return { upserted: 0, deleted: 0 }
+  }
+
+  const [statsRows, existingRows] = await Promise.all([
+    membersClient.memberStats.findMany({
+      where: {
+        userId: {
+          in: normalizedUserIds
+        },
+        rating: {
+          not: null
+        },
+        isPrivate: false
+      },
+      select: {
+        userId: true,
+        trackId: true,
+        typeId: true,
+        rating: true,
+        mostRecentEventDate: true
+      }
+    }),
+    membersClient.memberMaxRating.findMany({
+      where: {
+        userId: {
+          in: normalizedUserIds
+        }
+      },
+      select: {
+        id: true,
+        userId: true,
+        rating: true,
+        track: true,
+        subTrack: true,
+        ratingColor: true
+      }
+    })
+  ])
+
+  const statsRowsByUserId = new Map()
+  statsRows.forEach((row) => {
+    const userKey = normalizeBigInt(row.userId, 'user id').toString()
+    const rows = statsRowsByUserId.get(userKey) || []
+    rows.push(row)
+    statsRowsByUserId.set(userKey, rows)
+  })
+
+  const desiredRowsByUserId = new Map()
+  normalizedUserIds.forEach((userId) => {
+    const userKey = userId.toString()
+    const desiredRow = buildCurrentMemberMaxRatingData(statsRowsByUserId.get(userKey) || [])
+    if (desiredRow) {
+      desiredRowsByUserId.set(userKey, desiredRow)
+    }
+  })
+
+  const existingRowsByUserId = new Map(
+    existingRows.map((row) => [normalizeBigInt(row.userId, 'user id').toString(), row])
+  )
+
+  const queries = []
+  const deleteIds = existingRows
+    .filter((row) => !desiredRowsByUserId.has(normalizeBigInt(row.userId, 'user id').toString()))
+    .map((row) => row.id)
+
+  if (deleteIds.length > 0) {
+    queries.push(membersClient.memberMaxRating.deleteMany({
+      where: {
+        id: {
+          in: deleteIds
+        }
+      }
+    }))
+  }
+
+  let upserted = 0
+  desiredRowsByUserId.forEach((desiredRow, userKey) => {
+    const existingRow = existingRowsByUserId.get(userKey) || null
+    if (existingRow &&
+      toOptionalInt(existingRow.rating) === desiredRow.rating &&
+      existingRow.track === desiredRow.track &&
+      existingRow.subTrack === desiredRow.subTrack &&
+      existingRow.ratingColor === desiredRow.ratingColor) {
+      return
+    }
+
+    queries.push(membersClient.memberMaxRating.upsert({
+      where: {
+        userId: desiredRow.userId
+      },
+      create: {
+        userId: desiredRow.userId,
+        rating: desiredRow.rating,
+        track: desiredRow.track,
+        subTrack: desiredRow.subTrack,
+        ratingColor: desiredRow.ratingColor,
+        createdBy: CREATED_BY,
+        updatedBy: UPDATED_BY
+      },
+      update: {
+        rating: desiredRow.rating,
+        track: desiredRow.track,
+        subTrack: desiredRow.subTrack,
+        ratingColor: desiredRow.ratingColor,
+        updatedBy: UPDATED_BY
+      }
+    }))
+    upserted += 1
+  })
+
+  if (queries.length > 0) {
+    await membersClient.$transaction(queries)
+  }
+
+  return {
+    upserted,
+    deleted: deleteIds.length
+  }
+}
+
 /**
  * Build parameter placeholders and flattened values for a SQL VALUES list.
  * @param {Array<Array<*>>} rows row-major parameter values
@@ -3149,6 +3363,8 @@ async function main () {
   let updatedHistoryFlags = 0
   let reratedChallenges = 0
   let reratedRatings = 0
+  let syncedMemberMaxRatings = 0
+  let deletedMemberMaxRatings = 0
 
   try {
     logInfo(`Starting recalculateMemberStats in ${options.csvOnly ? 'CSV-only' : 'write'} mode with concurrency ${options.concurrency}`)
@@ -3232,6 +3448,7 @@ async function main () {
       let historyDurationMs = 0
       let historyRefreshDurationMs = 0
       let rerateDurationMs = 0
+      let maxRatingSyncDurationMs = 0
 
       for (const userId of batchUserIds) {
         if (existingUserIdSet.has(userId.toString())) {
@@ -3395,6 +3612,8 @@ async function main () {
       let batchHistoryRefreshes = 0
       let batchReratedChallenges = 0
       let batchReratedRatings = 0
+      let batchSyncedMemberMaxRatings = 0
+      let batchDeletedMemberMaxRatings = 0
 
       if (!options.csvOnly) {
         if (!options.skipHistory) {
@@ -3496,12 +3715,28 @@ async function main () {
             logInfo(`Re-rated ${batchReratedChallenges} development challenge(s) for users ${batchStart + 1}-${processedUsers}`)
           }
         }
+
+        if (!options.skipRatings) {
+          const {
+            result: maxRatingSyncResult,
+            durationMs
+          } = await measureAsyncStep(async () => syncCurrentMemberMaxRatingsForUsers(membersClient, existingBatchUserIds))
+          maxRatingSyncDurationMs = durationMs
+          batchSyncedMemberMaxRatings = maxRatingSyncResult.upserted
+          batchDeletedMemberMaxRatings = maxRatingSyncResult.deleted
+          syncedMemberMaxRatings += batchSyncedMemberMaxRatings
+          deletedMemberMaxRatings += batchDeletedMemberMaxRatings
+
+          if (batchSyncedMemberMaxRatings > 0 || batchDeletedMemberMaxRatings > 0) {
+            logInfo(`Synchronized ${batchSyncedMemberMaxRatings} memberMaxRating row(s) and deleted ${batchDeletedMemberMaxRatings} stale row(s) for users ${batchStart + 1}-${processedUsers}`)
+          }
+        }
       }
 
       const { durationMs: checkpointDurationMs } = await measureAsyncStep(async () => processedUserIdsWriter.appendUserIds(existingBatchUserIds))
       const batchTotalDurationMs = getElapsedMilliseconds(batchStartedAt)
 
-      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}`)
+      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}, maxRatingUpserts=${batchSyncedMemberMaxRatings}, maxRatingDeletes=${batchDeletedMemberMaxRatings}`)
       logInfo(`Batch ${batchNumber}/${totalBatches} timings: ${formatTimingSegments([
         { label: 'existingUsers', durationMs: existingUsersDurationMs },
         { label: 'legacyIds', durationMs: legacyIdsDurationMs },
@@ -3516,6 +3751,7 @@ async function main () {
         !options.csvOnly && !options.skipHistory ? { label: 'historyBackfill', durationMs: historyDurationMs } : null,
         !options.csvOnly ? { label: 'historyMostRecent', durationMs: historyRefreshDurationMs } : null,
         !options.csvOnly && !options.skipRatings && !options.skipRerate ? { label: 'rerate', durationMs: rerateDurationMs } : null,
+        !options.csvOnly && !options.skipRatings ? { label: 'maxRatingSync', durationMs: maxRatingSyncDurationMs } : null,
         { label: 'checkpoint', durationMs: checkpointDurationMs },
         { label: 'total', durationMs: batchTotalDurationMs }
       ])}`)
@@ -3529,7 +3765,7 @@ async function main () {
     }
 
     const totalRuntimeMs = getElapsedMilliseconds(scriptStartedAt)
-    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), total runtime ${formatDuration(totalRuntimeMs)}`)
+    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), synchronized ${syncedMemberMaxRatings} memberMaxRating row(s), deleted ${deletedMemberMaxRatings} stale memberMaxRating row(s), total runtime ${formatDuration(totalRuntimeMs)}`)
   } finally {
     await Promise.allSettled([
       membersClient.$disconnect(),
@@ -3565,5 +3801,7 @@ module.exports = {
   resolveLegacyDesignTypeId,
   buildAggregatedStatsFromReviewResults,
   buildSupplementalHistoryRowsFromCompletedChallenges,
-  aggregateChallengeWinnerStatsForUser
+  aggregateChallengeWinnerStatsForUser,
+  buildCurrentMemberMaxRatingData,
+  syncCurrentMemberMaxRatingsForUsers
 }

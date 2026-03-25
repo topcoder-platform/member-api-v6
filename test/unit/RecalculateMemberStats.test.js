@@ -608,4 +608,112 @@ describe('recalculateMemberStats unit tests', () => {
     results[0].mostRecentEventDate.toISOString().should.equal('2024-03-05T00:00:00.000Z')
     results[0].mostRecentSubmission.toISOString().should.equal('2024-03-03T10:00:00.000Z')
   })
+
+  it('should synchronize memberMaxRating from the highest current memberStats rating', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-f2f-id', name: 'First2Finish', abbreviation: 'F2F', legacyId: null, isTask: false },
+            { id: 'type-srm-id', name: 'SRM', abbreviation: 'SRM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const transactionCalls = []
+    const membersClient = {
+      memberStats: {
+        findMany: async () => ([
+          {
+            userId: global.BigInt(123),
+            trackId: 'track-dev-id',
+            typeId: 'type-ch-id',
+            rating: 224,
+            mostRecentEventDate: new Date('2026-03-20T00:00:00.000Z')
+          },
+          {
+            userId: global.BigInt(123),
+            trackId: 'track-ds-id',
+            typeId: 'type-srm-id',
+            rating: 180,
+            mostRecentEventDate: new Date('2026-03-18T00:00:00.000Z')
+          }
+        ])
+      },
+      memberMaxRating: {
+        findMany: async () => ([
+          {
+            id: 11,
+            userId: global.BigInt(123),
+            rating: 1237,
+            track: 'DEVELOP',
+            subTrack: 'Challenge',
+            ratingColor: '#69C329'
+          },
+          {
+            id: 22,
+            userId: global.BigInt(456),
+            rating: 900,
+            track: 'DESIGN',
+            subTrack: 'Challenge',
+            ratingColor: '#69C329'
+          }
+        ]),
+        deleteMany: (args) => ({ action: 'deleteMany', args }),
+        upsert: (args) => ({ action: 'upsert', args })
+      },
+      $transaction: async (queries) => {
+        transactionCalls.push(queries)
+      }
+    }
+
+    const result = await recalculateMemberStats.syncCurrentMemberMaxRatingsForUsers(
+      membersClient,
+      [global.BigInt(123), global.BigInt(456)]
+    )
+
+    result.should.deep.equal({
+      upserted: 1,
+      deleted: 1
+    })
+    transactionCalls.should.have.length(1)
+    transactionCalls[0].should.have.length(2)
+    transactionCalls[0][0].action.should.equal('deleteMany')
+    transactionCalls[0][0].args.should.deep.equal({
+      where: {
+        id: {
+          in: [22]
+        }
+      }
+    })
+    transactionCalls[0][1].action.should.equal('upsert')
+    transactionCalls[0][1].args.where.userId.should.equal(global.BigInt(123))
+    transactionCalls[0][1].args.create.should.deep.include({
+      rating: 224,
+      track: 'DEVELOP',
+      subTrack: 'Challenge',
+      ratingColor: '#9D9FA0'
+    })
+    transactionCalls[0][1].args.update.should.deep.include({
+      rating: 224,
+      track: 'DEVELOP',
+      subTrack: 'Challenge',
+      ratingColor: '#9D9FA0'
+    })
+  })
 })
