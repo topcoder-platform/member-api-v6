@@ -48,6 +48,70 @@ function normalizeDate (value, fallbackValue) {
   return date
 }
 
+function normalizeChallengeDimension (value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+}
+
+function parseBooleanLike (value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') {
+      return true
+    }
+    if (normalized === 'false') {
+      return false
+    }
+  }
+
+  return undefined
+}
+
+function isChallengeRated (challenge) {
+  if (!challenge) {
+    return false
+  }
+
+  const directRated = parseBooleanLike(challenge.isRated)
+  if (directRated !== undefined) {
+    return directRated
+  }
+
+  const legacyRated = parseBooleanLike(challenge.rated)
+  if (legacyRated !== undefined) {
+    return legacyRated
+  }
+
+  if (!Array.isArray(challenge.metadata)) {
+    return true
+  }
+
+  for (const entry of challenge.metadata) {
+    const name = normalizeChallengeDimension(entry && entry.name)
+    const value = parseBooleanLike(entry && entry.value)
+
+    if (value === undefined) {
+      continue
+    }
+
+    if (name === 'UNRATED') {
+      return !value
+    }
+
+    if (name === 'RATED' || name === 'ISRATED' || name === 'IS_RATED') {
+      return value
+    }
+  }
+
+  return true
+}
+
 function createDefaultState () {
   return {
     rating: 0,
@@ -235,7 +299,6 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeId) {
       SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "challengeId" = $1
-        AND "rated" = true
       ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC
     `,
     [String(challengeId)]
@@ -258,6 +321,8 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
     select: {
       id: true,
       endDate: true,
+      isRated: true,
+      rated: true,
       track: {
         select: {
           name: true
@@ -266,6 +331,17 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
       type: {
         select: {
           name: true
+        }
+      },
+      metadata: {
+        where: {
+          name: {
+            in: ['rated', 'isRated', 'unrated']
+          }
+        },
+        select: {
+          name: true,
+          value: true
         }
       }
     }
@@ -278,7 +354,8 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
   const history = []
 
   reviewRows.forEach((row) => {
-    if (!row.rated) {
+    const rowRated = parseBooleanLike(row.rated)
+    if (rowRated === false) {
       return
     }
 
@@ -291,7 +368,12 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
       return
     }
 
-    if (String(challenge.track.name).toUpperCase() !== CHALLENGE_TRACK_NAME || challenge.type.name !== CHALLENGE_TYPE_NAME) {
+    if (!isChallengeRated(challenge)) {
+      return
+    }
+
+    if (normalizeChallengeDimension(challenge.track.name) !== CHALLENGE_TRACK_NAME ||
+      normalizeChallengeDimension(challenge.type.name) !== normalizeChallengeDimension(CHALLENGE_TYPE_NAME)) {
       return
     }
 
@@ -651,7 +733,8 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   for (let index = startIndex; index < targetHistory.length; index += 1) {
     const historyEntry = targetHistory[index]
-    const participantRows = await fetchParticipantsForChallenge(reviewDbClient, historyEntry.challengeId)
+    const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry.challengeId))
+      .filter((row) => parseBooleanLike(row.rated) !== false)
     if (participantRows.length === 0) {
       continue
     }
