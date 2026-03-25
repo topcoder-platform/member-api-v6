@@ -2231,14 +2231,14 @@ function buildMemberStatsHistoryBulkUpdateQuery (historyRows) {
     sql: `
       UPDATE "members"."memberStatsHistory" msh
       SET
-        "eventDate" = data."eventDate",
-        "newRating" = data."newRating",
+        "eventDate" = CAST(data."eventDate" AS TIMESTAMP),
+        "newRating" = CAST(data."newRating" AS INTEGER),
         "updatedBy" = data."updatedBy",
         "updatedAt" = CURRENT_TIMESTAMP
       FROM (
         VALUES ${valuesSql}
       ) AS data ("id", "eventDate", "newRating", "updatedBy")
-      WHERE msh."id" = data."id"
+      WHERE msh."id" = CAST(data."id" AS BIGINT)
     `,
     params
   }
@@ -2275,7 +2275,29 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
         "createdBy",
         "updatedBy"
       )
-      VALUES ${valuesSql}
+      SELECT
+        CAST(data."userId" AS BIGINT),
+        data."trackId",
+        data."typeId",
+        data."challengeId",
+        data."mostRecent",
+        CAST(data."eventDate" AS TIMESTAMP),
+        CAST(data."newRating" AS INTEGER),
+        data."createdBy",
+        data."updatedBy"
+      FROM (
+        VALUES ${valuesSql}
+      ) AS data (
+        "userId",
+        "trackId",
+        "typeId",
+        "challengeId",
+        "mostRecent",
+        "eventDate",
+        "newRating",
+        "createdBy",
+        "updatedBy"
+      )
     `,
     params
   }

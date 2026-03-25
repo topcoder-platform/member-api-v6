@@ -226,7 +226,11 @@ describe('recalculateMemberStats unit tests', () => {
     const rawQueries = transactionCalls[0].filter((query) => query.action === 'executeRawUnsafe')
     rawQueries.should.have.length(2)
     rawQueries[0].sql.should.include('UPDATE "members"."memberStatsHistory"')
+    rawQueries[0].sql.should.include('CAST(data."newRating" AS INTEGER)')
+    rawQueries[0].sql.should.include('CAST(data."id" AS BIGINT)')
     rawQueries[1].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
+    rawQueries[1].sql.should.include('CAST(data."userId" AS BIGINT)')
+    rawQueries[1].sql.should.include('CAST(data."newRating" AS INTEGER)')
   })
 
   it('should supplement history rows from completed review and winner challenges', async () => {
