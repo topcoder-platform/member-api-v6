@@ -653,7 +653,13 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
 
     const pageMembers = await prisma.member.findMany({
       where: { userId: { in: pageUserIds } },
-      include: { maxRating: true, addresses: true }
+      include: {
+        maxRating: true,
+        addresses: true,
+        memberStats: {
+          select: prismaHelper.currentMaxRatingStatsSelect
+        }
+      }
     })
 
     const byId = _.keyBy(pageMembers, 'userId')
@@ -678,7 +684,10 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
       ...prismaFilter,
       include: {
         maxRating: true,
-        addresses: true
+        addresses: true,
+        memberStats: {
+          select: prismaHelper.currentMaxRatingStatsSelect
+        }
       },
       // sort by handle with given order
       skip: (query.page - 1) * query.perPage,
@@ -1091,6 +1100,9 @@ async function autocompleteByHandlePrefix (currentUser, term) {
           subTrack: true,
           ratingColor: true
         }
+      },
+      memberStats: {
+        select: prismaHelper.currentMaxRatingStatsSelect
       }
     },
     orderBy: {
@@ -1104,7 +1116,7 @@ async function autocompleteByHandlePrefix (currentUser, term) {
     photoURL: member.photoURL || '',
     firstName: member.firstName || '',
     lastName: member.lastName || '',
-    maxRating: member.maxRating ? _.pick(member.maxRating, ['rating', 'track', 'subTrack', 'ratingColor']) : null
+    maxRating: prismaHelper.buildCurrentMaxRatingResponse(member.maxRating, member.memberStats)
   }))
 }
 

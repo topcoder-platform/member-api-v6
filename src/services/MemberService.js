@@ -214,6 +214,9 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
   }
   if (_.includes(selectFields, 'maxRating')) {
     prismaFilter.include.maxRating = true
+    prismaFilter.include.memberStats = {
+      select: prismaHelper.currentMaxRatingStatsSelect
+    }
   }
   if (_.includes(selectFields, 'addresses')) {
     prismaFilter.include.addresses = true

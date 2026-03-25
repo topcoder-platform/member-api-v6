@@ -103,6 +103,83 @@ function buildMaxRatingResponse (maxRating) {
   }, _.isNil)
 }
 
+function toOptionalNumber (value) {
+  if (_.isNil(value)) {
+    return null
+  }
+
+  const numericValue = helper.bigIntToNumber(value)
+  return Number.isFinite(Number(numericValue)) ? Number(numericValue) : null
+}
+
+function toComparableTimestamp (value) {
+  if (!value) {
+    return 0
+  }
+
+  if (_.isDate(value)) {
+    return value.getTime()
+  }
+
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+/**
+ * Resolve the highest current rating from unified memberStats rows.
+ * When stats rows are loaded, only their current `rating` values count toward the
+ * response. The persisted memberMaxRating row is used as a fallback only when no
+ * stats rows were loaded at all.
+ * @param {Object|null} maxRating persisted memberMaxRating row
+ * @param {Array<Object>} statsRows loaded memberStats rows
+ * @returns {Object|null} normalized max rating candidate for API responses
+ */
+function resolveCurrentMaxRating (maxRating, statsRows) {
+  if (!Array.isArray(statsRows) || statsRows.length === 0) {
+    return maxRating || null
+  }
+
+  let selectedRating = null
+  statsRows.forEach((row) => {
+    const rating = toOptionalNumber(row && row.rating)
+    if (rating === null) {
+      return
+    }
+
+    const candidate = {
+      rating,
+      track: getUnifiedTrackName(row.trackName || row.trackId),
+      subTrack: getUnifiedTypeName(row.typeName || row.typeId),
+      mostRecentEventDate: toComparableTimestamp(row.mostRecentEventDate)
+    }
+
+    if (!selectedRating || rating > selectedRating.rating) {
+      selectedRating = candidate
+      return
+    }
+
+    if (rating === selectedRating.rating) {
+      const currentTimestamp = selectedRating.mostRecentEventDate || 0
+      if (candidate.mostRecentEventDate > currentTimestamp) {
+        selectedRating = candidate
+      }
+    }
+  })
+
+  return selectedRating
+}
+
+/**
+ * Build the user-facing max rating payload from current memberStats rows when
+ * available, otherwise fall back to the persisted memberMaxRating row.
+ * @param {Object|null} maxRating persisted memberMaxRating row
+ * @param {Array<Object>} statsRows loaded memberStats rows
+ * @returns {Object|null} normalized maxRating payload for API responses
+ */
+function buildCurrentMaxRatingResponse (maxRating, statsRows) {
+  return buildMaxRatingResponse(resolveCurrentMaxRating(maxRating, statsRows))
+}
+
 /**
  * Convert member db data to response data
  * @param {Object} member member data from db
@@ -111,10 +188,12 @@ function convertMember (member) {
   member.userId = helper.bigIntToNumber(member.userId)
   member.createdAt = member.createdAt.getTime()
   member.updatedAt = member.updatedAt.getTime()
-  if (member.maxRating) {
-    member.maxRating = _.omit(member.maxRating,
-      ['id', 'userId', ...auditFields])
-  }
+  const statsRows = _.isArray(member.memberStats) ? member.memberStats : undefined
+  const maxRating = member.maxRating
+    ? _.omit(member.maxRating, ['id', 'userId', ...auditFields])
+    : null
+  member.maxRating = buildCurrentMaxRatingResponse(maxRating, statsRows)
+  delete member.memberStats
   if (member.addresses) {
     member.addresses = _.map(member.addresses, d => _.omit(d,
       ['id', 'userId', ...auditFields]))
@@ -246,7 +325,7 @@ function buildStatsResponse (member, statsData, fields) {
     challenges: statsData.challenges,
     wins: statsData.wins
   }
-  const maxRating = buildMaxRatingResponse(member.maxRating)
+  const maxRating = buildCurrentMaxRatingResponse(member.maxRating)
   if (maxRating) {
     item.maxRating = maxRating
   }
@@ -386,7 +465,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
     challenges: _.sumBy(validRows, row => toNumber(row.challenges)),
     wins: _.sumBy(validRows, row => toNumber(row.wins))
   }
-  const maxRating = buildMaxRatingResponse(member.maxRating)
+  const maxRating = buildCurrentMaxRatingResponse(member.maxRating, validRows)
   if (maxRating) {
     item.maxRating = maxRating
   }
@@ -621,6 +700,14 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
 
 // include parameters used to get unified member stats
 const unifiedStatsIncludeParams = {}
+
+// Minimal memberStats fields required to derive the highest current rating.
+const currentMaxRatingStatsSelect = {
+  trackId: true,
+  typeId: true,
+  rating: true,
+  mostRecentEventDate: true
+}
 
 // include parameters used to get all member skills
 // Standardized skills schema: userSkill has singular level and display mode
@@ -1053,11 +1140,13 @@ async function updateHistoryItems (updateItems, existingItems, txModel, parentId
 
 module.exports = {
   convertMember,
+  buildCurrentMaxRatingResponse,
   buildMemberSkills,
   buildStatsResponse,
   buildUnifiedStatsResponse,
   buildSearchMemberFilter,
   buildUnifiedStatsHistoryResponse,
+  currentMaxRatingStatsSelect,
   unifiedStatsIncludeParams,
   skillsIncludeParams,
   convertDate,

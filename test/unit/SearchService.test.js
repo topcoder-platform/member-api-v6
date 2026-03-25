@@ -192,4 +192,56 @@ describe('search service unit tests', () => {
       prisma.member.findFirst = originalMemberFindFirst
     }
   })
+
+  it('autocompleteByHandlePrefix should return the highest current rating from memberStats', async () => {
+    const prisma = prismaManager.getClient()
+    const originalMemberFindMany = prisma.member.findMany
+
+    try {
+      prisma.member.findMany = async () => ([
+        {
+          userId: BigInt(100000218),
+          handle: 'testmfa1',
+          firstName: 'Test',
+          lastName: 'Mfa',
+          photoURL: 'https://example.com/photo.png',
+          maxRating: {
+            rating: 1237,
+            track: 'DEVELOP',
+            subTrack: 'Challenge',
+            ratingColor: '#FCD617'
+          },
+          memberStats: [
+            {
+              trackId: 'DEVELOP',
+              typeId: 'Challenge',
+              rating: 224,
+              mostRecentEventDate: new Date('2026-03-01T00:00:00.000Z')
+            },
+            {
+              trackId: 'DATA_SCIENCE',
+              typeId: 'SRM',
+              rating: 180,
+              mostRecentEventDate: new Date('2026-02-01T00:00:00.000Z')
+            }
+          ]
+        }
+      ])
+
+      const response = await service.autocompleteByHandlePrefix(
+        { roles: ['administrator'] },
+        'test'
+      )
+
+      should.equal(response.length, 1)
+      response[0].maxRating.should.deep.equal({
+        rating: 224,
+        track: 'DEVELOP',
+        subTrack: 'Challenge',
+        ratingColor: '#9D9FA0'
+      })
+    } finally {
+      prisma.member.findMany = originalMemberFindMany
+    }
+  })
 })
