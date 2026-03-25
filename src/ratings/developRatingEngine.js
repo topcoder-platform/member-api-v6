@@ -297,14 +297,15 @@ function normalizeScore (row) {
 /**
  * Resolve whether one participant row should count toward Development rerating.
  * review-api challengeResult.rated can be false for backfilled rows when the
- * producer lacked explicit challenge metadata, so rerates rely on member-level
- * pass/win status while challenge-level rated intent is enforced separately.
+ * producer lacked explicit challenge metadata, so rerates rely on the final
+ * score/placement emitted for the participant while challenge-level rated
+ * intent is enforced separately.
  * @param {Object} row challengeResult row
  * @returns {boolean} true when the participant should be included in rerating
  */
 function isParticipantEligibleForRating (row) {
-  const passedReview = parseBooleanLike(row && row.passedReview)
-  if (passedReview === true) {
+  const finalScore = Number(row && row.finalScore)
+  if (Number.isFinite(finalScore)) {
     return true
   }
 

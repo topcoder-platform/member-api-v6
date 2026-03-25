@@ -846,4 +846,191 @@ describe('develop rating engine unit tests', () => {
     should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
+
+  it('rerateDevTrack should include failed review rows when final scores are present', async () => {
+    const targetUserId = toBigInt(9011)
+    const opponentUserId = toBigInt(9012)
+    const challengeId = 'failed-review-dev'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId,
+        userId: targetUserId,
+        finalScore: 60,
+        placement: null,
+        rated: true,
+        passedReview: false,
+        createdAt: new Date('2024-08-01T09:05:00.000Z')
+      },
+      {
+        challengeId,
+        userId: opponentUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-08-01T09:00:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [challengeId]: {
+        id: challengeId,
+        endDate: new Date('2024-08-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 60),
+      createParticipant(opponentUserId, 0, 0, 0, 100)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === CHALLENGE_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+
+    should.equal(statsRow.rating, expectedTarget.rating)
+    should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+  })
+
+  it('rerateDevTrack should include failed review opponents so later challenge ratings still move', async () => {
+    const targetUserId = toBigInt(9013)
+    const opponentUserId = toBigInt(9014)
+    const seedChallengeId = 'seed-dev'
+    const rerateChallengeId = 'rerate-dev'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [
+        {
+          id: toBigInt(21),
+          userId: targetUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: seedChallengeId,
+          mostRecent: true,
+          oldRating: null,
+          newRating: 1500,
+          eventDate: new Date('2024-03-01T00:00:00.000Z')
+        },
+        {
+          id: toBigInt(22),
+          userId: opponentUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: seedChallengeId,
+          mostRecent: true,
+          oldRating: null,
+          newRating: 1400,
+          eventDate: new Date('2024-03-01T00:00:00.000Z')
+        }
+      ],
+      statsRows: [
+        {
+          userId: targetUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          rating: 1500,
+          volatility: DEFAULT_VOLATILITY
+        }
+      ],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId: seedChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-03-01T09:00:00.000Z')
+      },
+      {
+        challengeId: rerateChallengeId,
+        userId: targetUserId,
+        finalScore: 90,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-03-16T09:05:00.000Z')
+      },
+      {
+        challengeId: rerateChallengeId,
+        userId: opponentUserId,
+        finalScore: 100,
+        placement: null,
+        rated: true,
+        passedReview: false,
+        createdAt: new Date('2024-03-16T09:00:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [seedChallengeId]: {
+        id: seedChallengeId,
+        endDate: new Date('2024-03-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [rerateChallengeId]: {
+        id: rerateChallengeId,
+        endDate: new Date('2024-03-16T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      rerateChallengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === CHALLENGE_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, rerateChallengeId)
+
+    should.equal(historyRow.oldRating, 1500)
+    should.equal(historyRow.newRating === historyRow.oldRating, false)
+    should.equal(historyRow.newRating < historyRow.oldRating, true)
+    should.equal(statsRow.rating, historyRow.newRating)
+  })
 })
