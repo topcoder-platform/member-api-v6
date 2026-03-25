@@ -294,11 +294,29 @@ function normalizeScore (row) {
   return 0
 }
 
+/**
+ * Resolve whether one participant row should count toward Development rerating.
+ * review-api challengeResult.rated can be false for backfilled rows when the
+ * producer lacked explicit challenge metadata, so rerates rely on member-level
+ * pass/win status while challenge-level rated intent is enforced separately.
+ * @param {Object} row challengeResult row
+ * @returns {boolean} true when the participant should be included in rerating
+ */
+function isParticipantEligibleForRating (row) {
+  const passedReview = parseBooleanLike(row && row.passedReview)
+  if (passedReview === true) {
+    return true
+  }
+
+  const placement = Number(row && row.placement)
+  return Number.isInteger(placement) && placement > 0
+}
+
 async function fetchReviewResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = $1
       ORDER BY "createdAt" ASC
@@ -313,7 +331,7 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "challengeId" = $1
       ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC
@@ -377,8 +395,7 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
   const history = []
 
   reviewRows.forEach((row) => {
-    const rowRated = parseBooleanLike(row.rated)
-    if (rowRated === false) {
+    if (!isParticipantEligibleForRating(row)) {
       return
     }
 
@@ -757,7 +774,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
   for (let index = startIndex; index < targetHistory.length; index += 1) {
     const historyEntry = targetHistory[index]
     const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry.challengeId))
-      .filter((row) => parseBooleanLike(row.rated) !== false)
+      .filter((row) => isParticipantEligibleForRating(row))
     if (participantRows.length === 0) {
       continue
     }

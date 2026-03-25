@@ -719,6 +719,7 @@ describe('develop rating engine unit tests', () => {
         finalScore: 100,
         placement: 1,
         rated: null,
+        passedReview: true,
         createdAt: new Date('2024-06-01T09:00:00.000Z')
       },
       {
@@ -727,6 +728,7 @@ describe('develop rating engine unit tests', () => {
         finalScore: 50,
         placement: 2,
         rated: null,
+        passedReview: true,
         createdAt: new Date('2024-06-01T09:05:00.000Z')
       }
     ])
@@ -771,6 +773,77 @@ describe('develop rating engine unit tests', () => {
     should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(statsRow.volatility, expectedTarget.volatility)
     should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+  })
+
+  it('rerateDevTrack should use passed review rows even when challengeResult.rated is false', async () => {
+    const targetUserId = toBigInt(9009)
+    const opponentUserId = toBigInt(9010)
+    const challengeId = 'false-rated-dev'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: false,
+        passedReview: true,
+        createdAt: new Date('2024-07-01T09:00:00.000Z')
+      },
+      {
+        challengeId,
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: false,
+        passedReview: true,
+        createdAt: new Date('2024-07-01T09:05:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [challengeId]: {
+        id: challengeId,
+        endDate: new Date('2024-07-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === CHALLENGE_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+
+    should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
 })
