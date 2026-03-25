@@ -3020,6 +3020,15 @@ async function writeStatsToDatabase (membersClient, statsRecords, replaceUsers =
   }
 }
 
+/**
+ * Recompute memberStatsHistory.mostRecent for the specified users.
+ * The refresh clears existing flags before promoting the latest row in each
+ * track/type group so reruns overwrite stale winners without tripping the
+ * partial unique index on mostRecent=true.
+ * @param {Object} membersClient prisma members client
+ * @param {Array<*>} userIds user ids to refresh
+ * @returns {Promise<number>} number of history rows refreshed
+ */
 async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
   if (!userIds || userIds.length === 0) {
     return 0
@@ -3049,7 +3058,19 @@ async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
     return 0
   }
 
-  const rows = await membersClient.$queryRawUnsafe(
+  const clearMostRecentQuery = membersClient.$executeRawUnsafe(
+    `
+    UPDATE "members"."memberStatsHistory" msh
+    SET
+      "mostRecent" = false,
+      "updatedBy" = ${updatedByPlaceholder},
+      "updatedAt" = CURRENT_TIMESTAMP
+    WHERE ${whereClauses.join(' AND ')}
+    `,
+    ...params
+  )
+
+  const refreshWinnersQuery = membersClient.$executeRawUnsafe(
     `
     WITH ranked AS (
       SELECT
@@ -3065,39 +3086,35 @@ async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
       FROM "members"."memberStatsHistory" msh
       WHERE ${whereClauses.join(' AND ')}
     ),
-    updated AS (
-      UPDATE "members"."memberStatsHistory" msh
-      SET
-        "mostRecent" = CASE WHEN ranked."rowNum" = 1 THEN true ELSE false END,
-        "oldRating" = CASE
-          WHEN ranked."rowNum" = 1 THEN previous."newRating"
-          ELSE msh."oldRating"
-        END,
-        "newRating" = CASE
-          WHEN ranked."rowNum" = 1 AND ms."id" IS NOT NULL THEN ms."rating"
-          ELSE msh."newRating"
-        END,
-        "updatedBy" = ${updatedByPlaceholder},
-        "updatedAt" = CURRENT_TIMESTAMP
-      FROM ranked
-      LEFT JOIN ranked previous
-        ON previous."userId" = ranked."userId"
-        AND previous."trackId" = ranked."trackId"
-        AND previous."typeId" = ranked."typeId"
-        AND previous."rowNum" = 2
-      LEFT JOIN "members"."memberStats" ms
-        ON ms."userId" = ranked."userId"
-        AND ms."trackId" = ranked."trackId"
-        AND ms."typeId" = ranked."typeId"
-      WHERE msh."id" = ranked."id"
-      RETURNING 1
-    )
-    SELECT COUNT(*)::int AS "updatedRows" FROM updated
+    UPDATE "members"."memberStatsHistory" msh
+    SET
+      "mostRecent" = true,
+      "oldRating" = previous."newRating",
+      "newRating" = CASE
+        WHEN ms."id" IS NOT NULL THEN ms."rating"
+        ELSE msh."newRating"
+      END,
+      "updatedBy" = ${updatedByPlaceholder},
+      "updatedAt" = CURRENT_TIMESTAMP
+    FROM ranked
+    LEFT JOIN ranked previous
+      ON previous."userId" = ranked."userId"
+      AND previous."trackId" = ranked."trackId"
+      AND previous."typeId" = ranked."typeId"
+      AND previous."rowNum" = 2
+    LEFT JOIN "members"."memberStats" ms
+      ON ms."userId" = ranked."userId"
+      AND ms."trackId" = ranked."trackId"
+      AND ms."typeId" = ranked."typeId"
+    WHERE msh."id" = ranked."id"
+      AND ranked."rowNum" = 1
     `,
     ...params
   )
 
-  return rows && rows[0] ? toInt(rows[0].updatedRows) : 0
+  await membersClient.$transaction([clearMostRecentQuery, refreshWinnersQuery])
+
+  return rowCount
 }
 
 async function main () {

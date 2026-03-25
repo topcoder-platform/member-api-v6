@@ -301,6 +301,41 @@ describe('recalculateMemberStats unit tests', () => {
     rawQueries[0].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
   })
 
+  it('should refresh mostRecent flags in two phases so reruns overwrite stale winners', async () => {
+    const transactionCalls = []
+    const membersClient = {
+      $queryRawUnsafe: async (sql, ...params) => {
+        if (sql.includes('SELECT COUNT(*)::int AS "rowCount"')) {
+          return [{ rowCount: 3 }]
+        }
+
+        throw new Error(`Unexpected raw query: ${sql}`)
+      },
+      $executeRawUnsafe: (sql, ...params) => ({ action: 'executeRawUnsafe', sql, params }),
+      $transaction: async (queries) => {
+        transactionCalls.push(queries)
+      }
+    }
+
+    const updatedRows = await recalculateMemberStats.refreshHistoryMostRecentFlagsForUsers(
+      membersClient,
+      [123, '123', global.BigInt(456)]
+    )
+
+    updatedRows.should.equal(3)
+    transactionCalls.should.have.length(1)
+    transactionCalls[0].should.have.length(2)
+    transactionCalls[0][0].action.should.equal('executeRawUnsafe')
+    transactionCalls[0][0].sql.should.include('UPDATE "members"."memberStatsHistory" msh')
+    transactionCalls[0][0].sql.should.include('"mostRecent" = false')
+    transactionCalls[0][0].params.should.deep.equal(['stats-migration'])
+    transactionCalls[0][1].action.should.equal('executeRawUnsafe')
+    transactionCalls[0][1].sql.should.include('ROW_NUMBER() OVER')
+    transactionCalls[0][1].sql.should.include('AND ranked."rowNum" = 1')
+    transactionCalls[0][1].sql.should.include('"mostRecent" = true')
+    transactionCalls[0][1].params.should.deep.equal(['stats-migration'])
+  })
+
   it('should not delete legacy-backed rows during replacement cleanup', async () => {
     const transactionCalls = []
     const membersClient = {
