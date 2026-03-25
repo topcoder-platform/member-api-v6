@@ -1887,7 +1887,7 @@ async function fetchChallengeWinnerRowsForUser (challengesClient, userId, option
     INNER JOIN "Challenge" c ON c.id = cw."challengeId"
     WHERE ${whereSql}
       AND cw."type" = 'PLACEMENT'
-      AND UPPER(COALESCE(c.status, '')) = '${COMPLETED_CHALLENGE_STATUS}'
+      AND c.status::text = '${COMPLETED_CHALLENGE_STATUS}'
     ORDER BY cw."createdAt" ASC, cw."challengeId" ASC
     `,
     ...params

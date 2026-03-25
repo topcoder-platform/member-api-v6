@@ -1588,7 +1588,7 @@ async function getHistoryStats (currentUser, handle, query) {
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, reviewFallbackRows)
       }
 
-      if (unresolvedPairKeys.size > 0 || historyRowsNeedPlacementEnrichment(annotatedRows)) {
+      if (missingPairKeys.size > 0 || historyRowsNeedPlacementEnrichment(annotatedRows)) {
         const winnerRows = await fetchChallengeWinnerResultsForMember(challengeClient, member.userId)
 
         annotatedRows = mergeHistoryPlacementsFromChallengeWinners(annotatedRows, winnerRows)
