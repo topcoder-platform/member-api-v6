@@ -2748,6 +2748,16 @@ async function getExistingMemberUserIdSet (membersClient, userIds) {
   return new Set(rows.map((row) => normalizeBigInt(row.userId, 'user id').toString()))
 }
 
+/**
+ * Aggregate unified memberStats rows from challenge winner placements.
+ * Challenges count distinct completed winner-backed challenges, while wins count
+ * only first-place PLACEMENT rows so second/third-place finishes do not inflate
+ * the public win totals during ChallengeWinner fallback aggregation.
+ * @param {Object} challengesClient prisma challenges client
+ * @param {BigInt} userId member user id
+ * @param {Object} options script options
+ * @returns {Promise<Array<Object>>} unified aggregate rows derived from ChallengeWinner
+ */
 async function aggregateChallengeWinnerStatsForUser (challengesClient, userId, options) {
   const { whereSql, params } = buildFilterQuery(options, userId)
 
@@ -2758,7 +2768,7 @@ async function aggregateChallengeWinnerStatsForUser (challengesClient, userId, o
       c."trackId" AS "trackId",
       c."typeId" AS "typeId",
       COUNT(DISTINCT c.id)::int AS "challenges",
-      COUNT(CASE WHEN cw."type" = 'PLACEMENT' THEN 1 END)::int AS "wins",
+      COUNT(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id END)::int AS "wins",
       MAX(c."endDate") AS "mostRecentEventDate",
       MAX(cw."createdAt") AS "mostRecentSubmission"
     FROM "ChallengeWinner" cw
@@ -3515,5 +3525,6 @@ module.exports = {
   buildProcessedUserIdsWriter,
   resolveLegacyDesignTypeId,
   buildAggregatedStatsFromReviewResults,
-  buildSupplementalHistoryRowsFromCompletedChallenges
+  buildSupplementalHistoryRowsFromCompletedChallenges,
+  aggregateChallengeWinnerStatsForUser
 }

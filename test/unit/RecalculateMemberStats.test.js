@@ -97,6 +97,46 @@ describe('recalculateMemberStats unit tests', () => {
     }
   })
 
+  it('should count only first-place ChallengeWinner rows as wins', async () => {
+    const capturedQueries = []
+    const challengesClient = {
+      $queryRawUnsafe: async (sql, ...params) => {
+        capturedQueries.push({ sql, params })
+        return [{
+          userId: '456',
+          trackId: 'track-design',
+          typeId: 'type-challenge',
+          challenges: 3,
+          wins: 1,
+          mostRecentEventDate: '2024-03-05T00:00:00.000Z',
+          mostRecentSubmission: '2024-03-05T10:00:00.000Z'
+        }]
+      }
+    }
+
+    const result = await recalculateMemberStats.aggregateChallengeWinnerStatsForUser(
+      challengesClient,
+      global.BigInt(456),
+      {}
+    )
+
+    capturedQueries.should.have.length(1)
+    capturedQueries[0].sql.should.include(
+      `COUNT(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id END)::int AS "wins"`
+    )
+    capturedQueries[0].params.should.deep.equal([global.BigInt(456)])
+    result.should.have.length(1)
+    chai.expect(result[0]).to.include({
+      trackId: 'track-design',
+      typeId: 'type-challenge',
+      challenges: 3,
+      wins: 1
+    })
+    result[0].userId.should.equal(global.BigInt(456))
+    result[0].mostRecentEventDate.toISOString().should.equal('2024-03-05T00:00:00.000Z')
+    result[0].mostRecentSubmission.toISOString().should.equal('2024-03-05T10:00:00.000Z')
+  })
+
   it('should bulk update and insert history rows during legacy backfill', async () => {
     const fakeChallengesClient = {
       $queryRaw (strings) {
