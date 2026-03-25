@@ -3085,7 +3085,7 @@ async function refreshHistoryMostRecentFlagsForUsers (membersClient, userIds) {
         ) AS "rowNum"
       FROM "members"."memberStatsHistory" msh
       WHERE ${whereClauses.join(' AND ')}
-    ),
+    )
     UPDATE "members"."memberStatsHistory" msh
     SET
       "mostRecent" = true,

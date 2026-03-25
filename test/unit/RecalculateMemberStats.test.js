@@ -333,6 +333,8 @@ describe('recalculateMemberStats unit tests', () => {
     transactionCalls[0][1].sql.should.include('ROW_NUMBER() OVER')
     transactionCalls[0][1].sql.should.include('AND ranked."rowNum" = 1')
     transactionCalls[0][1].sql.should.include('"mostRecent" = true')
+    transactionCalls[0][1].sql.should.include('WITH ranked AS (')
+    transactionCalls[0][1].sql.should.not.include('),\n    UPDATE "members"."memberStatsHistory" msh')
     transactionCalls[0][1].params.should.deep.equal(['stats-migration'])
   })
 
