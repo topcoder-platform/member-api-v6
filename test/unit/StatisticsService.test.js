@@ -46,6 +46,7 @@ function createStatsDimensionHelperStub () {
   }
   const TYPE_NAMES = {
     CHALLENGE: 'Challenge',
+    CODE: 'CODE',
     FIRST2FINISH: 'First2Finish',
     TASK: 'Task',
     SRM: 'SRM',
@@ -59,6 +60,7 @@ function createStatsDimensionHelperStub () {
   }
   const typeIds = {
     CHALLENGE: 'type-challenge-id',
+    CODE: 'type-code-id',
     FIRST2FINISH: 'type-f2f-id',
     TASK: 'type-task-id',
     SRM: 'type-srm-id',
@@ -72,6 +74,7 @@ function createStatsDimensionHelperStub () {
   }
   const typeNamesById = {
     'type-challenge-id': TYPE_NAMES.CHALLENGE,
+    'type-code-id': TYPE_NAMES.CODE,
     'type-f2f-id': TYPE_NAMES.FIRST2FINISH,
     'type-task-id': TYPE_NAMES.TASK,
     'type-srm-id': TYPE_NAMES.SRM,
@@ -105,6 +108,9 @@ function createStatsDimensionHelperStub () {
     }
     if (normalized === 'FIRST2FINISH' || normalized === 'F2F') {
       return typeIds.FIRST2FINISH
+    }
+    if (normalized === 'CODE' || normalized === 'COD') {
+      return typeIds.CODE
     }
     if (normalized === 'TASK' || normalized === 'TSK') {
       return typeIds.TASK
@@ -142,6 +148,9 @@ function createStatsDimensionHelperStub () {
       }
       if (normalized === 'CHALLENGE' || normalized === 'CH') {
         return TYPE_NAMES.CHALLENGE
+      }
+      if (normalized === 'CODE' || normalized === 'COD') {
+        return TYPE_NAMES.CODE
       }
       if (normalized === 'TASK' || normalized === 'TSK') {
         return TYPE_NAMES.TASK
@@ -200,6 +209,7 @@ function loadStatisticsService (options = {}) {
     [prismaHelperPath]: require.cache[prismaHelperPath],
     [joiPath]: require.cache[joiPath]
   }
+  const originalFetch = global.fetch
 
   const statsDimensionHelper = createStatsDimensionHelperStub()
   const member = options.member || {
@@ -270,10 +280,22 @@ function loadStatisticsService (options = {}) {
 
   delete require.cache[servicePath]
   const service = require(servicePath)
+  if (options.fetchStub) {
+    global.fetch = options.fetchStub
+  } else {
+    delete global.fetch
+  }
 
   return {
     service,
-    restore: () => restoreModuleCache(originalEntries)
+    restore: () => {
+      restoreModuleCache(originalEntries)
+      if (typeof originalFetch === 'undefined') {
+        delete global.fetch
+      } else {
+        global.fetch = originalFetch
+      }
+    }
   }
 }
 
@@ -579,6 +601,98 @@ describe('statistics service unit tests', () => {
       result[0].DESIGN.subTracks[0].history[0].placement.should.equal(1)
       result[0].DESIGN.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
       result[0].DESIGN.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should recover missing CODE history from legacy challenge pages when legacy ids are not mapped', async () => {
+    const codeMostRecentDate = new Date('2014-10-10T11:01:01.000Z')
+    const pageHtmlByChallengeId = {
+      30046082: '<meta name="twitter:title" content="[$600/$200] - Copy Number Algorithm Executable Updates (C++ required)"><a href="/challenges?search=C%2B%2B">C++</a><a href="/challenges?search=Data%20Science">Data Science</a><a href="/challenges?search=Other">Other</a>',
+      30045145: '<meta name="twitter:title" content="[$750/$250] - iOS SDK Modernization"><a href="/challenges?search=Swift">Swift</a><a href="/challenges?search=Other">Other</a>',
+      30043029: '<meta name="twitter:title" content="[$1200/$400] - Cross Language Runtime Updates"><a href="/challenges?search=Java">Java</a><a href="/challenges?search=C%2B%2B">C++</a><a href="/challenges?search=Python">Python</a>',
+      30040814: '<meta name="twitter:title" content="[$1500/$750] - Asteroid Data Hunter - Phase 1 - Create Marathon Match Problem Statement">',
+      30039557: '<meta name="twitter:title" content="[$3000/$2000] - EPA ToxCast - Predictive Capability Tests">',
+      30034503: '<meta name="twitter:title" content="[$1500/$750] - FrameSkipper Paper Research Contest">'
+    }
+
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-dev-id',
+            typeId: 'type-code-id',
+            challenges: 3,
+            mostRecentSubmission: null,
+            mostRecentEventDate: codeMostRecentDate
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      },
+      challengeRows: [],
+      reviewRows: [{
+        challengeId: '30046082',
+        userId: '88770025',
+        placement: 0,
+        createdAt: new Date('2014-10-13T13:24:29.000Z')
+      }, {
+        challengeId: '30045145',
+        userId: '88770025',
+        placement: 0,
+        createdAt: new Date('2014-09-09T16:40:22.000Z')
+      }, {
+        challengeId: '30043029',
+        userId: '88770025',
+        placement: 0,
+        createdAt: new Date('2014-05-26T04:34:20.000Z')
+      }, {
+        challengeId: '30040814',
+        userId: '88770025',
+        placement: 0,
+        createdAt: new Date('2014-03-17T15:55:19.000Z')
+      }, {
+        challengeId: '30039557',
+        userId: '88770025',
+        placement: 0,
+        createdAt: new Date('2014-02-25T11:19:37.000Z')
+      }, {
+        challengeId: '30034503',
+        userId: '88770025',
+        placement: 0,
+        createdAt: new Date('2013-06-18T20:40:34.000Z')
+      }],
+      fetchStub: async (url) => {
+        const challengeId = String(url).split('/').pop()
+        return {
+          ok: true,
+          text: async () => pageHtmlByChallengeId[challengeId] || '<meta name="twitter:title" content="Topcoder">'
+        }
+      }
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {
+        trackId: 'DEVELOP',
+        typeId: 'CODE'
+      })
+
+      result.should.have.length(1)
+      should.exist(result[0].DEVELOP)
+      result[0].DEVELOP.subTracks.should.have.length(1)
+      result[0].DEVELOP.subTracks[0].name.should.equal('CODE')
+      result[0].DEVELOP.subTracks[0].history.should.have.length(3)
+      result[0].DEVELOP.subTracks[0].history[0].challengeId.should.equal(30046082)
+      result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('Copy Number Algorithm Executable Updates (C++ required)')
+      result[0].DEVELOP.subTracks[0].history[0].mostRecent.should.equal(true)
+      result[0].DEVELOP.subTracks[0].history[1].challengeId.should.equal(30045145)
+      result[0].DEVELOP.subTracks[0].history[1].challengeName.should.equal('iOS SDK Modernization')
+      result[0].DEVELOP.subTracks[0].history[2].challengeId.should.equal(30043029)
+      result[0].DEVELOP.subTracks[0].history[2].challengeName.should.equal('Cross Language Runtime Updates')
     } finally {
       restore()
     }

@@ -95,6 +95,161 @@ function normalizeChallengeIdForResponse (value) {
 }
 
 let challengeDimensionLookupPromise
+const legacyChallengePageSummaryPromiseCache = new Map()
+
+const LEGACY_CODE_PAGE_TIMEOUT_MS = 5000
+const GENERIC_LEGACY_PAGE_TAG_NAMES = new Set([
+  'OTHER',
+  'DATA SCIENCE',
+  'DEVELOPMENT',
+  'DESIGN',
+  'QUALITY ASSURANCE',
+  'QA',
+  'COPILOT'
+])
+
+function decodeBasicHtmlEntities (value) {
+  if (_.isNil(value)) {
+    return null
+  }
+
+  return String(value)
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, '\'')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .trim()
+}
+
+function safeDecodeUriComponent (value) {
+  if (_.isNil(value)) {
+    return null
+  }
+
+  try {
+    return decodeURIComponent(String(value))
+  } catch (error) {
+    return String(value)
+  }
+}
+
+function stripLegacyChallengeTitlePrefix (value) {
+  if (_.isNil(value)) {
+    return null
+  }
+
+  return String(value).replace(/^\[[^\]]+\]\s*-\s*/, '').trim()
+}
+
+function parseLegacyChallengePageSummary (html, challengeId) {
+  const normalizedChallengeId = _.isNil(challengeId) ? null : String(challengeId).trim()
+  if (!normalizedChallengeId || !html) {
+    return null
+  }
+
+  let title = null
+  const titleMarker = 'name="twitter:title" content="'
+  const titleMarkerIndex = html.indexOf(titleMarker)
+  if (titleMarkerIndex >= 0) {
+    title = html.slice(titleMarkerIndex + titleMarker.length).split('"', 1)[0]
+  }
+
+  if (!title) {
+    const headingMarker = '<h1 class="'
+    const headingMarkerIndex = html.indexOf(headingMarker)
+    if (headingMarkerIndex >= 0) {
+      const afterHeadingMarker = html.slice(headingMarkerIndex + headingMarker.length)
+      const headingOpenTagEnd = afterHeadingMarker.indexOf('>')
+      if (headingOpenTagEnd >= 0) {
+        title = afterHeadingMarker.slice(headingOpenTagEnd + 1).split('</h1>', 1)[0]
+      }
+    }
+  }
+
+  const searchTags = []
+  const searchTagNeedle = 'href="/challenges?search='
+  let searchTagIndex = 0
+  while (searchTagIndex >= 0) {
+    searchTagIndex = html.indexOf(searchTagNeedle, searchTagIndex)
+    if (searchTagIndex < 0) {
+      break
+    }
+
+    const encodedTag = html
+      .slice(searchTagIndex + searchTagNeedle.length)
+      .split('"', 1)[0]
+      .split('&', 1)[0]
+    const decodedTag = decodeBasicHtmlEntities(safeDecodeUriComponent(encodedTag))
+    if (decodedTag) {
+      searchTags.push(decodedTag)
+    }
+    searchTagIndex += searchTagNeedle.length
+  }
+
+  return {
+    challengeId: normalizedChallengeId,
+    title: stripLegacyChallengeTitlePrefix(decodeBasicHtmlEntities(title)),
+    searchTags: _.uniq(searchTags)
+  }
+}
+
+function isLegacyCodeChallengePageSummary (summary) {
+  if (!summary || !summary.title || summary.title === 'Topcoder') {
+    return false
+  }
+
+  const specificTags = _.filter(summary.searchTags || [], (tag) => {
+    const normalizedTag = String(tag || '').trim().toUpperCase()
+    return normalizedTag && !GENERIC_LEGACY_PAGE_TAG_NAMES.has(normalizedTag)
+  })
+
+  return specificTags.length > 0
+}
+
+/**
+ * Fetch one legacy challenge page summary from topcoder.com.
+ * This is only used as a narrow fallback for older CODE history rows when
+ * neither ChallengeLegacy nor ChallengeWinner data can map legacy review ids.
+ * @param {string|number} challengeId legacy numeric challenge identifier
+ * @returns {Promise<Object|null>} parsed title/tag summary when available
+ */
+async function fetchLegacyChallengePageSummary (challengeId) {
+  const normalizedChallengeId = _.isNil(challengeId) ? null : String(challengeId).trim()
+  if (!normalizedChallengeId || !/^\d+$/.test(normalizedChallengeId) || typeof global.fetch !== 'function') {
+    return null
+  }
+
+  if (!legacyChallengePageSummaryPromiseCache.has(normalizedChallengeId)) {
+    legacyChallengePageSummaryPromiseCache.set(normalizedChallengeId, (async () => {
+      try {
+        const fetchOptions = {
+          headers: {
+            'user-agent': 'member-api-v6/legacy-code-history'
+          }
+        }
+        if (typeof global.AbortSignal !== 'undefined' &&
+          typeof global.AbortSignal.timeout === 'function') {
+          fetchOptions.signal = global.AbortSignal.timeout(LEGACY_CODE_PAGE_TIMEOUT_MS)
+        }
+
+        const response = await global.fetch(`https://www.topcoder.com/challenges/${normalizedChallengeId}`, fetchOptions)
+        if (!response.ok) {
+          logger.warn(`Unable to load legacy challenge page summary for challengeId=${normalizedChallengeId}: status ${response.status}`)
+          return null
+        }
+
+        return parseLegacyChallengePageSummary(await response.text(), normalizedChallengeId)
+      } catch (error) {
+        logger.warn(`Unable to load legacy challenge page summary for challengeId=${normalizedChallengeId}: ${error.message}`)
+        return null
+      }
+    })())
+  }
+
+  return legacyChallengePageSummaryPromiseCache.get(normalizedChallengeId)
+}
 
 /**
  * Load the shared challenge track/type lookup used by unified stats reads and writes.
@@ -795,6 +950,122 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
       }, ['createdAt']))
     })
   })
+
+  return fallbackRows
+}
+
+/**
+ * Recover missing legacy CODE history cards from the public challenge pages when
+ * review rows exist but challenge-api metadata is unavailable for old numeric ids.
+ * This keeps the development CODE details panel populated for members whose
+ * aggregate counts survived migration but whose legacy challenge mappings did not.
+ * @param {Array<Object>} reviewRows review-api challenge results for the member
+ * @param {Array<Object>} aggregateRows visible memberStats rows for the member
+ * @param {Array<Object>} existingRows persisted and/or synthesized history rows
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @param {Set<string>} missingPairKeys unresolved track/type pairs still needing history
+ * @param {Function} [pageSummaryFetcher=fetchLegacyChallengePageSummary] legacy page fetcher used for testing
+ * @returns {Promise<Array<Object>>} synthesized CODE history rows ordered per pair
+ */
+async function buildFallbackHistoryRowsFromLegacyCodePages (
+  reviewRows,
+  aggregateRows,
+  existingRows,
+  dimensionLookup,
+  missingPairKeys,
+  pageSummaryFetcher = fetchLegacyChallengePageSummary
+) {
+  if (!missingPairKeys || missingPairKeys.size === 0 || !reviewRows || reviewRows.length === 0) {
+    return []
+  }
+
+  const candidatePairs = _.chain(annotateUnifiedDimensionRows(aggregateRows || [], dimensionLookup))
+    .filter((row) => {
+      const pairKey = buildStatsTrackTypeKey(row.trackId, row.typeId)
+      return missingPairKeys.has(pairKey) &&
+        row.trackName === TRACK_NAMES.DEVELOP &&
+        row.typeName === TYPE_NAMES.CODE
+    })
+    .value()
+
+  if (candidatePairs.length === 0) {
+    return []
+  }
+
+  const existingChallengeIds = new Set(
+    _.chain(existingRows || [])
+      .map((row) => (_.isNil(row.challengeId) ? null : String(row.challengeId).trim()))
+      .filter(Boolean)
+      .value()
+  )
+
+  const orderedReviewRows = _.orderBy(reviewRows || [], [
+    row => (row.createdAt ? new Date(row.createdAt).getTime() : 0),
+    row => String(row.challengeId || '')
+  ], ['desc', 'desc'])
+
+  const fallbackRows = []
+  for (const pair of candidatePairs) {
+    const maxChallenges = Math.max(0, toOptionalInt(pair.challenges) || 0)
+    if (maxChallenges === 0) {
+      continue
+    }
+
+    const horizonDate = toOptionalDate(pair.mostRecentEventDate || pair.mostRecentSubmission)
+    const horizonTimestamp = horizonDate
+      ? horizonDate.getTime() + (45 * 24 * 60 * 60 * 1000)
+      : null
+    const pairRows = []
+
+    for (const row of orderedReviewRows) {
+      if (pairRows.length >= maxChallenges) {
+        break
+      }
+
+      const challengeId = _.isNil(row.challengeId) ? null : String(row.challengeId).trim()
+      if (!challengeId || existingChallengeIds.has(challengeId)) {
+        continue
+      }
+
+      const createdAt = toOptionalDate(row.createdAt)
+      if (!createdAt) {
+        continue
+      }
+
+      if (horizonTimestamp && createdAt.getTime() > horizonTimestamp) {
+        continue
+      }
+
+      const pageSummary = await pageSummaryFetcher(challengeId)
+      if (!isLegacyCodeChallengePageSummary(pageSummary)) {
+        continue
+      }
+
+      existingChallengeIds.add(challengeId)
+      pairRows.push({
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        trackName: pair.trackName,
+        typeName: pair.typeName,
+        challengeId,
+        challengeName: pageSummary.title || null,
+        eventDate: createdAt,
+        placement: toVisiblePlacement(row.placement)
+      })
+    }
+
+    const orderedPairRows = _.orderBy(pairRows, [
+      row => row.eventDate.getTime(),
+      row => row.challengeId
+    ], ['desc', 'desc'])
+
+    _.forEach(orderedPairRows, (row, index) => {
+      fallbackRows.push({
+        ...row,
+        mostRecent: index === 0
+      })
+    })
+  }
 
   return fallbackRows
 }
@@ -1549,7 +1820,10 @@ async function getHistoryStats (currentUser, handle, query) {
       where,
       select: {
         trackId: true,
-        typeId: true
+        typeId: true,
+        challenges: true,
+        mostRecentSubmission: true,
+        mostRecentEventDate: true
       }
     })
 
@@ -1605,6 +1879,18 @@ async function getHistoryStats (currentUser, handle, query) {
         )
         annotatedRows = mergeMissingHistoryRows(annotatedRows, winnerFallbackRows)
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, winnerFallbackRows)
+      }
+
+      if (unresolvedPairKeys.size > 0) {
+        const legacyCodeFallbackRows = await buildFallbackHistoryRowsFromLegacyCodePages(
+          reviewRows,
+          aggregateRows,
+          annotatedRows,
+          dimensionLookup,
+          unresolvedPairKeys
+        )
+        annotatedRows = mergeMissingHistoryRows(annotatedRows, legacyCodeFallbackRows)
+        unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, legacyCodeFallbackRows)
       }
 
       const orderedRows = orderUnifiedHistoryRows(annotatedRows)

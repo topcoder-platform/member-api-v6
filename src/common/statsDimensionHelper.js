@@ -9,6 +9,7 @@ const TRACK_NAMES = {
 
 const TYPE_NAMES = {
   CHALLENGE: 'Challenge',
+  CODE: 'CODE',
   FIRST2FINISH: 'First2Finish',
   TASK: 'Task',
   SRM: 'SRM',
@@ -85,6 +86,10 @@ function getCanonicalTypeName (value) {
 
   if (normalized.includes('FIRST') || normalized === 'F2F') {
     return TYPE_NAMES.FIRST2FINISH
+  }
+
+  if (normalized === 'CODE' || normalized === 'COD') {
+    return TYPE_NAMES.CODE
   }
 
   if (normalized.includes('TASK') || normalized === 'TSK') {
@@ -169,6 +174,7 @@ function buildChallengeDimensionLookup (trackRows, typeRows) {
   }
   lookup.typeIds = {
     CHALLENGE: resolveTypeIdFromLookup(lookup, TYPE_NAMES.CHALLENGE) || null,
+    CODE: resolveTypeIdFromLookup(lookup, TYPE_NAMES.CODE) || null,
     FIRST2FINISH: resolveTypeIdFromLookup(lookup, TYPE_NAMES.FIRST2FINISH) || null,
     TASK: resolveTypeIdFromLookup(lookup, TYPE_NAMES.TASK) || null,
     SRM: resolveTypeIdFromLookup(lookup, TYPE_NAMES.SRM) || null,
