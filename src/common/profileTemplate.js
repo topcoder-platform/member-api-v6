@@ -371,20 +371,20 @@ function buildProfileTemplate (pdfData) {
       ),
       member.statusBarText
         ? React.createElement(
-            View,
-            { style: styles.statusBar },
-            React.createElement(
-              Text,
-              { style: styles.statusBarText },
-              member.statusBarText
-            )
+          View,
+          { style: styles.statusBar },
+          React.createElement(
+            Text,
+            { style: styles.statusBarText },
+            member.statusBarText
           )
+        )
         : React.createElement(View, { style: styles.statusBarSeparator })
     )
   )
 
   // Biography Section
-  const biography = member.description || (basicInfo && basicInfo.shortBio)
+  const biography = member.description
   if (biography) {
     children.push(
       React.createElement(
@@ -513,10 +513,15 @@ function buildProfileTemplate (pdfData) {
 
     if (hasStatsByTrack) {
       const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
-        const wins = stat.wins ?? 0
-        const submissions = stat.submissions ?? 0
-        const challenges = stat.challenges ?? 0
-        const valueText = `${wins} ${wins === 1 ? 'win' : 'wins'}, ${submissions} ${submissions === 1 ? 'submission' : 'submissions'}, ${challenges} ${challenges === 1 ? 'challenge' : 'challenges'}`
+        const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
+        const rating = stat.rating == null ? 0 : stat.rating
+        const wins = stat.wins == null ? 0 : stat.wins
+        const competitions = stat.competitions == null ? 0 : stat.competitions
+        const submissions = stat.submissions == null ? 0 : stat.submissions
+        const challenges = stat.challenges == null ? 0 : stat.challenges
+        const valueText = isCompetitiveProgramming
+          ? `${rating} rating, ${wins} wins, ${competitions} competitions`
+          : `${wins} ${wins === 1 ? 'win' : 'wins'}, ${submissions} ${submissions === 1 ? 'submission' : 'submissions'}, ${challenges} ${challenges === 1 ? 'challenge' : 'challenges'}`
         return React.createElement(
           Text,
           { key: `stats-track-${index}`, style: styles.activityItem },

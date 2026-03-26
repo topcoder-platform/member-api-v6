@@ -8,6 +8,7 @@ const {
   DELETE_USER_SCOPE
 } = require('config')
 const constants = require('../app-constants')
+const { STATS_REFRESH, STATS_RERATE } = MEMBERS
 
 module.exports = {
   '/members/health': {
@@ -199,6 +200,24 @@ module.exports = {
       method: 'partiallyUpdateHistoryStats',
       auth: 'jwt',
       scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
+  },
+  '/members/:handle/stats/refresh': {
+    post: {
+      controller: 'StatisticsController',
+      method: 'refreshMemberStats',
+      auth: 'jwt',
+      scopes: [STATS_REFRESH, MEMBERS.ALL],
+      access: constants.ADMIN_ROLES
+    }
+  },
+  '/members/:handle/stats/rerate': {
+    post: {
+      controller: 'StatisticsController',
+      method: 'rerateMemberStats',
+      auth: 'jwt',
+      scopes: [STATS_RERATE, MEMBERS.ALL],
+      access: constants.ADMIN_ROLES
     }
   },
   '/members/:handle/stats': {

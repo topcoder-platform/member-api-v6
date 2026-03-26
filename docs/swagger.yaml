@@ -1411,6 +1411,7 @@ paths:
         - Statistics
       description: >
         Retrieve member statistics, optionally filtered by group, challenge track, and challenge type.
+        Counts sourced from unified challenge results include completed challenges only.
         
         Filtering behavior:
           - `trackId` only: returns all statistics for that track across all types.
@@ -1600,6 +1601,10 @@ paths:
       description: >
         Get member history statistics, by default only returns the public Topcoder history statistics.
         Results can be filtered by challenge track and challenge type for more granular historical views.
+        When persisted history rows are missing or incomplete for a visible track/type pair, challenge cards are synthesized
+        from available completed challenge-result sources so challenge-level history still appears. Non-completed
+        challenges are excluded from the response. Fallback rows may omit
+        rating fields when no authoritative rating snapshot exists.
         
         Filtering behavior:
           - `trackId` only: returns all history statistics for that track across all types.
@@ -1749,6 +1754,118 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/MemberHistoryStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats/refresh':
+    post:
+      x-internal: true
+      tags:
+        - Statistics
+      description: >
+        Refreshes unified member stats for the member from completed review-api challenge results.
+        `challengeId` is accepted for compatibility and echoed in the response summary.
+        Callable by admin users or M2M tokens with `refresh:member_stats` scope.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: false
+          schema:
+            type: object
+            properties:
+              challengeId:
+                type: string
+                description: Optional UUID or legacy numeric challenge identifier echoed in the response summary.
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/StatsRefreshResult'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats/rerate':
+    post:
+      x-internal: true
+      tags:
+        - Statistics
+      description: >
+        Triggers a re-rating pass for the member starting from the specified challenge.
+        All subsequent challenges in the same track/type are also re-rated to maintain accuracy.
+        Callable by admin users or M2M tokens with `rerate:member_stats` scope.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required:
+              - challengeId
+            properties:
+              challengeId:
+                type: string
+                description: UUID or legacy numeric challenge identifier that starts the rerate request.
+              trackId:
+                type: string
+                enum:
+                  - DEVELOP
+                  - DATA_SCIENCE
+              typeId:
+                type: string
+                enum:
+                  - Challenge
+                  - MARATHON_MATCH
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/StatsRerateResult'
         '400':
           description: Bad request data
           schema:
@@ -1965,6 +2082,7 @@ paths:
         - Statistics
       description: >
         Get member distribution statistics grouped by track and sub-track.
+        Valid non-rated track/type combinations return an empty histogram instead of `404`.
         
         Authorization:
           - Public: Endpoint is unauthenticated.
@@ -2372,6 +2490,47 @@ definitions:
       timePeriodTo:
         type: string
         format: date-time
+  StatsRefreshResult:
+    type: object
+    properties:
+      handle:
+        type: string
+      refreshed:
+        type: boolean
+      challengeId:
+        type: string
+        x-nullable: true
+        description: Optional UUID or legacy numeric challenge identifier echoed as a string in the refresh summary.
+      challengeResultsProcessed:
+        type: integer
+        format: int32
+      statsUpdated:
+        type: integer
+        format: int32
+  StatsRerateResult:
+    type: object
+    properties:
+      handle:
+        type: string
+      rerated:
+        type: boolean
+      challengeId:
+        type: string
+        description: UUID or legacy numeric challenge identifier echoed as a string in the rerate summary.
+      trackId:
+        type: string
+      typeId:
+        type: string
+      challengesRerated:
+        type: integer
+        format: int32
+        description: Number of subsequent challenges rerated after the starting challenge.
+      challengesProcessed:
+        type: integer
+        format: int32
+      ratingsUpdated:
+        type: integer
+        format: int32
   MemberStats:
     type: object
     properties:
@@ -2846,8 +3005,47 @@ definitions:
                     type: object
                     properties:
                       challengeId:
+                        type: string
+                        description: Canonical challenge UUID when challenge metadata can be resolved; otherwise the stored legacy identifier.
+                      challengeName:
+                        type: string
+                      ratingDate:
+                        type: string
+                        format: date-time
+                        description: >-
+                          ISO-8601 formatted date times
+                          (YYYY-MM-DDTHH:mm:ss.sssZ)
+                      mostRecent:
+                        type: boolean
+                        description: True if this is the latest history row for the same user, track, and type.
+                      oldRating:
                         type: number
                         format: int64
+                      newRating:
+                        type: number
+                        format: int64
+                        description: For mostRecent=true rows, this equals the current member stats rating for the same track/type.
+      DESIGN:
+        type: object
+        properties:
+          subTracks:
+            type: array
+            items:
+              type: object
+              properties:
+                id:
+                  type: number
+                  format: int64
+                name:
+                  type: string
+                history:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      challengeId:
+                        type: string
+                        description: Canonical challenge UUID when challenge metadata can be resolved; otherwise the stored legacy identifier.
                       challengeName:
                         type: string
                       ratingDate:
@@ -2878,8 +3076,8 @@ definitions:
                   type: object
                   properties:
                     challengeId:
-                      type: number
-                      format: int64
+                      type: string
+                      description: Canonical challenge UUID when challenge metadata can be resolved; otherwise the stored legacy identifier.
                     challengeName:
                       type: string
                     date:
@@ -2923,8 +3121,8 @@ definitions:
                   type: object
                   properties:
                     challengeId:
-                      type: number
-                      format: int64
+                      type: string
+                      description: Canonical challenge UUID when challenge metadata can be resolved; otherwise the stored legacy identifier.
                     challengeName:
                       type: string
                     date:
