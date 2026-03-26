@@ -128,8 +128,9 @@ function toComparableTimestamp (value) {
 /**
  * Resolve the highest current rating from unified memberStats rows.
  * When stats rows are loaded, only their current `rating` values count toward the
- * response. The persisted memberMaxRating row is used as a fallback only when no
- * stats rows were loaded at all.
+ * response. Rows missing unified track/type ids are ignored so partially-migrated
+ * legacy data does not break maxRating resolution. The persisted memberMaxRating
+ * row is used as a fallback when no current rating can be derived from loaded rows.
  * @param {Object|null} maxRating persisted memberMaxRating row
  * @param {Array<Object>} statsRows loaded memberStats rows
  * @returns {Object|null} normalized max rating candidate for API responses
@@ -141,6 +142,12 @@ function resolveCurrentMaxRating (maxRating, statsRows) {
 
   let selectedRating = null
   statsRows.forEach((row) => {
+    const trackId = _.isNil(row && row.trackId) ? '' : String(row.trackId).trim()
+    const typeId = _.isNil(row && row.typeId) ? '' : String(row.typeId).trim()
+    if (!trackId || !typeId) {
+      return
+    }
+
     const rating = toOptionalNumber(row && row.rating)
     if (rating === null) {
       return
@@ -148,8 +155,8 @@ function resolveCurrentMaxRating (maxRating, statsRows) {
 
     const candidate = {
       rating,
-      track: getUnifiedTrackName(row.trackName || row.trackId),
-      subTrack: getUnifiedTypeName(row.typeName || row.typeId),
+      track: getUnifiedTrackName(row.trackName || trackId),
+      subTrack: getUnifiedTypeName(row.typeName || typeId),
       mostRecentEventDate: toComparableTimestamp(row.mostRecentEventDate)
     }
 
@@ -166,7 +173,7 @@ function resolveCurrentMaxRating (maxRating, statsRows) {
     }
   })
 
-  return selectedRating
+  return selectedRating || maxRating || null
 }
 
 /**
