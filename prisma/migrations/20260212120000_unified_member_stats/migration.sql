@@ -24,84 +24,84 @@ ADD COLUMN     "trackId" TEXT,
 ADD COLUMN     "typeId" TEXT,
 ADD COLUMN     "volatility" INTEGER;
 
--- ValidateBackfillPrerequisites
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM "members"."memberStats") THEN
-    IF NOT EXISTS (SELECT 1 FROM "challenges"."ChallengeTrack") THEN
-      RAISE EXCEPTION 'Cannot backfill members.memberStats.trackId because challenges.ChallengeTrack has no rows.';
-    END IF;
+-- -- ValidateBackfillPrerequisites
+-- DO $$
+-- BEGIN
+--   IF EXISTS (SELECT 1 FROM "members"."memberStats") THEN
+--     IF NOT EXISTS (SELECT 1 FROM "challenges"."ChallengeTrack") THEN
+--       RAISE EXCEPTION 'Cannot backfill members.memberStats.trackId because challenges.ChallengeTrack has no rows.';
+--     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM "challenges"."ChallengeType") THEN
-      RAISE EXCEPTION 'Cannot backfill members.memberStats.typeId because challenges.ChallengeType has no rows.';
-    END IF;
-  END IF;
-END $$;
+--     IF NOT EXISTS (SELECT 1 FROM "challenges"."ChallengeType") THEN
+--       RAISE EXCEPTION 'Cannot backfill members.memberStats.typeId because challenges.ChallengeType has no rows.';
+--     END IF;
+--   END IF;
+-- END $$;
 
--- BackfillExistingMemberStatsTrackAndType
-WITH defaults AS (
-  SELECT
-    COALESCE(
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."name") = 'development' ORDER BY ct."createdAt" ASC LIMIT 1),
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."abbreviation") = 'dev' ORDER BY ct."createdAt" ASC LIMIT 1),
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct ORDER BY ct."createdAt" ASC LIMIT 1)
-    ) AS develop_track_id,
-    COALESCE(
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."name") = 'design' ORDER BY ct."createdAt" ASC LIMIT 1),
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."abbreviation") = 'des' ORDER BY ct."createdAt" ASC LIMIT 1),
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct ORDER BY ct."createdAt" ASC LIMIT 1)
-    ) AS design_track_id,
-    COALESCE(
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."name") = 'data science' ORDER BY ct."createdAt" ASC LIMIT 1),
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."abbreviation") = 'ds' ORDER BY ct."createdAt" ASC LIMIT 1),
-      (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct ORDER BY ct."createdAt" ASC LIMIT 1)
-    ) AS data_science_track_id,
-    COALESCE(
-      (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."name") = 'challenge' ORDER BY cty."createdAt" ASC LIMIT 1),
-      (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."abbreviation") = 'ch' ORDER BY cty."createdAt" ASC LIMIT 1),
-      (SELECT cty."id" FROM "challenges"."ChallengeType" cty ORDER BY cty."createdAt" ASC LIMIT 1)
-    ) AS challenge_type_id,
-    COALESCE(
-      (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."name") = 'marathon match' ORDER BY cty."createdAt" ASC LIMIT 1),
-      (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."abbreviation") = 'mm' ORDER BY cty."createdAt" ASC LIMIT 1),
-      (SELECT cty."id" FROM "challenges"."ChallengeType" cty ORDER BY cty."createdAt" ASC LIMIT 1)
-    ) AS marathon_type_id
-)
-UPDATE "members"."memberStats" ms
-SET
-  "trackId" = COALESCE(
-    ms."trackId",
-    CASE
-      WHEN EXISTS (SELECT 1 FROM "members"."memberDesignStats" mdes WHERE mdes."memberStatsId" = ms."id")
-        THEN d.design_track_id
-      WHEN EXISTS (SELECT 1 FROM "members"."memberDataScienceStats" mds WHERE mds."memberStatsId" = ms."id")
-        THEN d.data_science_track_id
-      WHEN EXISTS (SELECT 1 FROM "members"."memberCopilotStats" mcs WHERE mcs."memberStatsId" = ms."id")
-        THEN d.develop_track_id
-      WHEN EXISTS (SELECT 1 FROM "members"."memberDevelopStats" mdev WHERE mdev."memberStatsId" = ms."id")
-        THEN d.develop_track_id
-      ELSE d.develop_track_id
-    END
-  ),
-  "typeId" = COALESCE(
-    ms."typeId",
-    CASE
-      WHEN EXISTS (
-        SELECT 1
-        FROM "members"."memberDataScienceStats" mds
-        INNER JOIN "members"."memberMarathonStats" mm ON mm."dataScienceStatsId" = mds."id"
-        WHERE mds."memberStatsId" = ms."id"
-      ) THEN d.marathon_type_id
-      ELSE d.challenge_type_id
-    END
-  )
-FROM defaults d
-WHERE ms."trackId" IS NULL OR ms."typeId" IS NULL;
+-- -- BackfillExistingMemberStatsTrackAndType
+-- WITH defaults AS (
+--   SELECT
+--     COALESCE(
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."name") = 'development' ORDER BY ct."createdAt" ASC LIMIT 1),
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."abbreviation") = 'dev' ORDER BY ct."createdAt" ASC LIMIT 1),
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct ORDER BY ct."createdAt" ASC LIMIT 1)
+--     ) AS develop_track_id,
+--     COALESCE(
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."name") = 'design' ORDER BY ct."createdAt" ASC LIMIT 1),
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."abbreviation") = 'des' ORDER BY ct."createdAt" ASC LIMIT 1),
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct ORDER BY ct."createdAt" ASC LIMIT 1)
+--     ) AS design_track_id,
+--     COALESCE(
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."name") = 'data science' ORDER BY ct."createdAt" ASC LIMIT 1),
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct WHERE LOWER(ct."abbreviation") = 'ds' ORDER BY ct."createdAt" ASC LIMIT 1),
+--       (SELECT ct."id" FROM "challenges"."ChallengeTrack" ct ORDER BY ct."createdAt" ASC LIMIT 1)
+--     ) AS data_science_track_id,
+--     COALESCE(
+--       (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."name") = 'challenge' ORDER BY cty."createdAt" ASC LIMIT 1),
+--       (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."abbreviation") = 'ch' ORDER BY cty."createdAt" ASC LIMIT 1),
+--       (SELECT cty."id" FROM "challenges"."ChallengeType" cty ORDER BY cty."createdAt" ASC LIMIT 1)
+--     ) AS challenge_type_id,
+--     COALESCE(
+--       (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."name") = 'marathon match' ORDER BY cty."createdAt" ASC LIMIT 1),
+--       (SELECT cty."id" FROM "challenges"."ChallengeType" cty WHERE LOWER(cty."abbreviation") = 'mm' ORDER BY cty."createdAt" ASC LIMIT 1),
+--       (SELECT cty."id" FROM "challenges"."ChallengeType" cty ORDER BY cty."createdAt" ASC LIMIT 1)
+--     ) AS marathon_type_id
+-- )
+-- UPDATE "members"."memberStats" ms
+-- SET
+--   "trackId" = COALESCE(
+--     ms."trackId",
+--     CASE
+--       WHEN EXISTS (SELECT 1 FROM "members"."memberDesignStats" mdes WHERE mdes."memberStatsId" = ms."id")
+--         THEN d.design_track_id
+--       WHEN EXISTS (SELECT 1 FROM "members"."memberDataScienceStats" mds WHERE mds."memberStatsId" = ms."id")
+--         THEN d.data_science_track_id
+--       WHEN EXISTS (SELECT 1 FROM "members"."memberCopilotStats" mcs WHERE mcs."memberStatsId" = ms."id")
+--         THEN d.develop_track_id
+--       WHEN EXISTS (SELECT 1 FROM "members"."memberDevelopStats" mdev WHERE mdev."memberStatsId" = ms."id")
+--         THEN d.develop_track_id
+--       ELSE d.develop_track_id
+--     END
+--   ),
+--   "typeId" = COALESCE(
+--     ms."typeId",
+--     CASE
+--       WHEN EXISTS (
+--         SELECT 1
+--         FROM "members"."memberDataScienceStats" mds
+--         INNER JOIN "members"."memberMarathonStats" mm ON mm."dataScienceStatsId" = mds."id"
+--         WHERE mds."memberStatsId" = ms."id"
+--       ) THEN d.marathon_type_id
+--       ELSE d.challenge_type_id
+--     END
+--   )
+-- FROM defaults d
+-- WHERE ms."trackId" IS NULL OR ms."typeId" IS NULL;
 
--- AlterTable
-ALTER TABLE "members"."memberStats"
-ALTER COLUMN "trackId" SET NOT NULL,
-ALTER COLUMN "typeId" SET NOT NULL;
+-- -- AlterTable
+-- ALTER TABLE "members"."memberStats"
+-- ALTER COLUMN "trackId" SET NOT NULL,
+-- ALTER COLUMN "typeId" SET NOT NULL;
 
 -- CreateTable
 CREATE TABLE "members"."memberStatsHistory" (
