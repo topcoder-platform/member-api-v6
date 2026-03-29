@@ -2207,6 +2207,33 @@ async function getMemberSkill (currentUser, handle, skillId) {
       }
     }
 
+    // Prepare marathon match fetch
+    const marathonMatchSources = _.get(skill, 'activity["marathon match"].sources', [])
+    if (marathonMatchSources.length > 0) {
+      const marathonIds = _.uniqBy(marathonMatchSources, 'sourceId').map(s => s.sourceId).filter(Boolean)
+      if (marathonIds.length > 0) {
+        fetchPromises.push(
+          challengesPrisma.Challenge.findMany({
+            where: { id: { in: marathonIds } },
+            select: { id: true, name: true }
+          }).then(dbMarathons => {
+            const marathonMap = new Map(dbMarathons.map(m => [m.id, m]))
+            skill.activity['marathon match'] = {
+              count: marathonIds.length,
+              lastSources: marathonIds
+                .map(id => marathonMap.get(id))
+                .filter(Boolean)
+                .slice(0, 3)
+                .map(m => ({
+                  id: m.id,
+                  name: m.name
+                }))
+            }
+          })
+        )
+      }
+    }
+
     // Fetch all sources in parallel
     await Promise.all(fetchPromises)
   }
