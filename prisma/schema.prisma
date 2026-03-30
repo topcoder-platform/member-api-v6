@@ -500,6 +500,7 @@ model memberTraitPersonalization {
   updatedBy   String?
 
   @@index([memberTraitId])
+  @@index([memberTraitId, key], map: "memberTraitPersonalization_memberTraitId_key_idx")
   @@schema("members")
 }
 
