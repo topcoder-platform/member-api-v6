@@ -57,6 +57,8 @@ const SKILL_LEVEL_WEIGHTS = {
 
 const DEFAULT_SKILL_SCORE_DEDUCTION = -0.04
 const SKILL_SCORE_MEMBER_BATCH_SIZE = 1000
+const MEMBER_STATS_DEPENDENT_FIELDS = ['stats', 'numberOfChallengesWon', 'numberOfChallengesPlaced']
+const MEMBER_SELECT_EXCLUDED_FIELDS = ['addresses', 'maxRating', 'skills', 'stats', 'numberOfChallengesWon', 'numberOfChallengesPlaced']
 
 const BULK_IDENTIFIER_MAX_LENGTH = 256
 const BULK_EMAIL_REGEX = /^[+_A-Za-z0-9-]+(\.[+_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9]+)*(\.[A-Za-z]{2,}$)/
@@ -413,6 +415,7 @@ searchMembers.schema = {
     userIds: Joi.array(),
     term: Joi.string(),
     fields: Joi.string(),
+    includeStats: Joi.string(),
     page: Joi.page(),
     perPage: Joi.perPage(),
     sort: Joi.sort()
@@ -577,10 +580,69 @@ function skillSearchOrder (results, query) {
   return results
 }
 
+/**
+ * Determine whether the caller requested stats-derived fields and did not explicitly disable stats loading.
+ * @param {Object} query member search query parameters
+ * @param {Array<string>} fields resolved member response fields
+ * @returns {boolean} true when member stats should be loaded
+ */
+function shouldLoadStatsForFields (query, fields) {
+  const includeStats = query.includeStats !== 'false' && query.includeStats !== false
+  return includeStats && _.some(MEMBER_STATS_DEPENDENT_FIELDS, field => _.includes(fields, field))
+}
+
+/**
+ * Build Prisma query options for the requested member fields so explicit lookups can avoid loading unrelated relations.
+ * @param {Array<string>} fields resolved member response fields
+ * @param {boolean} shouldLoadStats whether stats-derived fields are needed
+ * @returns {Object} Prisma select/include configuration for member lookups
+ */
+function buildMemberQueryOptions (fields, shouldLoadStats) {
+  const shouldLoadAddresses = _.includes(fields, 'addresses')
+  const shouldLoadMaxRating = _.includes(fields, 'maxRating') || shouldLoadStats
+  const shouldLoadCurrentMaxRatingStats = _.includes(fields, 'maxRating')
+
+  const include = {}
+  if (shouldLoadAddresses) {
+    include.addresses = true
+  }
+  if (shouldLoadMaxRating) {
+    include.maxRating = true
+  }
+  if (shouldLoadCurrentMaxRatingStats) {
+    include.memberStats = {
+      select: prismaHelper.currentMaxRatingStatsSelect
+    }
+  }
+
+  if (!_.isEmpty(include)) {
+    return { include }
+  }
+
+  const selectFields = _.uniq([
+    'userId',
+    'createdAt',
+    'updatedAt',
+    'verified',
+    ...(shouldLoadStats ? ['handle', 'handleLower'] : []),
+    ...fields
+  ]).filter(field => !_.includes(MEMBER_SELECT_EXCLUDED_FIELDS, field))
+
+  const select = {}
+  _.forEach(selectFields, (field) => {
+    select[field] = true
+  })
+
+  return { select }
+}
+
 async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
   let total = 0
 
   let results = []
+  const shouldLoadStats = shouldLoadStatsForFields(query, fields)
+  const shouldLoadSkills = _.includes(fields, 'skills')
+  const memberQueryOptions = buildMemberQueryOptions(fields, shouldLoadStats)
   if (skillSearch && query.sortBy === 'skillScore') {
     // For skill searches, compute scores and sort in memory using the skills database
     const memberIds = _.get(prismaFilter, 'where.userId.in', []) || []
@@ -653,13 +715,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
 
     const pageMembers = await prisma.member.findMany({
       where: { userId: { in: pageUserIds } },
-      include: {
-        maxRating: true,
-        addresses: true,
-        memberStats: {
-          select: prismaHelper.currentMaxRatingStatsSelect
-        }
-      }
+      ...memberQueryOptions
     })
 
     const byId = _.keyBy(pageMembers, 'userId')
@@ -682,13 +738,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
     // get member data
     results = await prisma.member.findMany({
       ...prismaFilter,
-      include: {
-        maxRating: true,
-        addresses: true,
-        memberStats: {
-          select: prismaHelper.currentMaxRatingStatsSelect
-        }
-      },
+      ...memberQueryOptions,
       // sort by handle with given order
       skip: (query.page - 1) * query.perPage,
       take: query.perPage,
@@ -703,12 +753,14 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
 
   // Include the stats by default, but allow them to be ignored with ?includeStats=false
   // This is for performance reasons - pulling the stats is a bit of a resource hog
-  if (!query.includeStats || query.includeStats === 'true') {
+  if (shouldLoadStats) {
     results = await addStats(results, query)
   }
 
   // add skills data
-  await addSkills(results)
+  if (shouldLoadSkills) {
+    await addSkills(results)
+  }
 
   // Sort in slightly different secondary orders, depending on if
   // this is a skill search or handle search
