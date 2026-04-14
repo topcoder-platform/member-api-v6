@@ -19,6 +19,85 @@ const service = require('../../src/services/SearchService')
 const should = chai.should()
 
 describe('search service unit tests', () => {
+  it('searchMembers should skip stats and skills hydration for explicit field-limited lookups', async () => {
+    const prisma = prismaManager.getClient()
+    const skillsPrisma = prismaManager.getSkillsClient()
+
+    const originalMemberCount = prisma.member.count
+    const originalMemberFindMany = prisma.member.findMany
+    const originalMemberStatsFindMany = prisma.memberStats.findMany
+    const originalUserSkillFindMany = skillsPrisma.userSkill.findMany
+
+    let memberStatsRequested = false
+    let userSkillsRequested = false
+
+    try {
+      prisma.member.count = async () => 2
+      prisma.member.findMany = async (args) => {
+        args.select.should.deep.equal({
+          userId: true,
+          createdAt: true,
+          updatedAt: true,
+          verified: true,
+          handle: true,
+          email: true
+        })
+        should.not.exist(args.include)
+
+        return [
+          {
+            userId: BigInt(1001),
+            handle: 'alpha',
+            email: 'alpha@example.com',
+            createdAt: new Date('2026-04-01T00:00:00.000Z'),
+            updatedAt: new Date('2026-04-02T00:00:00.000Z'),
+            verified: true
+          },
+          {
+            userId: BigInt(1002),
+            handle: 'beta',
+            email: 'beta@example.com',
+            createdAt: new Date('2026-04-03T00:00:00.000Z'),
+            updatedAt: new Date('2026-04-04T00:00:00.000Z'),
+            verified: false
+          }
+        ]
+      }
+      prisma.memberStats.findMany = async () => {
+        memberStatsRequested = true
+        return []
+      }
+      skillsPrisma.userSkill.findMany = async () => {
+        userSkillsRequested = true
+        return []
+      }
+
+      const response = await service.searchMembers(
+        { isMachine: true },
+        {
+          userIds: [1001, 1002],
+          page: 1,
+          perPage: 20,
+          fields: 'userId,handle,email',
+          includeStats: 'false'
+        }
+      )
+
+      should.equal(response.total, 2)
+      response.result.should.deep.equal([
+        { userId: 1001, handle: 'alpha', email: 'alpha@example.com' },
+        { userId: 1002, handle: 'beta', email: 'beta@example.com' }
+      ])
+      should.equal(memberStatsRequested, false)
+      should.equal(userSkillsRequested, false)
+    } finally {
+      prisma.member.count = originalMemberCount
+      prisma.member.findMany = originalMemberFindMany
+      prisma.memberStats.findMany = originalMemberStatsFindMany
+      skillsPrisma.userSkill.findMany = originalUserSkillFindMany
+    }
+  })
+
   it('searchMembersBySkills should chunk member queries for skill score searches', async () => {
     const prisma = prismaManager.getClient()
     const skillsPrisma = prismaManager.getSkillsClient()
