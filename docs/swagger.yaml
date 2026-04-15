@@ -624,7 +624,7 @@ paths:
       tags:
         - Basic
       description: |-
-        Get all SendGrid email activity records sent to the member's current email address in the last 30 days.
+        Get up to the 20 most recent SendGrid email activity records sent to the member's current email address in the last 30 days.
 
         Authorization:
           - JWT roles: Only `administrator` or `admin`.

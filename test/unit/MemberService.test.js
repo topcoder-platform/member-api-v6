@@ -10,6 +10,14 @@ const fs = require('fs')
 const path = require('path')
 const awsMock = require('aws-sdk-mock')
 const axios = require('axios')
+
+const placeholderDbUrl = 'postgresql://user:pass@localhost:5432/topcoder?schema=public'
+process.env.SKILLS_DB_URL = process.env.SKILLS_DB_URL || placeholderDbUrl
+process.env.CHALLENGES_DB_URL = process.env.CHALLENGES_DB_URL || placeholderDbUrl
+process.env.ACADEMY_DB_URL = process.env.ACADEMY_DB_URL || placeholderDbUrl
+process.env.RESOURCES_DB_URL = process.env.RESOURCES_DB_URL || placeholderDbUrl
+process.env.ENGAGEMENTS_DB_URL = process.env.ENGAGEMENTS_DB_URL || placeholderDbUrl
+
 const service = require('../../src/services/MemberService')
 const testHelper = require('../testHelper')
 
@@ -177,40 +185,31 @@ describe('member service unit tests', () => {
       throw new Error('should not reach here')
     })
 
-    it('get member sendgrid emails successfully with pagination', async () => {
+    it('get member sendgrid emails successfully with capped recent results', async () => {
       config.SENDGRID_API_KEY = 'test-sendgrid-api-key'
       const calls = []
 
       axios.get = async (url, options) => {
         calls.push({ url, options })
-        if (calls.length === 1) {
-          return {
-            data: {
-              messages: [{ messageId: 'm1' }, { messageId: 'm2' }],
-              _metadata: {
-                next: '/v3/messages?query=cursor123'
-              }
-            }
-          }
-        }
-
         return {
           data: {
-            messages: [{ messageId: 'm3' }],
-            _metadata: {}
+            messages: Array.from({ length: 25 }, (_, index) => ({ messageId: `m${index + 1}` })),
+            _metadata: {
+              next: '/v3/messages?query=cursor123'
+            }
           }
         }
       }
 
       const result = await service.getMemberSendgridEmails({ roles: ['admin'] }, member1.handle)
-      should.equal(result.length, 3)
-      should.equal(calls.length, 2)
+      should.equal(result.length, 20)
+      should.equal(calls.length, 1)
       should.equal(calls[0].url, 'https://api.sendgrid.com/v3/messages')
       should.equal(calls[0].options.headers.Authorization, 'Bearer test-sendgrid-api-key')
-      should.equal(calls[0].options.params.limit, 100)
+      should.equal(calls[0].options.params.limit, 20)
       should.equal(calls[0].options.params.query.indexOf(`to_email = "${member1.email}"`) >= 0, true)
-      should.equal(calls[1].url, 'https://api.sendgrid.com/v3/messages?query=cursor123')
-      should.equal(calls[1].options.params, undefined)
+      should.equal(result[0].messageId, 'm1')
+      should.equal(result[19].messageId, 'm20')
     })
 
     it('get member sendgrid emails allows m2m caller', async () => {
