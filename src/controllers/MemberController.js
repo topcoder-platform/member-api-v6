@@ -115,7 +115,7 @@ async function downloadProfile (req, res) {
 }
 
 /**
- * Get SendGrid emails sent to a member in the last 30 days.
+ * Get up to the most recent 20 SendGrid emails sent to a member in the last 30 days.
  * @param {Object} req the request
  * @param {Object} res the response
  */

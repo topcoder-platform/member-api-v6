@@ -48,8 +48,7 @@ const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyToke
 
 const SENDGRID_BASE_URL = 'https://api.sendgrid.com'
 const SENDGRID_EMAIL_ACTIVITY_LOOKBACK_DAYS = 30
-const SENDGRID_EMAIL_ACTIVITY_PAGE_SIZE = 100
-const SENDGRID_EMAIL_ACTIVITY_MAX_PAGES = 50
+const SENDGRID_EMAIL_ACTIVITY_RESULT_LIMIT = 20
 
 /**
  * Clean member fields according to current user.
@@ -364,28 +363,10 @@ function buildSendgridEmailActivityQuery (email, startTime, endTime) {
 }
 
 /**
- * Normalize SendGrid metadata next-page URL.
- * @param {String} nextPath next page path or absolute URL
- * @returns {String|null} normalized absolute URL for next page
- */
-function normalizeSendgridNextPageUrl (nextPath) {
-  if (!nextPath || typeof nextPath !== 'string') {
-    return null
-  }
-  if (nextPath.startsWith('https://') || nextPath.startsWith('http://')) {
-    return nextPath
-  }
-  if (nextPath.startsWith('/')) {
-    return `${SENDGRID_BASE_URL}${nextPath}`
-  }
-  return `${SENDGRID_BASE_URL}/${nextPath}`
-}
-
-/**
- * Get SendGrid email activity for a member in the last 30 days.
+ * Get up to the most recent SendGrid email activity records for a member in the last 30 days.
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
- * @returns {Array} all SendGrid message activity records
+ * @returns {Array} up to the most recent SendGrid message activity records
  */
 async function getMemberSendgridEmails (currentUser, handle) {
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
@@ -411,44 +392,26 @@ async function getMemberSendgridEmails (currentUser, handle) {
     Authorization: `Bearer ${sendgridApiKey}`
   }
   const query = buildSendgridEmailActivityQuery(member.email, startTime, endTime)
-  const messages = []
+  try {
+    const response = await axios.get(`${SENDGRID_BASE_URL}/v3/messages`, {
+      headers,
+      params: {
+        limit: SENDGRID_EMAIL_ACTIVITY_RESULT_LIMIT,
+        query
+      }
+    })
 
-  let nextUrl = `${SENDGRID_BASE_URL}/v3/messages`
-  let params = {
-    limit: SENDGRID_EMAIL_ACTIVITY_PAGE_SIZE,
-    query
+    const messages = _.get(response, 'data.messages', [])
+    return Array.isArray(messages)
+      ? messages.slice(0, SENDGRID_EMAIL_ACTIVITY_RESULT_LIMIT)
+      : []
+  } catch (err) {
+    const statusCode = _.get(err, 'response.status')
+    logger.error(
+      `Failed to fetch SendGrid email activity for member "${handle}" (status: ${statusCode || 'N/A'}): ${err.message}`
+    )
+    throw new errors.ServiceUnavailableError('Failed to fetch SendGrid email activity.')
   }
-
-  for (let page = 0; page < SENDGRID_EMAIL_ACTIVITY_MAX_PAGES; page += 1) {
-    let response
-    try {
-      response = await axios.get(nextUrl, {
-        headers,
-        params
-      })
-    } catch (err) {
-      const statusCode = _.get(err, 'response.status')
-      logger.error(
-        `Failed to fetch SendGrid email activity for member "${handle}" (status: ${statusCode || 'N/A'}): ${err.message}`
-      )
-      throw new errors.ServiceUnavailableError('Failed to fetch SendGrid email activity.')
-    }
-
-    const pageMessages = _.get(response, 'data.messages', [])
-    if (Array.isArray(pageMessages) && pageMessages.length > 0) {
-      messages.push(...pageMessages)
-    }
-
-    const nextPath = _.get(response, 'data._metadata.next')
-    const normalizedNextUrl = normalizeSendgridNextPageUrl(nextPath)
-    if (!normalizedNextUrl) {
-      break
-    }
-    nextUrl = normalizedNextUrl
-    params = undefined
-  }
-
-  return messages
 }
 
 getMemberSendgridEmails.schema = {
