@@ -91,6 +91,10 @@ const CREATED_BY = process.env.CREATED_BY || DEFAULT_ACTOR
 const UPDATED_BY = process.env.UPDATED_BY || DEFAULT_ACTOR
 const USER_BATCH_SIZE = 100
 const DEFAULT_CONCURRENCY = 4
+const MAX_RAW_QUERY_PARAMS = 10000
+const MEMBER_STATS_BULK_UPSERT_PARAM_COUNT = 22
+const HISTORY_BULK_UPDATE_PARAM_COUNT = 4
+const HISTORY_BULK_INSERT_PARAM_COUNT = 9
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'recalculateMemberStats.processedUserIds.json'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 const NULL_PRESERVED_STAT_FIELDS = [
@@ -1739,12 +1743,18 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
 
   const queries = []
   if (historyRowsToUpdate.length > 0) {
-    const { sql, params } = buildMemberStatsHistoryBulkUpdateQuery(historyRowsToUpdate)
-    queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+    chunkRecordsForParameterizedQuery(historyRowsToUpdate, HISTORY_BULK_UPDATE_PARAM_COUNT)
+      .forEach((historyRowsChunk) => {
+        const { sql, params } = buildMemberStatsHistoryBulkUpdateQuery(historyRowsChunk)
+        queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+      })
   }
   if (historyRowsToInsert.length > 0) {
-    const { sql, params } = buildMemberStatsHistoryBulkInsertQuery(historyRowsToInsert)
-    queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+    chunkRecordsForParameterizedQuery(historyRowsToInsert, HISTORY_BULK_INSERT_PARAM_COUNT)
+      .forEach((historyRowsChunk) => {
+        const { sql, params } = buildMemberStatsHistoryBulkInsertQuery(historyRowsChunk)
+        queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+      })
   }
 
   await membersClient.$transaction(queries)
@@ -2313,6 +2323,33 @@ async function syncCurrentMemberMaxRatingsForUsers (membersClient, userIds) {
     upserted,
     deleted: deleteIds.length
   }
+}
+
+/**
+ * Split raw-query write records so each generated query stays below the bind
+ * parameter limit used by spread-based Prisma raw calls.
+ * @param {Array<*>} records write records to split
+ * @param {number} parametersPerRecord number of bound parameters each record emits
+ * @returns {Array<Array<*>>} record chunks sized for safe raw-query execution
+ * @throws {Error} if parametersPerRecord is not a positive integer
+ */
+function chunkRecordsForParameterizedQuery (records, parametersPerRecord) {
+  if (!records || records.length === 0) {
+    return []
+  }
+
+  if (!Number.isInteger(parametersPerRecord) || parametersPerRecord <= 0) {
+    throw new Error('parametersPerRecord must be a positive integer')
+  }
+
+  const chunkSize = Math.max(1, Math.floor(MAX_RAW_QUERY_PARAMS / parametersPerRecord))
+  const chunks = []
+
+  for (let start = 0; start < records.length; start += chunkSize) {
+    chunks.push(records.slice(start, start + chunkSize))
+  }
+
+  return chunks
 }
 
 /**
@@ -3182,8 +3219,11 @@ async function writeStatsToDatabase (membersClient, statsRecords, replaceUsers =
       }))
     }
 
-    const { sql, params } = buildMemberStatsBulkUpsertQuery(statsWriteRecords)
-    queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+    chunkRecordsForParameterizedQuery(statsWriteRecords, MEMBER_STATS_BULK_UPSERT_PARAM_COUNT)
+      .forEach((statsWriteChunk) => {
+        const { sql, params } = buildMemberStatsBulkUpsertQuery(statsWriteChunk)
+        queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+      })
 
     // Use array transactions so the bulk delete and bulk upsert stay atomic.
     await membersClient.$transaction(queries)
@@ -3595,7 +3635,9 @@ async function main () {
           return
         }
 
-        batchStatsRecords.push(...stats)
+        stats.forEach((stat) => {
+          batchStatsRecords.push(stat)
+        })
       })
 
       if (!options.csvOnly && batchStatsRecords.length > 0) {

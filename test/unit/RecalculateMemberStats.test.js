@@ -301,6 +301,51 @@ describe('recalculateMemberStats unit tests', () => {
     rawQueries[0].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
   })
 
+  it('should chunk large history inserts to avoid raw query parameter limits', async () => {
+    const transactionCalls = []
+    const membersClient = {
+      memberStatsHistory: {
+        findMany: async () => []
+      },
+      $executeRawUnsafe: (sql, ...params) => ({ action: 'executeRawUnsafe', sql, params }),
+      $transaction: async (queries) => {
+        transactionCalls.push(queries)
+      }
+    }
+    const winnerRows = Array.from({ length: 1200 }, (value, index) => ({
+      challengeId: `challenge-${index}`,
+      createdAt: '2024-03-03T00:00:00.000Z',
+      canonicalChallengeId: `challenge-${index}`,
+      trackId: 'track-design-id',
+      typeId: 'type-ch-id',
+      status: 'COMPLETED',
+      endDate: '2024-03-04T00:00:00.000Z'
+    }))
+    const challengesClient = {
+      $queryRawUnsafe: async () => winnerRows
+    }
+
+    const result = await recalculateMemberStats.backfillHistoryFromCompletedChallenges(
+      membersClient,
+      challengesClient,
+      null,
+      global.BigInt(123),
+      { refreshMostRecent: false }
+    )
+
+    result.should.deep.equal({
+      upserted: 1200,
+      refreshed: 0
+    })
+    transactionCalls.should.have.length(1)
+    const rawQueries = transactionCalls[0].filter((query) => query.action === 'executeRawUnsafe')
+    rawQueries.should.have.length(2)
+    rawQueries.forEach((query) => {
+      query.sql.should.include('INSERT INTO "members"."memberStatsHistory"')
+      query.params.length.should.be.at.most(10000)
+    })
+  })
+
   it('should refresh mostRecent flags in two phases so reruns overwrite stale winners', async () => {
     const transactionCalls = []
     const membersClient = {
