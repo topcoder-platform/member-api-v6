@@ -113,6 +113,7 @@ The following parameters can be set in config files or in env variables:
 - MISC_SECURE_FIELDS: Misc identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATISTICS_SECURE_FIELDS: Member Statistics identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATS_READ_SOURCE: Controls stats read backend, `unified` (default, new tables) or `legacy` (pre-refactor tables)
+- RATING_PATHS: JSON array of tag-based Development Challenge and Marathon Match rating paths. Each entry has `name`, `tags`, and optional `track` (`DATA_SCIENCE`, `DEVELOP`, or `DEVELOPMENT`); defaults to `[{"name":"AI","track":"DATA_SCIENCE","tags":["AI","AI Exponential League"]}]`. Re-rate a path by passing `ratingName` to `POST /members/{handle}/stats/rerate`; rows are stored under `{track} / {name}` in unified stats.
 - HEALTH_CHECK_TIMEOUT: health check timeout in milliseconds
 
 Set the following environment variables used by bus API to get TC M2M token (use 'set' insted of 'export' for Windows OS):

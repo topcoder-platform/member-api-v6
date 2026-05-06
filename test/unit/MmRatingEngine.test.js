@@ -12,6 +12,7 @@ const {
   getRatingColor,
   runQubitsRating
 } = require('../../src/ratings/qubitsAlgorithm')
+const { normalizeRatingPathConfig } = require('../../src/ratings/ratingPathConfig')
 
 const should = chai.should()
 const DEVELOP_TRACK_ID = 'track-develop-id'
@@ -242,6 +243,12 @@ function createMmReviewDbClient (rows) {
 
   return {
     async query (sql, params) {
+      if (sql.includes('pg_catalog.pg_class')) {
+        return {
+          rows: [{ schemaName: 'public' }]
+        }
+      }
+
       if (sql.includes('WHERE s."memberId" = $1')) {
         return {
           rows: resultRows
@@ -277,6 +284,26 @@ function createMmReviewDbClient (rows) {
         }
       }
 
+      if (sql.includes('WHERE "challengeId" = $1')) {
+        return {
+          rows: resultRows
+            .filter((row) => String(row.challengeId) === String(params[0]) && row.userId !== undefined)
+            .sort((left, right) => {
+              const placementComparison = compareValues(left.placement, right.placement)
+              if (placementComparison !== 0) {
+                return placementComparison
+              }
+
+              const scoreComparison = compareValues(left.finalScore, right.finalScore)
+              if (scoreComparison !== 0) {
+                return -scoreComparison
+              }
+
+              return compareValues(left.createdAt, right.createdAt)
+            })
+        }
+      }
+
       throw new Error(`Unexpected review query: ${sql}`)
     }
   }
@@ -305,10 +332,22 @@ function createChallengeClient (metadataById) {
     },
     challenge: {
       async findMany (args) {
-        return args.where.id.in
-          .map((challengeId) => metadataById[String(challengeId)])
-          .filter(Boolean)
-          .map(cloneRow)
+        if (args.where && args.where.id && Array.isArray(args.where.id.in)) {
+          return args.where.id.in
+            .map((challengeId) => metadataById[String(challengeId)])
+            .filter(Boolean)
+            .map(cloneRow)
+        }
+
+        if (args.where && args.where.tags && Array.isArray(args.where.tags.hasSome)) {
+          const requestedTags = args.where.tags.hasSome.map((tag) => String(tag))
+          return Object.values(metadataById)
+            .filter((challenge) => Array.isArray(challenge.tags) &&
+              challenge.tags.some((tag) => requestedTags.includes(String(tag))))
+            .map(cloneRow)
+        }
+
+        return Object.values(metadataById).map(cloneRow)
       }
     }
   }
@@ -486,6 +525,166 @@ describe('marathon match rating engine unit tests', () => {
       should.equal(historyRow.oldRating, null)
       should.equal(historyRow.newRating, expectedTargetState.rating)
     })
+  })
+
+  it('rerateMmTrack should replay tagged Development Challenge and MM events under the configured destination track', async () => {
+    const priorChallengeId = 'ai-prior-development-challenge'
+    const targetChallengeId = 'ai-target-challenge'
+    const nonAiChallengeId = 'non-ai-challenge'
+    const ratingPath = normalizeRatingPathConfig({
+      name: 'AI',
+      track: 'DEVELOPMENT',
+      tags: ['AI', 'AI Exponential League']
+    })
+    const pathMetadata = {
+      [priorChallengeId]: {
+        id: priorChallengeId,
+        endDate: new Date('2024-05-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['AI'],
+        metadata: []
+      },
+      [targetChallengeId]: {
+        id: targetChallengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'DATA_SCIENCE' },
+        type: { name: 'MARATHON_MATCH' },
+        tags: ['AI Exponential League'],
+        metadata: []
+      },
+      [nonAiChallengeId]: {
+        id: nonAiChallengeId,
+        endDate: new Date('2024-07-01T00:00:00.000Z'),
+        track: { name: 'DATA_SCIENCE' },
+        type: { name: 'MARATHON_MATCH' },
+        tags: ['Other'],
+        metadata: []
+      }
+    }
+    const reviewRows = [
+      {
+        challengeId: priorChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2024-05-01T10:00:00.000Z')
+      },
+      {
+        challengeId: priorChallengeId,
+        userId: opponentUserId,
+        finalScore: 50,
+        placement: 2,
+        rated: true,
+        createdAt: new Date('2024-05-01T10:05:00.000Z')
+      },
+      {
+        submissionId: 'submission-target-ai',
+        memberId: targetUserId,
+        challengeId: targetChallengeId,
+        aggregateScore: 20,
+        reviewedDate: new Date('2024-06-01T10:00:00.000Z'),
+        createdAt: new Date('2024-06-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-ai',
+        memberId: opponentUserId,
+        challengeId: targetChallengeId,
+        aggregateScore: 10,
+        reviewedDate: new Date('2024-06-01T10:05:00.000Z'),
+        createdAt: new Date('2024-06-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:05:00.000Z')
+      },
+      {
+        submissionId: 'submission-target-non-ai',
+        memberId: targetUserId,
+        challengeId: nonAiChallengeId,
+        aggregateScore: 100,
+        reviewedDate: new Date('2024-07-01T10:00:00.000Z'),
+        createdAt: new Date('2024-07-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-07-01T09:00:00.000Z')
+      }
+    ]
+    const scoringConfig = {
+      relativeScoringEnabled: true,
+      scoreDirection: 'MAXIMIZE'
+    }
+    const priorParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 50)
+    ]
+    runQubitsRating(priorParticipants)
+    const seededTarget = priorParticipants.find((participant) => participant.coderId === String(targetUserId))
+    const seededOpponent = priorParticipants.find((participant) => participant.coderId === String(opponentUserId))
+    const targetParticipants = [
+      createParticipant(
+        targetUserId,
+        seededTarget.rating,
+        seededTarget.volatility,
+        seededTarget.numRatings,
+        20
+      ),
+      createParticipant(
+        opponentUserId,
+        seededOpponent.rating,
+        seededOpponent.volatility,
+        seededOpponent.numRatings,
+        10
+      )
+    ]
+    runQubitsRating(targetParticipants)
+    const expectedTargetState = targetParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createMmReviewDbClient(reviewRows)
+    const challengeClient = createChallengeClient(pathMetadata)
+    const mmDbClient = createMmDbClient({
+      [priorChallengeId]: scoringConfig,
+      [targetChallengeId]: scoringConfig,
+      [nonAiChallengeId]: scoringConfig
+    })
+
+    const result = await rerateMmTrack(
+      membersClient,
+      challengeClient,
+      mmDbClient,
+      reviewDbClient,
+      targetUserId,
+      targetChallengeId,
+      {
+        ratingPath
+      }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingPathChallengesProcessed, 2)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === 'AI'
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, targetChallengeId)
+    const nonAiHistoryRow = findHistoryRow(state.historyRows, targetUserId, nonAiChallengeId)
+    const maxRatingRow = state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
+
+    should.equal(statsRow.rating, expectedTargetState.rating)
+    should.equal(statsRow.volatility, expectedTargetState.volatility)
+    should.equal(statsRow.challenges, 2)
+    should.equal(statsRow.mostRecentEventDate.getTime(), pathMetadata[targetChallengeId].endDate.getTime())
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTargetState.rating)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, priorChallengeId), undefined)
+    should.equal(nonAiHistoryRow, undefined)
+    should.equal(maxRatingRow.track, 'DEVELOP')
+    should.equal(maxRatingRow.subTrack, 'AI')
   })
 
   it('rerateMmTrack should preserve a higher Develop memberMaxRating', async () => {

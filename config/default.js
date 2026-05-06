@@ -14,6 +14,33 @@ if (!communicationSecureFields.includes('email')) {
   communicationSecureFields.unshift('email')
 }
 
+const defaultRatingPaths = [
+  {
+    name: 'AI',
+    track: 'DATA_SCIENCE',
+    tags: ['AI', 'AI Exponential League']
+  }
+]
+
+/**
+ * Parse rating path JSON from the environment.
+ * @param {string|undefined} value raw JSON environment value
+ * @returns {Array<Object>} configured rating path entries
+ * @throws {Error} when RATING_PATHS is not a JSON array
+ */
+function parseRatingPaths (value) {
+  if (!value) {
+    return defaultRatingPaths
+  }
+
+  const parsedValue = JSON.parse(value)
+  if (!Array.isArray(parsedValue)) {
+    throw new Error('RATING_PATHS must be a JSON array')
+  }
+
+  return parsedValue
+}
+
 module.exports = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'debug',
   PORT: process.env.PORT || 3000,
@@ -126,6 +153,8 @@ module.exports = {
     : ['createdBy', 'updatedBy'],
   // Select stats read source: 'unified' (new tables) or 'legacy' (pre-refactor tables)
   STATS_READ_SOURCE: process.env.STATS_READ_SOURCE || 'unified',
+  // Configurable tag-based Development Challenge and Marathon Match rating paths.
+  RATING_PATHS: parseRatingPaths(process.env.RATING_PATHS),
 
   // Public group id
   PUBLIC_GROUP_ID: process.env.PUBLIC_GROUP_ID || '10',

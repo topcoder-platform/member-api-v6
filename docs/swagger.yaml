@@ -1832,6 +1832,9 @@ paths:
       description: >
         Triggers a re-rating pass for the member starting from the specified challenge.
         All subsequent challenges in the same track/type are also re-rated to maintain accuracy.
+        When `ratingName` is supplied, the named configurable tag-based rating path
+        is re-rated across tagged Development Challenge and Marathon Match events and
+        stored under the configured destination track / `{ratingName}`.
         Callable by admin users or M2M tokens with `rerate:member_stats` scope.
       security:
         - bearer: []
@@ -1851,6 +1854,9 @@ paths:
               challengeId:
                 type: string
                 description: UUID or legacy numeric challenge identifier that starts the rerate request.
+              ratingName:
+                type: string
+                description: Optional configured tag-based rating path name, for example `AI`.
               trackId:
                 type: string
                 enum:
@@ -2521,6 +2527,14 @@ definitions:
         type: string
       typeId:
         type: string
+      ratingName:
+        type: string
+        description: Configured tag-based rating path name when a custom path was used.
+      ratingTags:
+        type: array
+        items:
+          type: string
+        description: Challenge tags included by the configured rating path.
       challengesRerated:
         type: integer
         format: int32
@@ -2528,6 +2542,10 @@ definitions:
       challengesProcessed:
         type: integer
         format: int32
+      ratingPathChallengesProcessed:
+        type: integer
+        format: int32
+        description: Number of tagged path challenges replayed when a custom rating path was used.
       ratingsUpdated:
         type: integer
         format: int32

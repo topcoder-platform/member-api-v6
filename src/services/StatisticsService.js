@@ -17,6 +17,7 @@ const reviewDb = require('../common/reviewDb')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const { rerateMmTrack } = require('../ratings/mmRatingEngine')
+const { getConfiguredRatingPath } = require('../ratings/ratingPathConfig')
 const {
   TRACK_NAMES,
   TYPE_NAMES,
@@ -281,6 +282,43 @@ function resolveTrackName (trackId) {
  */
 function resolveTypeName (typeId) {
   return getCanonicalTypeName(typeId)
+}
+
+/**
+ * Resolve a configured rating path from the service config.
+ * @param {*} ratingName requested rating path name
+ * @returns {Object|null} normalized rating path config, or null when no name is supplied
+ * @throws {errors.BadRequestError} when the requested rating path is not configured
+ */
+function resolveConfiguredRatingPath (ratingName) {
+  if (_.isNil(ratingName) || String(ratingName).trim() === '') {
+    return null
+  }
+
+  const ratingPath = getConfiguredRatingPath(config.RATING_PATHS, ratingName)
+  if (!ratingPath) {
+    throw new errors.BadRequestError(`Rating path '${ratingName}' is not configured.`)
+  }
+
+  return ratingPath
+}
+
+/**
+ * Load the MM config client when available for configured rating paths.
+ * Development-only rating paths do not need MM_DB_URL, but any path containing
+ * Marathon Match events will fail later with an explicit MM configuration error.
+ * @returns {Object|null} MM config client or null when MM_DB_URL is absent
+ */
+function getOptionalMmClientForRatingPath () {
+  try {
+    return prismaManager.getMmClient()
+  } catch (error) {
+    if (error && String(error.message || '').includes('MM_DB_URL')) {
+      return null
+    }
+
+    throw error
+  }
 }
 
 function isLegacyMaxRatingPayload (value) {
@@ -1526,9 +1564,27 @@ function annotateUnifiedDimensionRows (rows, dimensionLookup) {
 }
 
 /**
- * Resolve optional unified stats filter parameters into stored UUID ids.
- * A missing filter remains undefined; an invalid non-empty filter resolves to undefined
- * with its corresponding has* flag still true so callers can short-circuit to no results.
+ * Resolve a stats type filter to the stored value.
+ * Known challenge types resolve to UUIDs, while custom rating path names
+ * are stored directly in memberStats.typeId and must remain queryable by name.
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @param {*} value raw request filter value
+ * @returns {string|undefined} stored filter value
+ */
+function resolveStatsTypeFilterValue (dimensionLookup, value) {
+  const resolvedValue = resolveTypeIdFromLookup(dimensionLookup, value)
+  if (resolvedValue) {
+    return resolvedValue
+  }
+
+  const rawValue = String(value || '').trim()
+  return rawValue || undefined
+}
+
+/**
+ * Resolve optional unified stats filter parameters into stored ids.
+ * Track filters resolve to challenge UUIDs. Type filters also accept custom
+ * rating path names that are stored directly as type ids.
  * @param {Object} query request query params
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @returns {Object} resolved filter payload
@@ -1541,7 +1597,7 @@ function resolveUnifiedDimensionFilters (query, dimensionLookup) {
     hasTrackFilter,
     hasTypeFilter,
     trackId: hasTrackFilter ? resolveTrackIdFromLookup(dimensionLookup, query.trackId) : undefined,
-    typeId: hasTypeFilter ? resolveTypeIdFromLookup(dimensionLookup, query.typeId) : undefined
+    typeId: hasTypeFilter ? resolveStatsTypeFilterValue(dimensionLookup, query.typeId) : undefined
   }
 }
 
@@ -1688,7 +1744,7 @@ async function getDistribution (query) {
   const hasTrackFilter = !_.isNil(query.track) && String(query.track).trim() !== ''
   const hasTypeFilter = !_.isNil(query.subTrack) && String(query.subTrack).trim() !== ''
   const trackId = hasTrackFilter ? resolveTrackIdFromLookup(dimensionLookup, query.track) : undefined
-  const typeId = hasTypeFilter ? resolveTypeIdFromLookup(dimensionLookup, query.subTrack) : undefined
+  const typeId = hasTypeFilter ? resolveStatsTypeFilterValue(dimensionLookup, query.subTrack) : undefined
 
   if ((hasTrackFilter && !trackId) || (hasTypeFilter && !typeId)) {
     throw new errors.NotFoundError('No member distribution statistics is found.')
@@ -2699,10 +2755,10 @@ refreshMemberStats.schema = {
 }
 
 /**
- * Trigger a DEVELOPMENT / Challenge or DATA_SCIENCE / MARATHON_MATCH re-rating pass
- * beginning with the supplied challenge. The relevant review-api results are
- * reprocessed in chronological order and persisted into the existing unified
- * rating tables for the member.
+ * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / MARATHON_MATCH, or configured
+ * tag-based rating path re-rating pass beginning with the supplied challenge.
+ * The relevant review-api results are reprocessed in chronological order and
+ * persisted into the existing unified rating tables for the member.
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
  * @param {Object} data the rerate payload whose challengeId is echoed back as a string
@@ -2716,13 +2772,26 @@ async function rerateMemberStats (currentUser, handle, data) {
     throw new errors.ForbiddenError('You are not allowed to update the member stats.')
   }
 
-  const trackId = resolveTrackName(payload.trackId || TRACK_NAMES.DEVELOP)
-  const typeId = resolveTypeName(payload.typeId || TYPE_NAMES.CHALLENGE)
+  const ratingPath = resolveConfiguredRatingPath(payload.ratingName)
+  const trackId = ratingPath ? ratingPath.trackName : resolveTrackName(payload.trackId || TRACK_NAMES.DEVELOP)
+  const typeId = ratingPath ? ratingPath.name : resolveTypeName(payload.typeId || TYPE_NAMES.CHALLENGE)
   const challengeClient = prismaManager.getChallengesClient()
   const reviewDbClient = getReviewDbClientOrThrow()
 
   let result
-  if (trackId === TRACK_NAMES.DEVELOP && typeId === TYPE_NAMES.CHALLENGE) {
+  if (ratingPath) {
+    result = await rerateMmTrack(
+      prisma,
+      challengeClient,
+      getOptionalMmClientForRatingPath(),
+      reviewDbClient,
+      member.userId,
+      payload.challengeId,
+      {
+        ratingPath
+      }
+    )
+  } else if (trackId === TRACK_NAMES.DEVELOP && typeId === TYPE_NAMES.CHALLENGE) {
     result = await rerateDevTrack(
       prisma,
       challengeClient,
@@ -2749,8 +2818,11 @@ async function rerateMemberStats (currentUser, handle, data) {
     challengeId: normalizeChallengeIdForResponse(payload.challengeId),
     trackId,
     typeId,
+    ratingName: ratingPath ? ratingPath.name : undefined,
+    ratingTags: ratingPath ? ratingPath.tags : undefined,
     challengesRerated: Math.max(result.challengesProcessed - 1, 0),
     challengesProcessed: result.challengesProcessed,
+    ratingPathChallengesProcessed: result.ratingPathChallengesProcessed,
     ratingsUpdated: result.ratingsUpdated
   }
 }
@@ -2760,6 +2832,7 @@ rerateMemberStats.schema = {
   handle: Joi.string().required(),
   data: Joi.object().keys({
     challengeId: Joi.alternatives().try(Joi.string().uuid(), Joi.number().integer().strict()).required(),
+    ratingName: Joi.string(),
     trackId: Joi.string().valid(TRACK_NAMES.DEVELOP, TRACK_NAMES.DATA_SCIENCE).insensitive(),
     typeId: Joi.string().valid(TYPE_NAMES.CHALLENGE, TYPE_NAMES.MARATHON_MATCH).insensitive()
   }).required()

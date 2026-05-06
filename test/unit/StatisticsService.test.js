@@ -255,6 +255,7 @@ function loadStatisticsService (options = {}) {
     },
     getClient: () => prismaStub,
     getSkillsClient: () => ({}),
+    getMmClient: () => options.mmClient || {},
     getChallengesClient: () => ({
       challenge: {
         findMany: async () => challengeRows
@@ -272,10 +273,10 @@ function loadStatisticsService (options = {}) {
   })
   setStubModule(joiPath, createJoiStub())
   setStubModule(developRatingEnginePath, {
-    rerateDevTrack: async () => ({})
+    rerateDevTrack: options.rerateDevTrack || (async () => ({}))
   })
   setStubModule(mmRatingEnginePath, {
-    rerateMmTrack: async () => ({})
+    rerateMmTrack: options.rerateMmTrack || (async () => ({}))
   })
 
   delete require.cache[servicePath]
@@ -328,6 +329,41 @@ describe('statistics service unit tests', () => {
       result.subTrack.should.equal('First2Finish')
       result.distribution.ratingRange0To099.should.equal(0)
       Object.values(result.distribution).every(value => value === 0).should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rerateMemberStats should route configured rating paths to the Marathon Match engine', async () => {
+    let capturedOptions
+    const { service, restore } = loadStatisticsService({
+      rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
+        capturedOptions = options
+        should.equal(String(userId), '88770025')
+        should.equal(challengeId, 'ai-target-challenge')
+        return {
+          challengesProcessed: 1,
+          ratingPathChallengesProcessed: 2,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateMemberStats({ isMachine: true }, 'devtest1400', {
+        challengeId: 'ai-target-challenge',
+        ratingName: 'AI'
+      })
+
+      should.exist(capturedOptions)
+      capturedOptions.ratingPath.name.should.equal('AI')
+      capturedOptions.ratingPath.tags.should.deep.equal(['AI', 'AI Exponential League'])
+      result.trackId.should.equal('DATA_SCIENCE')
+      result.typeId.should.equal('AI')
+      result.ratingName.should.equal('AI')
+      result.ratingTags.should.deep.equal(['AI', 'AI Exponential League'])
+      result.ratingPathChallengesProcessed.should.equal(2)
+      result.ratingsUpdated.should.equal(1)
     } finally {
       restore()
     }
