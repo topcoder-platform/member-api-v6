@@ -153,7 +153,7 @@ module.exports = {
     : ['createdBy', 'updatedBy'],
   // Select stats read source: 'unified' (new tables) or 'legacy' (pre-refactor tables)
   STATS_READ_SOURCE: process.env.STATS_READ_SOURCE || 'unified',
-  // Configurable tag-based Development Challenge and Marathon Match rating paths.
+  // Configurable tag- and skill-based Development Challenge and Marathon Match rating paths.
   RATING_PATHS: parseRatingPaths(process.env.RATING_PATHS),
 
   // Public group id

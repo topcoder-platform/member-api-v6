@@ -2,8 +2,8 @@
  * Re-rate unified member stats for rated DATA_SCIENCE / MARATHON_MATCH results.
  *
  * The engine reads final reviewSummation rows from review-api for Marathon
- * Match rerates. Configured rating paths also include tagged Development /
- * Challenge rows from challengeResult. In both cases it resolves challenge
+ * Match rerates. Configured rating paths also include tagged or skilled
+ * Development / Challenge rows from challengeResult. In both cases it resolves challenge
  * metadata from challenge-api, applies the Qubits math one challenge at a time,
  * and persists the target member's rating state into memberStats,
  * memberStatsHistory, and memberMaxRating.
@@ -1039,21 +1039,57 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
 }
 
 /**
+ * Build the Challenge API where clause for a configured rating path.
+ * Tags are queried as any-of filters. Skill ids are queried as an all-of
+ * combination by requiring a ChallengeSkill row for each configured skill id.
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Object} Prisma where clause for candidate challenges
+ */
+function buildRatingPathChallengeWhere (ratingPath) {
+  const conditions = []
+
+  if (ratingPath && Array.isArray(ratingPath.tags) && ratingPath.tags.length > 0) {
+    conditions.push({
+      tags: {
+        hasSome: ratingPath.tags
+      }
+    })
+  }
+
+  if (ratingPath && Array.isArray(ratingPath.skillIds) && ratingPath.skillIds.length > 0) {
+    ratingPath.skillIds.forEach((skillId) => {
+      conditions.push({
+        skills: {
+          some: {
+            skillId
+          }
+        }
+      })
+    })
+  }
+
+  if (conditions.length === 1) {
+    return conditions[0]
+  }
+
+  return {
+    AND: conditions
+  }
+}
+
+/**
  * Load completed, rated challenges that belong to a configured rating path.
- * The Challenge API stores tags on the challenge row, while rated state is kept
- * in metadata for some historical imports. Supported sources are Development /
- * Challenge and DATA_SCIENCE / MARATHON_MATCH.
+ * The Challenge API stores tags on the challenge row and skill links in
+ * ChallengeSkill rows, while rated state is kept in metadata for some historical
+ * imports. Supported sources are Development / Challenge and DATA_SCIENCE /
+ * MARATHON_MATCH.
  * @param {Object} challengeClient prisma challenge client
  * @param {Object} ratingPath normalized rating path config
  * @returns {Promise<Array<Object>>} ordered challenge entries for the rating path
  */
 async function fetchRatingPathHistory (challengeClient, ratingPath) {
   const challenges = await challengeClient.challenge.findMany({
-    where: {
-      tags: {
-        hasSome: ratingPath.tags
-      }
-    },
+    where: buildRatingPathChallengeWhere(ratingPath),
     select: {
       id: true,
       endDate: true,
@@ -1068,6 +1104,11 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
         }
       },
       tags: true,
+      skills: {
+        select: {
+          skillId: true
+        }
+      },
       metadata: {
         where: {
           name: {
@@ -1181,10 +1222,12 @@ function normalizeRatingPathScore (row, source, scoringConfig) {
 }
 
 /**
- * Re-rate one target member on a configured tag-based rating path.
- * The path is replayed from its first tagged challenge in memory so opponent
+ * Re-rate one target member on a configured rating path.
+ * The path is replayed from its first matching challenge in memory so opponent
  * states are correct even before their custom rating histories have been stored.
- * Only the requested target member's stats/history rows are persisted.
+ * Only the requested target member's stats/history rows are persisted. Tag
+ * predicates match any configured tag; skill predicates require every configured
+ * skill id to be present on the challenge.
  * @param {Object} membersClient prisma members client
  * @param {Object} challengeClient prisma challenge client
  * @param {Object} mmDbClient prisma Marathon Match client
@@ -1328,7 +1371,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
  * @param {string|number|BigInt} userId target member identifier
  * @param {string|number} fromChallengeId starting challenge identifier
  * @param {Object} options optional rerate controls
- * @param {Object} options.ratingPath normalized tag-based rating path config
+ * @param {Object} options.ratingPath normalized rating path config
  * @returns {Promise<Object>} rerate summary counts
  * @throws {Error} when required review or MM database connections are missing
  * @throws {errors.BadRequestError} when the start challenge is not a rated MM event for the member

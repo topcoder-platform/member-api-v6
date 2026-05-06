@@ -16,12 +16,30 @@ function normalizeRatingPathName (value) {
 }
 
 /**
+ * Normalize a challenge tag or skill id for case-insensitive matching.
+ * @param {*} value raw challenge tag or skill id
+ * @returns {string} normalized lookup key
+ */
+function normalizeRatingPathLookupValue (value) {
+  return String(value || '').trim().toUpperCase()
+}
+
+/**
  * Normalize a challenge tag for case-insensitive matching.
  * @param {*} value raw challenge tag
  * @returns {string} normalized tag key
  */
 function normalizeRatingPathTag (value) {
-  return String(value || '').trim().toUpperCase()
+  return normalizeRatingPathLookupValue(value)
+}
+
+/**
+ * Normalize a challenge skill id for case-insensitive matching.
+ * @param {*} value raw challenge skill id
+ * @returns {string} normalized skill id key
+ */
+function normalizeRatingPathSkillId (value) {
+  return normalizeRatingPathLookupValue(value)
 }
 
 /**
@@ -50,12 +68,14 @@ function normalizeRatingPathTrack (value) {
 
 /**
  * Convert one raw rating path config entry into the engine-ready shape.
- * Invalid entries and entries without tags are ignored by returning null.
- * @param {Object} entry raw config entry with name, tags, and optional track
+ * Invalid entries and entries without tags or skill ids are ignored by returning null.
+ * Tags are treated as any-of filters, while skill ids are treated as an all-of
+ * combination filter so a path can target challenges requiring multiple skills.
+ * @param {Object} entry raw config entry with name, optional tags, optional skillIds, and optional track
  * @returns {Object|null} normalized rating path config
  */
 function normalizeRatingPathConfig (entry) {
-  if (!entry || !entry.name || !Array.isArray(entry.tags)) {
+  if (!entry || !entry.name) {
     return null
   }
 
@@ -63,8 +83,11 @@ function normalizeRatingPathConfig (entry) {
   const trackName = normalizeRatingPathTrack(entry.track || entry.trackId || entry.trackName)
   const tags = []
   const normalizedTagSet = new Set()
+  const skillIds = []
+  const normalizedSkillIdSet = new Set()
 
-  entry.tags.forEach((tag) => {
+  const rawTags = Array.isArray(entry.tags) ? entry.tags : []
+  rawTags.forEach((tag) => {
     const trimmedTag = String(tag || '').trim()
     const normalizedTag = normalizeRatingPathTag(trimmedTag)
     if (!trimmedTag || normalizedTagSet.has(normalizedTag)) {
@@ -75,7 +98,19 @@ function normalizeRatingPathConfig (entry) {
     normalizedTagSet.add(normalizedTag)
   })
 
-  if (!name || !trackName || tags.length === 0) {
+  const rawSkillIds = Array.isArray(entry.skillIds) ? entry.skillIds : (Array.isArray(entry.skills) ? entry.skills : [])
+  rawSkillIds.forEach((skillId) => {
+    const trimmedSkillId = String(skillId || '').trim()
+    const normalizedSkillId = normalizeRatingPathSkillId(trimmedSkillId)
+    if (!trimmedSkillId || normalizedSkillIdSet.has(normalizedSkillId)) {
+      return
+    }
+
+    skillIds.push(trimmedSkillId)
+    normalizedSkillIdSet.add(normalizedSkillId)
+  })
+
+  if (!name || !trackName || (tags.length === 0 && skillIds.length === 0)) {
     return null
   }
 
@@ -84,7 +119,9 @@ function normalizeRatingPathConfig (entry) {
     normalizedName: normalizeRatingPathName(name),
     trackName,
     tags,
-    normalizedTags: Array.from(normalizedTagSet)
+    normalizedTags: Array.from(normalizedTagSet),
+    skillIds,
+    normalizedSkillIds: Array.from(normalizedSkillIdSet)
   }
 }
 
@@ -120,18 +157,47 @@ function getConfiguredRatingPath (entries, ratingName) {
 }
 
 /**
- * Check whether a challenge's tag array matches a configured rating path.
- * @param {Object} challenge challenge metadata containing a tags array
+ * Check whether a challenge's tags and skills match a configured rating path.
+ * Configured tags match when any tag is present. Configured skill ids match only
+ * when every configured skill id is present on the challenge.
+ * @param {Object} challenge challenge metadata containing tags and skills
  * @param {Object} ratingPath normalized rating path config
- * @returns {boolean} true when any configured tag is present on the challenge
+ * @returns {boolean} true when all configured rating path predicates match
  */
 function challengeMatchesRatingPath (challenge, ratingPath) {
-  if (!ratingPath || !Array.isArray(ratingPath.normalizedTags) || !Array.isArray(challenge && challenge.tags)) {
+  if (!ratingPath || !challenge) {
     return false
   }
 
-  const normalizedPathTags = new Set(ratingPath.normalizedTags)
-  return challenge.tags.some((tag) => normalizedPathTags.has(normalizeRatingPathTag(tag)))
+  const hasTagPredicates = Array.isArray(ratingPath.normalizedTags) && ratingPath.normalizedTags.length > 0
+  const hasSkillPredicates = Array.isArray(ratingPath.normalizedSkillIds) && ratingPath.normalizedSkillIds.length > 0
+  if (!hasTagPredicates && !hasSkillPredicates) {
+    return false
+  }
+
+  if (hasTagPredicates) {
+    if (!Array.isArray(challenge.tags)) {
+      return false
+    }
+
+    const normalizedPathTags = new Set(ratingPath.normalizedTags)
+    if (!challenge.tags.some((tag) => normalizedPathTags.has(normalizeRatingPathTag(tag)))) {
+      return false
+    }
+  }
+
+  if (hasSkillPredicates) {
+    if (!Array.isArray(challenge.skills)) {
+      return false
+    }
+
+    const challengeSkillIds = new Set(challenge.skills.map((skill) => normalizeRatingPathSkillId(skill && skill.skillId)))
+    if (!ratingPath.normalizedSkillIds.every((skillId) => challengeSkillIds.has(skillId))) {
+      return false
+    }
+  }
+
+  return true
 }
 
 module.exports = {
@@ -139,6 +205,7 @@ module.exports = {
   RATING_PATH_TRACK_NAMES,
   normalizeRatingPathName,
   normalizeRatingPathTag,
+  normalizeRatingPathSkillId,
   normalizeRatingPathTrack,
   normalizeRatingPathConfig,
   normalizeRatingPathConfigs,

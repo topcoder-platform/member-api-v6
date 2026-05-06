@@ -18,6 +18,7 @@ const developRatingEnginePath = path.resolve(__dirname, '../../src/ratings/devel
 const mmRatingEnginePath = path.resolve(__dirname, '../../src/ratings/mmRatingEngine.js')
 const prismaHelperPath = path.resolve(__dirname, '../../src/common/prismaHelper.js')
 const joiPath = require.resolve('joi')
+const configPath = require.resolve('config')
 
 function setStubModule (modulePath, exports) {
   delete require.cache[modulePath]
@@ -207,9 +208,11 @@ function loadStatisticsService (options = {}) {
     [developRatingEnginePath]: require.cache[developRatingEnginePath],
     [mmRatingEnginePath]: require.cache[mmRatingEnginePath],
     [prismaHelperPath]: require.cache[prismaHelperPath],
-    [joiPath]: require.cache[joiPath]
+    [joiPath]: require.cache[joiPath],
+    [configPath]: require.cache[configPath]
   }
   const originalFetch = global.fetch
+  const realConfig = originalEntries[configPath] ? originalEntries[configPath].exports : require('config')
 
   const statsDimensionHelper = createStatsDimensionHelperStub()
   const member = options.member || {
@@ -272,6 +275,10 @@ function loadStatisticsService (options = {}) {
     resolveChallengeResultRelation: async () => 'reviews."challengeResult"'
   })
   setStubModule(joiPath, createJoiStub())
+  setStubModule(configPath, {
+    ...realConfig,
+    RATING_PATHS: options.ratingPaths || realConfig.RATING_PATHS
+  })
   setStubModule(developRatingEnginePath, {
     rerateDevTrack: options.rerateDevTrack || (async () => ({}))
   })
@@ -362,6 +369,50 @@ describe('statistics service unit tests', () => {
       result.typeId.should.equal('AI')
       result.ratingName.should.equal('AI')
       result.ratingTags.should.deep.equal(['AI', 'AI Exponential League'])
+      result.ratingPathChallengesProcessed.should.equal(2)
+      result.ratingsUpdated.should.equal(1)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rerateMemberStats should expose configured rating path skill ids in the rerate summary', async () => {
+    const skillIds = [
+      '9d3f5b4d-0000-4000-8000-000000000001',
+      '9d3f5b4d-0000-4000-8000-000000000002'
+    ]
+    let capturedOptions
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [{
+        name: 'Java MySQL',
+        track: 'DEVELOPMENT',
+        skillIds
+      }],
+      rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
+        capturedOptions = options
+        should.equal(String(userId), '88770025')
+        should.equal(challengeId, 'java-mysql-target-challenge')
+        return {
+          challengesProcessed: 1,
+          ratingPathChallengesProcessed: 2,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateMemberStats({ isMachine: true }, 'devtest1400', {
+        challengeId: 'java-mysql-target-challenge',
+        ratingName: 'Java MySQL'
+      })
+
+      should.exist(capturedOptions)
+      capturedOptions.ratingPath.name.should.equal('Java MySQL')
+      capturedOptions.ratingPath.skillIds.should.deep.equal(skillIds)
+      result.trackId.should.equal('DEVELOP')
+      result.typeId.should.equal('Java MySQL')
+      result.ratingName.should.equal('Java MySQL')
+      result.ratingSkillIds.should.deep.equal(skillIds)
       result.ratingPathChallengesProcessed.should.equal(2)
       result.ratingsUpdated.should.equal(1)
     } finally {

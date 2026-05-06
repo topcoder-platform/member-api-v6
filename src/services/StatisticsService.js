@@ -2756,7 +2756,7 @@ refreshMemberStats.schema = {
 
 /**
  * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / MARATHON_MATCH, or configured
- * tag-based rating path re-rating pass beginning with the supplied challenge.
+ * tag- or skill-based rating path re-rating pass beginning with the supplied challenge.
  * The relevant review-api results are reprocessed in chronological order and
  * persisted into the existing unified rating tables for the member.
  * @param {Object} currentUser the user who performs operation
@@ -2820,6 +2820,7 @@ async function rerateMemberStats (currentUser, handle, data) {
     typeId,
     ratingName: ratingPath ? ratingPath.name : undefined,
     ratingTags: ratingPath ? ratingPath.tags : undefined,
+    ratingSkillIds: ratingPath ? ratingPath.skillIds : undefined,
     challengesRerated: Math.max(result.challengesProcessed - 1, 0),
     challengesProcessed: result.challengesProcessed,
     ratingPathChallengesProcessed: result.ratingPathChallengesProcessed,

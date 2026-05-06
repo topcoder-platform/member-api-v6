@@ -309,6 +309,61 @@ function createMmReviewDbClient (rows) {
   }
 }
 
+/**
+ * Check whether stub challenge metadata contains any requested tag.
+ * @param {Object} challenge challenge metadata in the test fixture
+ * @param {Array<string>} tags requested rating path tags
+ * @returns {boolean} true when any requested tag is present
+ */
+function challengeHasSomeTag (challenge, tags) {
+  if (!Array.isArray(challenge.tags) || !Array.isArray(tags)) {
+    return false
+  }
+
+  const requestedTags = tags.map((tag) => String(tag))
+  return challenge.tags.some((tag) => requestedTags.includes(String(tag)))
+}
+
+/**
+ * Check whether stub challenge metadata contains a requested skill id.
+ * @param {Object} challenge challenge metadata in the test fixture
+ * @param {string} skillId requested skill id
+ * @returns {boolean} true when the challenge has the skill
+ */
+function challengeHasSkill (challenge, skillId) {
+  if (!Array.isArray(challenge.skills)) {
+    return false
+  }
+
+  return challenge.skills.some((skill) => String(skill.skillId) === String(skillId))
+}
+
+/**
+ * Evaluate the subset of Prisma challenge where clauses used by rating path tests.
+ * @param {Object} challenge challenge metadata in the test fixture
+ * @param {Object} where Prisma-style where clause
+ * @returns {boolean} true when the challenge satisfies the where clause
+ */
+function matchesChallengeWhere (challenge, where) {
+  if (!where) {
+    return true
+  }
+
+  if (Array.isArray(where.AND)) {
+    return where.AND.every((condition) => matchesChallengeWhere(challenge, condition))
+  }
+
+  if (where.tags && Array.isArray(where.tags.hasSome) && !challengeHasSomeTag(challenge, where.tags.hasSome)) {
+    return false
+  }
+
+  if (where.skills && where.skills.some && !challengeHasSkill(challenge, where.skills.some.skillId)) {
+    return false
+  }
+
+  return true
+}
+
 function createChallengeClient (metadataById) {
   return {
     async $queryRaw (strings) {
@@ -340,10 +395,14 @@ function createChallengeClient (metadataById) {
         }
 
         if (args.where && args.where.tags && Array.isArray(args.where.tags.hasSome)) {
-          const requestedTags = args.where.tags.hasSome.map((tag) => String(tag))
           return Object.values(metadataById)
-            .filter((challenge) => Array.isArray(challenge.tags) &&
-              challenge.tags.some((tag) => requestedTags.includes(String(tag))))
+            .filter((challenge) => matchesChallengeWhere(challenge, args.where))
+            .map(cloneRow)
+        }
+
+        if (args.where && (Array.isArray(args.where.AND) || args.where.skills)) {
+          return Object.values(metadataById)
+            .filter((challenge) => matchesChallengeWhere(challenge, args.where))
             .map(cloneRow)
         }
 
@@ -685,6 +744,172 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(nonAiHistoryRow, undefined)
     should.equal(maxRatingRow.track, 'DEVELOP')
     should.equal(maxRatingRow.subTrack, 'AI')
+  })
+
+  it('rerateMmTrack should replay only challenges with every configured rating path skill', async () => {
+    const javaSkillId = 'java-skill-id'
+    const mysqlSkillId = 'mysql-skill-id'
+    const priorChallengeId = 'java-mysql-prior-challenge'
+    const targetChallengeId = 'java-mysql-target-challenge'
+    const javaOnlyChallengeId = 'java-only-challenge'
+    const ratingPath = normalizeRatingPathConfig({
+      name: 'Java MySQL',
+      track: 'DEVELOPMENT',
+      skillIds: [javaSkillId, mysqlSkillId]
+    })
+    const pathMetadata = {
+      [priorChallengeId]: {
+        id: priorChallengeId,
+        endDate: new Date('2024-05-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: [],
+        skills: [
+          { skillId: javaSkillId },
+          { skillId: mysqlSkillId }
+        ],
+        metadata: []
+      },
+      [targetChallengeId]: {
+        id: targetChallengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: [],
+        skills: [
+          { skillId: javaSkillId },
+          { skillId: mysqlSkillId }
+        ],
+        metadata: []
+      },
+      [javaOnlyChallengeId]: {
+        id: javaOnlyChallengeId,
+        endDate: new Date('2024-07-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: [],
+        skills: [
+          { skillId: javaSkillId }
+        ],
+        metadata: []
+      }
+    }
+    const reviewRows = [
+      {
+        challengeId: priorChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2024-05-01T10:00:00.000Z')
+      },
+      {
+        challengeId: priorChallengeId,
+        userId: opponentUserId,
+        finalScore: 50,
+        placement: 2,
+        rated: true,
+        createdAt: new Date('2024-05-01T10:05:00.000Z')
+      },
+      {
+        challengeId: targetChallengeId,
+        userId: targetUserId,
+        finalScore: 80,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2024-06-01T10:00:00.000Z')
+      },
+      {
+        challengeId: targetChallengeId,
+        userId: opponentUserId,
+        finalScore: 70,
+        placement: 2,
+        rated: true,
+        createdAt: new Date('2024-06-01T10:05:00.000Z')
+      },
+      {
+        challengeId: javaOnlyChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2024-07-01T10:00:00.000Z')
+      },
+      {
+        challengeId: javaOnlyChallengeId,
+        userId: opponentUserId,
+        finalScore: 30,
+        placement: 2,
+        rated: true,
+        createdAt: new Date('2024-07-01T10:05:00.000Z')
+      }
+    ]
+    const priorParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 50)
+    ]
+    runQubitsRating(priorParticipants)
+    const seededTarget = priorParticipants.find((participant) => participant.coderId === String(targetUserId))
+    const seededOpponent = priorParticipants.find((participant) => participant.coderId === String(opponentUserId))
+    const targetParticipants = [
+      createParticipant(
+        targetUserId,
+        seededTarget.rating,
+        seededTarget.volatility,
+        seededTarget.numRatings,
+        80
+      ),
+      createParticipant(
+        opponentUserId,
+        seededOpponent.rating,
+        seededOpponent.volatility,
+        seededOpponent.numRatings,
+        70
+      )
+    ]
+    runQubitsRating(targetParticipants)
+    const expectedTargetState = targetParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createMmReviewDbClient(reviewRows)
+    const challengeClient = createChallengeClient(pathMetadata)
+    const mmDbClient = createMmDbClient({})
+
+    const result = await rerateMmTrack(
+      membersClient,
+      challengeClient,
+      mmDbClient,
+      reviewDbClient,
+      targetUserId,
+      targetChallengeId,
+      {
+        ratingPath
+      }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingPathChallengesProcessed, 2)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === 'Java MySQL'
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, targetChallengeId)
+    const javaOnlyHistoryRow = findHistoryRow(state.historyRows, targetUserId, javaOnlyChallengeId)
+
+    should.equal(statsRow.rating, expectedTargetState.rating)
+    should.equal(statsRow.volatility, expectedTargetState.volatility)
+    should.equal(statsRow.challenges, 2)
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTargetState.rating)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, priorChallengeId), undefined)
+    should.equal(javaOnlyHistoryRow, undefined)
   })
 
   it('rerateMmTrack should preserve a higher Develop memberMaxRating', async () => {

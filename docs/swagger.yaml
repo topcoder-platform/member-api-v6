@@ -1832,9 +1832,10 @@ paths:
       description: >
         Triggers a re-rating pass for the member starting from the specified challenge.
         All subsequent challenges in the same track/type are also re-rated to maintain accuracy.
-        When `ratingName` is supplied, the named configurable tag-based rating path
-        is re-rated across tagged Development Challenge and Marathon Match events and
-        stored under the configured destination track / `{ratingName}`.
+        When `ratingName` is supplied, the named configurable rating path
+        is re-rated across matching Development Challenge and Marathon Match events and
+        stored under the configured destination track / `{ratingName}`. Rating paths can
+        match any configured challenge tag and/or require every configured challenge skill ID.
         Callable by admin users or M2M tokens with `rerate:member_stats` scope.
       security:
         - bearer: []
@@ -1856,7 +1857,7 @@ paths:
                 description: UUID or legacy numeric challenge identifier that starts the rerate request.
               ratingName:
                 type: string
-                description: Optional configured tag-based rating path name, for example `AI`.
+                description: Optional configured rating path name, for example `AI` or `Java MySQL`.
               trackId:
                 type: string
                 enum:
@@ -2529,12 +2530,17 @@ definitions:
         type: string
       ratingName:
         type: string
-        description: Configured tag-based rating path name when a custom path was used.
+        description: Configured rating path name when a custom path was used.
       ratingTags:
         type: array
         items:
           type: string
         description: Challenge tags included by the configured rating path.
+      ratingSkillIds:
+        type: array
+        items:
+          type: string
+        description: Challenge skill IDs included by the configured rating path. All listed skills are required on a challenge.
       challengesRerated:
         type: integer
         format: int32

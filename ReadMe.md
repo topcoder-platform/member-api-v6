@@ -113,7 +113,7 @@ The following parameters can be set in config files or in env variables:
 - MISC_SECURE_FIELDS: Misc identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATISTICS_SECURE_FIELDS: Member Statistics identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATS_READ_SOURCE: Controls stats read backend, `unified` (default, new tables) or `legacy` (pre-refactor tables)
-- RATING_PATHS: JSON array of tag-based Development Challenge and Marathon Match rating paths. Each entry has `name`, `tags`, and optional `track` (`DATA_SCIENCE`, `DEVELOP`, or `DEVELOPMENT`); defaults to `[{"name":"AI","track":"DATA_SCIENCE","tags":["AI","AI Exponential League"]}]`. Re-rate a path by passing `ratingName` to `POST /members/{handle}/stats/rerate`; rows are stored under `{track} / {name}` in unified stats.
+- RATING_PATHS: JSON array of tag- and skill-based Development Challenge and Marathon Match rating paths. Each entry has `name`, optional `tags`, optional `skillIds`, and optional `track` (`DATA_SCIENCE`, `DEVELOP`, or `DEVELOPMENT`); at least one of `tags` or `skillIds` is required. Tags match any listed challenge tag, while skill IDs require every listed challenge skill. Defaults to `[{"name":"AI","track":"DATA_SCIENCE","tags":["AI","AI Exponential League"]}]`. Re-rate a path by passing `ratingName` to `POST /members/{handle}/stats/rerate`; rows are stored under `{track} / {name}` in unified stats.
 - HEALTH_CHECK_TIMEOUT: health check timeout in milliseconds
 
 Set the following environment variables used by bus API to get TC M2M token (use 'set' insted of 'export' for Windows OS):
@@ -137,6 +137,59 @@ The following test parameters can be set in config file or in env variables:
 - M2M_READ_ACCESS_TOKEN: M2M read access token
 - M2M_UPDATE_ACCESS_TOKEN: M2M update (including 'delete') access token
 - S3_ENDPOINT: endpoint of AWS S3 API, for unit and e2e test only; default to `localhost:9000`
+
+## Rating Path Operations
+
+Historical rating paths are configured with `RATING_PATHS`. The default AI path is:
+
+```json
+[
+  {
+    "name": "AI",
+    "track": "DATA_SCIENCE",
+    "tags": ["AI", "AI Exponential League"]
+  }
+]
+```
+
+The `track` value controls where the rating is stored in unified stats. Use `DATA_SCIENCE` to store rows under `DATA_SCIENCE / AI`, or `DEVELOP` / `DEVELOPMENT` to store rows under `DEVELOP / AI`. The rating engine includes both Marathon Match results and `challenge` type Development Challenge results when the challenges match the configured tags or skill IDs.
+
+To re-run a configured rating path for one member, call the member stats rerate endpoint with `ratingName`:
+
+```http
+POST /v6/members/{handle}/stats/rerate
+Content-Type: application/json
+
+{
+  "challengeId": "earliest-tagged-challenge-id-for-that-member",
+  "ratingName": "AI"
+}
+```
+
+The request requires an admin token or an M2M token with `rerate:member_stats` or `all:user_profiles`. Use the earliest matching challenge the member competed in when you want complete rating history for the path. If a later challenge is supplied, prior matching events can still influence the calculated rating during replay, but persisted history starts at the supplied challenge.
+
+To view one member's rating and history for a `DATA_SCIENCE` path:
+
+```http
+GET /v6/members/{handle}/stats?trackId=DATA_SCIENCE&typeId=AI
+GET /v6/members/{handle}/stats/history?trackId=DATA_SCIENCE&typeId=AI
+```
+
+To view one member's rating and history for a `DEVELOPMENT` path, use the canonical unified track name:
+
+```http
+GET /v6/members/{handle}/stats?trackId=DEVELOP&typeId=AI
+GET /v6/members/{handle}/stats/history?trackId=DEVELOP&typeId=AI
+```
+
+To view aggregate rating distribution data:
+
+```http
+GET /v6/members/stats/distribution?track=DATA_SCIENCE&subTrack=AI
+GET /v6/members/stats/distribution?track=DEVELOP&subTrack=AI
+```
+
+There is no list endpoint that returns every member with a specific custom rating type. To fully backfill a new rating, run a script or job that finds members who participated in matching challenges and calls the rerate endpoint once per member with that member's earliest matching challenge. To inspect the complete current list without adding an endpoint, query `members.memberStats` directly for the resolved track ID and `typeId = 'AI'`.
 
 ## AWS S3 Setup
 Go to https://console.aws.amazon.com/ and login. Choose S3 from Service folder and click `Create bucket`. Following the instruction to create S3 bucket.
