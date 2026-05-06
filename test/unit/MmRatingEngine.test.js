@@ -19,6 +19,8 @@ const DEVELOP_TRACK_ID = 'track-develop-id'
 const DATA_SCIENCE_TRACK_ID = 'track-data-science-id'
 const CHALLENGE_TYPE_ID = 'type-challenge-id'
 const MARATHON_MATCH_TYPE_ID = 'type-marathon-match-id'
+const AI_RATING_TYPE_ID = 'rating-path-ai'
+const JAVA_MYSQL_RATING_TYPE_ID = 'rating-path-java-mysql'
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
@@ -365,6 +367,11 @@ function matchesChallengeWhere (challenge, where) {
 }
 
 function createChallengeClient (metadataById) {
+  const typeRows = [
+    { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+    { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+  ]
+
   return {
     async $queryRaw (strings) {
       const sql = Array.isArray(strings) ? strings.join('') : String(strings)
@@ -377,13 +384,40 @@ function createChallengeClient (metadataById) {
       }
 
       if (sql.includes('FROM "ChallengeType"')) {
-        return [
-          { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
-          { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
-        ]
+        return typeRows.map(cloneRow)
       }
 
       throw new Error(`Unexpected challenge lookup query: ${sql}`)
+    },
+    async $queryRawUnsafe (sql, ...params) {
+      const normalizedName = params[0]
+      if (sql.includes('SELECT "id"') && sql.includes('FROM "ChallengeType"')) {
+        return typeRows
+          .filter((row) =>
+            String(row.name).toUpperCase() === normalizedName ||
+            String(row.abbreviation).toUpperCase() === normalizedName
+          )
+          .map(row => ({ id: row.id }))
+      }
+
+      if (sql.includes('INSERT INTO "ChallengeType"')) {
+        const row = {
+          id: params[0],
+          name: params[1],
+          abbreviation: params[3],
+          legacyId: null,
+          isTask: false
+        }
+        const existingIndex = typeRows.findIndex(existing => existing.id === row.id)
+        if (existingIndex >= 0) {
+          typeRows[existingIndex] = row
+        } else {
+          typeRows.push(row)
+        }
+        return [{ id: row.id }]
+      }
+
+      throw new Error(`Unexpected challenge raw query: ${sql}`)
     },
     challenge: {
       async findMany (args) {
@@ -728,7 +762,7 @@ describe('marathon match rating engine unit tests', () => {
     const statsRow = state.statsRows.find((row) =>
       String(row.userId) === String(targetUserId) &&
       row.trackId === DEVELOP_TRACK_ID &&
-      row.typeId === 'AI'
+      row.typeId === AI_RATING_TYPE_ID
     )
     const historyRow = findHistoryRow(state.historyRows, targetUserId, targetChallengeId)
     const nonAiHistoryRow = findHistoryRow(state.historyRows, targetUserId, nonAiChallengeId)
@@ -898,7 +932,7 @@ describe('marathon match rating engine unit tests', () => {
     const statsRow = state.statsRows.find((row) =>
       String(row.userId) === String(targetUserId) &&
       row.trackId === DEVELOP_TRACK_ID &&
-      row.typeId === 'Java MySQL'
+      row.typeId === JAVA_MYSQL_RATING_TYPE_ID
     )
     const historyRow = findHistoryRow(state.historyRows, targetUserId, targetChallengeId)
     const javaOnlyHistoryRow = findHistoryRow(state.historyRows, targetUserId, javaOnlyChallengeId)

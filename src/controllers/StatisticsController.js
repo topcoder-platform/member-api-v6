@@ -85,6 +85,17 @@ async function refreshMemberStats (req, res) {
 }
 
 /**
+ * Trigger all applicable rating updates for submitters on a completed challenge.
+ * Callable by admin users or M2M tokens with the rerate:member_stats scope.
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function rerateChallengeSubmitterRatings (req, res) {
+  const result = await service.rerateChallengeSubmitterRatings(req.authUser, req.body)
+  res.send(result)
+}
+
+/**
  * Trigger a re-rating pass for the specified member from the requested challenge onward.
  * Callable by admin users or M2M tokens with the rerate:member_stats scope.
  * @param {Object} req the request
@@ -144,6 +155,7 @@ module.exports = {
   createMemberStats,
   partiallyUpdateMemberStats,
   refreshMemberStats,
+  rerateChallengeSubmitterRatings,
   rerateMemberStats,
   getMemberSkills,
   createMemberSkills,

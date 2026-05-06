@@ -222,6 +222,9 @@ function loadStatisticsService (options = {}) {
   }
   const prismaStub = options.prismaStub || {
     $queryRaw: async () => [],
+    member: {
+      findMany: async () => []
+    },
     memberStats: {
       findFirst: async () => null,
       findMany: async () => []
@@ -242,9 +245,11 @@ function loadStatisticsService (options = {}) {
     getMemberByHandle: async () => member,
     getAllowedGroupIds: async () => options.groupIds || ['10'],
     canManageMember: () => true,
+    hasAdminRole: () => true,
     bigIntToNumber: (value) => (value ? Number(value) : null)
   })
   setStubModule(loggerPath, {
+    debug: () => {},
     info: () => {},
     warn: () => {},
     error: () => {},
@@ -261,6 +266,7 @@ function loadStatisticsService (options = {}) {
     getMmClient: () => options.mmClient || {},
     getChallengesClient: () => ({
       challenge: {
+        findFirst: async () => options.challengeRow || null,
         findMany: async () => challengeRows
       },
       ChallengeWinner: {
@@ -283,6 +289,8 @@ function loadStatisticsService (options = {}) {
     rerateDevTrack: options.rerateDevTrack || (async () => ({}))
   })
   setStubModule(mmRatingEnginePath, {
+    fetchRatingPathParticipantsForChallenge: options.fetchRatingPathParticipantsForChallenge || (async () => ({ participantRows: [] })),
+    resolveRatingPathParticipantId: options.resolveRatingPathParticipantId || ((row) => global.BigInt(row.memberId || row.userId)),
     rerateMmTrack: options.rerateMmTrack || (async () => ({}))
   })
 
@@ -336,6 +344,49 @@ describe('statistics service unit tests', () => {
       result.subTrack.should.equal('First2Finish')
       result.distribution.ratingRange0To099.should.equal(0)
       Object.values(result.distribution).every(value => value === 0).should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getDistribution should map grouped rating rows into supported buckets', async () => {
+    let queryCalls = 0
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => {
+          queryCalls += 1
+          return [
+            { rangeStart: 0, count: 3 },
+            { rangeStart: 100, count: 5 },
+            { rangeStart: 3900, count: 2 },
+            { rangeStart: 4000, count: 9 }
+          ]
+        },
+        memberStats: {
+          findFirst: async () => {
+            throw new Error('findFirst should not run when rated distribution rows exist')
+          },
+          findMany: async () => []
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      }
+    })
+
+    try {
+      const result = await service.getDistribution({
+        track: 'DATA_SCIENCE',
+        subTrack: 'AI'
+      })
+
+      queryCalls.should.equal(1)
+      result.track.should.equal('DATA_SCIENCE')
+      result.subTrack.should.equal('AI')
+      result.distribution.ratingRange0To099.should.equal(3)
+      result.distribution.ratingRange100To199.should.equal(5)
+      result.distribution.ratingRange3900To3999.should.equal(2)
+      should.not.exist(result.distribution.ratingRange4000To4099)
     } finally {
       restore()
     }
@@ -415,6 +466,92 @@ describe('statistics service unit tests', () => {
       result.ratingSkillIds.should.deep.equal(skillIds)
       result.ratingPathChallengesProcessed.should.equal(2)
       result.ratingsUpdated.should.equal(1)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rerateChallengeSubmitterRatings should rerate native and matching named ratings for every submitter', async () => {
+    const devRerateCalls = []
+    const namedRerateCalls = []
+    const { service, restore } = loadStatisticsService({
+      challengeRow: {
+        id: 'ai-target-challenge',
+        status: 'COMPLETED',
+        endDate: new Date('2026-01-15T00:00:00.000Z'),
+        trackId: 'track-dev-id',
+        typeId: 'type-challenge-id',
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['AI'],
+        skills: [],
+        metadata: []
+      },
+      reviewRows: [
+        { challengeId: 'ai-target-challenge', userId: '101', finalScore: 98, placement: 1 },
+        { challengeId: 'ai-target-challenge', userId: '102', finalScore: 87, placement: 2 },
+        { challengeId: 'ai-target-challenge', userId: '101', finalScore: 96, placement: 3 }
+      ],
+      prismaStub: {
+        member: {
+          findMany: async ({ where }) => where.userId.in.map((userId) => ({ userId }))
+        }
+      },
+      rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, challengeId) => {
+        devRerateCalls.push({
+          userId: String(userId),
+          challengeId
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      },
+      rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
+        namedRerateCalls.push({
+          userId: String(userId),
+          challengeId,
+          ratingName: options.ratingPath.name
+        })
+        return {
+          challengesProcessed: 1,
+          ratingPathChallengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateChallengeSubmitterRatings({ isMachine: true }, {
+        challengeId: 'ai-target-challenge'
+      })
+
+      result.rerated.should.equal(true)
+      result.membersProcessed.should.equal(2)
+      result.ratingsAttempted.should.equal(4)
+      result.ratingsUpdated.should.equal(4)
+      result.participantIds.should.deep.equal(['101', '102'])
+      result.ratings.should.deep.equal([
+        {
+          trackId: 'DEVELOP',
+          typeId: 'Challenge'
+        },
+        {
+          trackId: 'DATA_SCIENCE',
+          typeId: 'AI',
+          ratingName: 'AI',
+          ratingTags: ['AI', 'AI Exponential League'],
+          ratingSkillIds: []
+        }
+      ])
+      devRerateCalls.should.deep.equal([
+        { userId: '101', challengeId: 'ai-target-challenge' },
+        { userId: '102', challengeId: 'ai-target-challenge' }
+      ])
+      namedRerateCalls.should.deep.equal([
+        { userId: '101', challengeId: 'ai-target-challenge', ratingName: 'AI' },
+        { userId: '102', challengeId: 'ai-target-challenge', ratingName: 'AI' }
+      ])
     } finally {
       restore()
     }

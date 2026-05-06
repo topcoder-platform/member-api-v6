@@ -152,7 +152,15 @@ Historical rating paths are configured with `RATING_PATHS`. The default AI path 
 ]
 ```
 
-The `track` value controls where the rating is stored in unified stats. Use `DATA_SCIENCE` to store rows under `DATA_SCIENCE / AI`, or `DEVELOP` / `DEVELOPMENT` to store rows under `DEVELOP / AI`. The rating engine includes both Marathon Match results and `challenge` type Development Challenge results when the challenges match the configured tags or skill IDs.
+The `track` value controls where the rating is stored in unified stats. Use `DATA_SCIENCE` to store rows under `DATA_SCIENCE / AI`, or `DEVELOP` / `DEVELOPMENT` to store rows under `DEVELOP / AI`. The rating engine includes both Marathon Match results and `challenge` type Development Challenge results when the challenges match the configured tags or skill IDs. When a configured rating name does not already exist as a `ChallengeType`, rerate creates a deterministic custom type row so unified `memberStats` foreign keys remain valid.
+
+### Rating Calculation Details
+
+Native Development Challenge ratings, native Marathon Match ratings, and configured rating paths all use the shared Qubits implementation in `src/ratings/qubitsAlgorithm.js`, following Topcoder's documented rating algorithm: https://www.topcoder.com/thrive/articles/Ratings.
+
+- Initial user state: a member without prior ratings starts the replay as `{ rating: 0, volatility: 0, numRatings: 0 }`, but the first calculation treats them as an unrated Qubits participant with baseline rating `1200` and volatility `515`. The first persisted rating is the calculated post-challenge rating, not a stored `1200` seed. First persisted volatility is forced to `385`.
+- Incremental rating changes: each rated challenge is replayed in event order. Previously rated participants are updated first using only the previously rated field, then unrated participants are rated against everyone in the challenge. Scores are converted into ranks, with higher normalized score ranked better and tied scores receiving the average tied rank. Expected rank starts at `0.5` and adds each comparison participant's win probability against the target: `0.5 * (erf((opponentRating - targetRating) / sqrt(2 * (opponentVolatility^2 + targetVolatility^2))) + 1)`. Expected and actual ranks are converted with `-normsinv((rank - 0.5) / participantCount)`. The target "performed as" value is `oldRating + challengeFactor * (actualPerformance - expectedPerformance)`. The raw new rating is `(oldRating + weight * performedAs) / (1 + weight)`, where `weight = 1 / (1 - (((0.60 - 0.18) / (timesPlayed + 1)) + 0.18)) - 1`, reduced by `10%` at ratings `>= 2000` and by `20%` above `2500`. The rating delta is capped to `150 + 1500 / (timesPlayed + 2)` before rounding.
+- Volatility: existing participants use their stored volatility in both win probability and challenge factor calculations. The challenge factor is `sqrt((sum(volatility^2) / participantCount) + (sum((rating - averageRating)^2) / (participantCount - 1)))` across comparison participants. After the capped rating change, new volatility is `sqrt(((newRating - oldRating)^2 / weight) + (oldVolatility^2 / (weight + 1)))`, rounded to an integer. Because `memberStatsHistory` does not store volatility, history-seeded rerates fall back to the default volatility `515` until replayed events produce updated volatility values.
 
 To re-run a configured rating path for one member, call the member stats rerate endpoint with `ratingName`:
 
@@ -167,6 +175,37 @@ Content-Type: application/json
 ```
 
 The request requires an admin token or an M2M token with `rerate:member_stats` or `all:user_profiles`. Use the earliest matching challenge the member competed in when you want complete rating history for the path. If a later challenge is supplied, prior matching events can still influence the calculated rating during replay, but persisted history starts at the supplied challenge.
+
+At challenge completion time, callers can rerate every submitter and every applicable rating dimension with the challenge-scoped endpoint:
+
+```http
+POST /v6/members/stats/rerate-challenge
+Content-Type: application/json
+
+{
+  "challengeId": "completed-challenge-id"
+}
+```
+
+The endpoint discovers submitters from review results, rerates the supported native track/type rating, and also rerates any configured named paths that match the challenge tags or skills. It requires an admin token or an M2M token with `rerate:member_stats` or `all:user_profiles`.
+
+To re-run a configured rating path for every member who participated in the configured challenge set, use the bulk script instead of the member-scoped API:
+
+```bash
+pnpm rerate-rating-path -- --rating-name AI --dry-run
+pnpm rerate-rating-path -- --rating-name AI --concurrency 5
+```
+
+The script discovers distinct user IDs from all rated challenges matching the configured path, then rerates each user from the start of the path so complete history is written without requiring individual handles or challenge IDs. It writes successfully processed user IDs to `rerateRatingPath.processedUserIds.json` by default.
+
+Useful script options:
+
+```bash
+pnpm rerate-rating-path -- --rating-name AI --limit 100
+pnpm rerate-rating-path -- --rating-name AI --user-id 12345
+pnpm rerate-rating-path -- --rating-name AI --user-ids 12345,67890
+pnpm rerate-rating-path -- --rating-name AI --processed-user-ids-path /tmp/ai-rerated-users.json
+```
 
 To view one member's rating and history for a `DATA_SCIENCE` path:
 
@@ -189,7 +228,7 @@ GET /v6/members/stats/distribution?track=DATA_SCIENCE&subTrack=AI
 GET /v6/members/stats/distribution?track=DEVELOP&subTrack=AI
 ```
 
-There is no list endpoint that returns every member with a specific custom rating type. To fully backfill a new rating, run a script or job that finds members who participated in matching challenges and calls the rerate endpoint once per member with that member's earliest matching challenge. To inspect the complete current list without adding an endpoint, query `members.memberStats` directly for the resolved track ID and `typeId = 'AI'`.
+There is no list endpoint that returns every member with a specific custom rating type. To inspect the complete current list without adding an endpoint, query `members.memberStats` directly for the resolved track ID and `typeId = 'AI'`.
 
 ## AWS S3 Setup
 Go to https://console.aws.amazon.com/ and login. Choose S3 from Service folder and click `Create bucket`. Following the instruction to create S3 bucket.

@@ -224,6 +224,7 @@ model memberStats {
   @@index([userId])
   @@index([trackId])
   @@index([typeId])
+  @@index([trackId, typeId, rating])
   @@index([userId, trackId, typeId])
   @@index([globalRank])
   @@index([countryRank])

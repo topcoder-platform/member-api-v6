@@ -15,7 +15,8 @@
     "test": "mocha -t 20000 test/unit/*.test.js --exit",
     "test:cov": "nyc --reporter=html --reporter=text npm test",
     "migrate-dynamo-data": "node src/scripts/migrate-dynamo-data.js",
-    "recalculate-member-stats": "node src/scripts/recalculateMemberStats.js"
+    "recalculate-member-stats": "node src/scripts/recalculateMemberStats.js",
+    "rerate-rating-path": "node src/scripts/rerateRatingPath.js"
   },
   "author": "TCSCODER",
   "license": "none",

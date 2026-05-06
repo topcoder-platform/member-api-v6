@@ -181,6 +181,15 @@ module.exports = {
       method: 'getDistribution'
     }
   },
+  '/members/stats/rerate-challenge': {
+    post: {
+      controller: 'StatisticsController',
+      method: 'rerateChallengeSubmitterRatings',
+      auth: 'jwt',
+      scopes: [STATS_RERATE, MEMBERS.ALL],
+      access: constants.ADMIN_ROLES
+    }
+  },
   '/members/:handle/stats/history': {
     get: {
       controller: 'StatisticsController',

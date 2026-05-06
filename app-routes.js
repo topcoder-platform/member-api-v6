@@ -86,9 +86,14 @@ module.exports = (app) => {
           })
         } else {
           actions.push((req, res, next) => {
+            if (!_.get(req, 'headers.authorization')) {
+              next()
+              return
+            }
+
             const interceptRes = {}
             interceptRes.status = () => interceptRes
-            interceptRes.json = () => interceptRes
+            interceptRes.json = () => next()
             interceptRes.send = () => next()
             authenticator(_.pick(config, ['AUTH_SECRET', 'VALID_ISSUERS']))(req, interceptRes, next)
           })

@@ -14,12 +14,16 @@
 const errors = require('../common/errors')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const {
+  clearChallengeDimensionLookupCache,
   loadChallengeDimensionLookup,
   resolveTrackIdFromLookup,
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
-const { challengeMatchesRatingPath } = require('./ratingPathConfig')
+const {
+  challengeMatchesRatingPath,
+  normalizeRatingPathName
+} = require('./ratingPathConfig')
 
 const TRACK_NAME = 'DATA_SCIENCE'
 const TYPE_NAME = 'MARATHON_MATCH'
@@ -112,9 +116,109 @@ function buildUserStateKey (userId) {
 }
 
 /**
+ * Build the deterministic ChallengeType id for a configured rating path.
+ * The unified stats tables enforce ChallengeType foreign keys, so custom rating
+ * names need stable dimension rows before memberStats can reference them.
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {string} deterministic custom ChallengeType id
+ */
+function buildRatingPathTypeId (ratingPath) {
+  const slug = normalizeRatingPathName(ratingPath && ratingPath.name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  return `rating-path-${slug || 'custom'}`
+}
+
+/**
+ * Find an existing ChallengeType row matching a configured rating path name.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Promise<string|undefined>} ChallengeType id when found
+ */
+async function findRatingPathTypeId (challengeClient, ratingPath) {
+  const normalizedName = normalizeRatingPathName(ratingPath && ratingPath.name)
+  if (!normalizedName || typeof challengeClient.$queryRawUnsafe !== 'function') {
+    return undefined
+  }
+
+  const rows = await challengeClient.$queryRawUnsafe(
+    `
+      SELECT "id"
+      FROM "ChallengeType"
+      WHERE UPPER("name") = $1
+         OR UPPER("abbreviation") = $1
+      ORDER BY CASE
+        WHEN UPPER("name") = $1 THEN 0
+        ELSE 1
+      END
+      LIMIT 1
+    `,
+    normalizedName
+  )
+
+  return rows && rows[0] ? String(rows[0].id) : undefined
+}
+
+/**
+ * Create or reuse the ChallengeType row needed by a configured rating path.
+ * The insert is deterministic and idempotent so concurrent rerate runs converge
+ * on the same custom type id.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Promise<string>} ChallengeType id for the rating path
+ * @throws {Error} when the challenge client cannot provision custom dimensions
+ */
+async function ensureRatingPathTypeId (challengeClient, ratingPath) {
+  const existingTypeId = await findRatingPathTypeId(challengeClient, ratingPath)
+  if (existingTypeId) {
+    return existingTypeId
+  }
+
+  if (typeof challengeClient.$queryRawUnsafe !== 'function') {
+    throw new Error(`Unable to provision ChallengeType for rating path '${ratingPath.name}'`)
+  }
+
+  const typeId = buildRatingPathTypeId(ratingPath)
+  const rows = await challengeClient.$queryRawUnsafe(
+    `
+      INSERT INTO "ChallengeType" (
+        "id",
+        "name",
+        "description",
+        "isActive",
+        "isTask",
+        "abbreviation",
+        "createdAt",
+        "createdBy",
+        "updatedAt",
+        "updatedBy"
+      )
+      VALUES ($1, $2, $3, true, false, $4, NOW(), $5, NOW(), $5)
+      ON CONFLICT ("id") DO UPDATE SET
+        "name" = EXCLUDED."name",
+        "description" = EXCLUDED."description",
+        "abbreviation" = EXCLUDED."abbreviation",
+        "updatedAt" = NOW(),
+        "updatedBy" = EXCLUDED."updatedBy"
+      RETURNING "id"
+    `,
+    typeId,
+    ratingPath.name,
+    `Configured rating path: ${ratingPath.name}`,
+    ratingPath.name,
+    RERATE_ACTOR
+  )
+
+  clearChallengeDimensionLookupCache()
+  return rows && rows[0] ? String(rows[0].id) : typeId
+}
+
+/**
  * Resolve the unified track/type identifiers used for MM rating rows.
- * Configured rating paths use the configured destination track and store the
- * rating path name directly as typeId.
+ * Configured rating paths use the configured destination track and a custom
+ * ChallengeType row named after the rating path.
  * @param {Object} challengeClient prisma challenge client
  * @param {Object} ratingPath normalized rating path config
  * @returns {Promise<{trackId: string, typeId: string, trackName: string, typeName: string}>} resolved unified ids
@@ -123,7 +227,9 @@ async function resolveUnifiedDimensionIds (challengeClient, ratingPath) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
   const trackName = ratingPath ? ratingPath.trackName : TRACK_NAME
   const trackId = resolveTrackIdFromLookup(dimensionLookup, trackName)
-  const typeId = ratingPath ? ratingPath.name : resolveTypeIdFromLookup(dimensionLookup, TYPE_NAME)
+  const typeId = ratingPath
+    ? (resolveTypeIdFromLookup(dimensionLookup, ratingPath.name) || await ensureRatingPathTypeId(challengeClient, ratingPath))
+    : resolveTypeIdFromLookup(dimensionLookup, TYPE_NAME)
 
   if (!trackId || !typeId) {
     throw new Error(`Unable to resolve unified dimension ids for ${trackName}/${ratingPath ? ratingPath.name : TYPE_NAME}`)
@@ -1528,5 +1634,8 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
 }
 
 module.exports = {
+  fetchRatingPathHistory,
+  fetchRatingPathParticipantsForChallenge,
+  resolveRatingPathParticipantId,
   rerateMmTrack
 }

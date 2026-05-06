@@ -16,8 +16,16 @@ const prismaHelper = require('../common/prismaHelper')
 const reviewDb = require('../common/reviewDb')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
-const { rerateMmTrack } = require('../ratings/mmRatingEngine')
-const { getConfiguredRatingPath } = require('../ratings/ratingPathConfig')
+const {
+  fetchRatingPathParticipantsForChallenge,
+  resolveRatingPathParticipantId,
+  rerateMmTrack
+} = require('../ratings/mmRatingEngine')
+const {
+  challengeMatchesRatingPath,
+  getConfiguredRatingPath,
+  normalizeRatingPathConfigs
+} = require('../ratings/ratingPathConfig')
 const {
   TRACK_NAMES,
   TYPE_NAMES,
@@ -44,11 +52,15 @@ const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxR
 const LEGACY_STATS_READ_SOURCE = 'legacy'
 const SUPPORTED_STATS_READ_SOURCES = ['unified', LEGACY_STATS_READ_SOURCE]
 const DISTRIBUTION_RANGES = _.range(0, 4000, 100)
+const DISTRIBUTION_MIN_RATING = 0
+const DISTRIBUTION_MAX_RATING_EXCLUSIVE = 4000
 const configuredStatsReadSource = _.toLower(String(config.STATS_READ_SOURCE || 'unified').trim())
 if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
   logger.warn(`Invalid STATS_READ_SOURCE='${config.STATS_READ_SOURCE}'. Falling back to 'unified'.`)
 }
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
+const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
+const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -319,6 +331,402 @@ function getOptionalMmClientForRatingPath () {
 
     throw error
   }
+}
+
+/**
+ * Convert a member identifier into the BigInt shape used by Prisma relations.
+ * @param {*} value raw member user id
+ * @returns {BigInt} normalized user id
+ */
+function toBigIntUserId (value) {
+  if (Object.prototype.toString.call(value) === '[object BigInt]') {
+    return value
+  }
+
+  if (typeof global.BigInt !== 'function') {
+    throw new Error('BigInt is not supported in this runtime')
+  }
+
+  return global.BigInt(String(value).trim())
+}
+
+/**
+ * Convert a user id into a stable response/cache key.
+ * @param {*} value raw user id
+ * @returns {string} string user id
+ */
+function stringifyUserId (value) {
+  return String(value)
+}
+
+/**
+ * Parse a boolean-like rating metadata value.
+ * @param {*} value raw metadata value
+ * @returns {boolean|undefined} parsed boolean or undefined when not boolean-like
+ */
+function parseBooleanLike (value) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') {
+      return true
+    }
+    if (normalized === 'false') {
+      return false
+    }
+  }
+
+  return undefined
+}
+
+/**
+ * Resolve whether challenge metadata allows rating updates.
+ * Missing rating metadata defaults to rated, matching the rating engines'
+ * historical replay behavior for older challenges.
+ * @param {Object} challenge challenge metadata row
+ * @returns {boolean} true when the challenge should be considered rated
+ */
+function isChallengeRatingEnabled (challenge) {
+  const directRated = parseBooleanLike(_.get(challenge, 'isRated'))
+  if (directRated !== undefined) {
+    return directRated
+  }
+
+  const legacyRated = parseBooleanLike(_.get(challenge, 'rated'))
+  if (legacyRated !== undefined) {
+    return legacyRated
+  }
+
+  const metadata = _.get(challenge, 'metadata')
+  if (!Array.isArray(metadata)) {
+    return true
+  }
+
+  for (const entry of metadata) {
+    const name = String(_.get(entry, 'name') || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+    const value = parseBooleanLike(_.get(entry, 'value'))
+
+    if (value === undefined) {
+      continue
+    }
+
+    if (name === 'UNRATED') {
+      return !value
+    }
+
+    if (name === 'RATED' || name === 'ISRATED' || name === 'IS_RATED') {
+      return value
+    }
+  }
+
+  return true
+}
+
+/**
+ * Load challenge metadata needed to decide which ratings apply.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {string|number} challengeId challenge UUID or legacy numeric id
+ * @returns {Promise<Object|null>} challenge metadata or null when absent
+ */
+async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
+  const normalizedChallengeId = String(challengeId || '').trim()
+  if (!normalizedChallengeId) {
+    return null
+  }
+
+  const numericChallengeId = /^\d+$/.test(normalizedChallengeId)
+    ? Number(normalizedChallengeId)
+    : null
+  const where = numericChallengeId && Number.isSafeInteger(numericChallengeId)
+    ? {
+      OR: [
+        { id: normalizedChallengeId },
+        { legacyId: numericChallengeId },
+        {
+          legacyRecord: {
+            is: {
+              legacySystemId: numericChallengeId
+            }
+          }
+        }
+      ]
+    }
+    : { id: normalizedChallengeId }
+
+  return challengeClient.challenge.findFirst({
+    where,
+    select: {
+      id: true,
+      status: true,
+      endDate: true,
+      trackId: true,
+      typeId: true,
+      track: {
+        select: {
+          name: true
+        }
+      },
+      type: {
+        select: {
+          name: true
+        }
+      },
+      tags: true,
+      skills: {
+        select: {
+          skillId: true
+        }
+      },
+      metadata: {
+        where: {
+          name: {
+            in: ['rated', 'isRated', 'unrated']
+          }
+        },
+        select: {
+          name: true,
+          value: true
+        }
+      }
+    }
+  })
+}
+
+/**
+ * Resolve the rating source supported by the engines for a challenge.
+ * @param {Object} challenge challenge metadata row
+ * @returns {string|null} source identifier or null when unsupported
+ */
+function resolveChallengeRatingSource (challenge) {
+  const trackName = getCanonicalTrackName(_.get(challenge, 'track.name') || _.get(challenge, 'trackId'))
+  const typeName = getCanonicalTypeName(_.get(challenge, 'type.name') || _.get(challenge, 'typeId'))
+
+  if (trackName === TRACK_NAMES.DEVELOP && typeName === TYPE_NAMES.CHALLENGE) {
+    return RATING_SOURCE_DEVELOPMENT
+  }
+
+  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.MARATHON_MATCH) {
+    return RATING_SOURCE_MARATHON_MATCH
+  }
+
+  return null
+}
+
+/**
+ * Build the native track/type rating job for a supported challenge.
+ * @param {Object} challenge challenge metadata row
+ * @param {string|null} source resolved challenge rating source
+ * @returns {Object|null} rating job or null when unsupported/unrated
+ */
+function buildBaseRatingJob (challenge, source) {
+  if (!source || !isChallengeRatingEnabled(challenge)) {
+    return null
+  }
+
+  if (source === RATING_SOURCE_DEVELOPMENT) {
+    return {
+      source,
+      trackId: TRACK_NAMES.DEVELOP,
+      typeId: TYPE_NAMES.CHALLENGE
+    }
+  }
+
+  if (source === RATING_SOURCE_MARATHON_MATCH) {
+    return {
+      source,
+      trackId: TRACK_NAMES.DATA_SCIENCE,
+      typeId: TYPE_NAMES.MARATHON_MATCH
+    }
+  }
+
+  return null
+}
+
+/**
+ * Build all rating jobs that apply to one completed challenge.
+ * The base track/type job is included for supported rated challenges, and
+ * configured named rating paths are included when their tags/skills match.
+ * @param {Object} challenge challenge metadata row
+ * @returns {Array<Object>} rating jobs to run
+ */
+function buildChallengeRatingJobs (challenge) {
+  const source = resolveChallengeRatingSource(challenge)
+  const jobs = []
+  const baseJob = buildBaseRatingJob(challenge, source)
+  if (baseJob) {
+    jobs.push(baseJob)
+  }
+
+  if (!source || !isChallengeRatingEnabled(challenge)) {
+    return jobs
+  }
+
+  normalizeRatingPathConfigs(config.RATING_PATHS).forEach((ratingPath) => {
+    if (!challengeMatchesRatingPath(challenge, ratingPath)) {
+      return
+    }
+
+    jobs.push({
+      source,
+      trackId: ratingPath.trackName,
+      typeId: ratingPath.name,
+      ratingName: ratingPath.name,
+      ratingPath
+    })
+  })
+
+  return _.uniqBy(jobs, (job) => `${job.ratingName || ''}::${job.trackId}::${job.typeId}`)
+}
+
+/**
+ * Fetch review-api challengeResult participants with score or placement data.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|number} challengeId challenge identifier
+ * @returns {Promise<Array<BigInt>>} participant user ids
+ */
+async function fetchChallengeResultParticipantIds (reviewDbClient, challengeId) {
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
+  const result = await reviewDbClient.query(
+    `
+      SELECT DISTINCT "userId"
+      FROM ${challengeResultRelation}
+      WHERE "challengeId" = $1
+        AND "userId" IS NOT NULL
+        AND (
+          "finalScore" IS NOT NULL OR
+          ("placement" IS NOT NULL AND "placement" > 0)
+        )
+      ORDER BY "userId" ASC
+    `,
+    [String(challengeId)]
+  )
+
+  return result.rows.map((row) => toBigIntUserId(row.userId))
+}
+
+/**
+ * Fetch Marathon Match participants from review summations when challengeResult
+ * rows are not available yet.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {Object|null} mmDbClient prisma Marathon Match client
+ * @param {string|number} challengeId challenge identifier
+ * @returns {Promise<Array<BigInt>>} participant user ids
+ */
+async function fetchMarathonMatchParticipantIds (reviewDbClient, mmDbClient, challengeId) {
+  if (!mmDbClient) {
+    return []
+  }
+
+  const { participantRows } = await fetchRatingPathParticipantsForChallenge(
+    reviewDbClient,
+    mmDbClient,
+    {
+      challengeId: String(challengeId),
+      source: RATING_SOURCE_MARATHON_MATCH
+    }
+  )
+
+  return participantRows.map((row) => resolveRatingPathParticipantId(row, RATING_SOURCE_MARATHON_MATCH))
+}
+
+/**
+ * Resolve submitter ids for the challenge and rating source.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|number} challengeId challenge identifier
+ * @param {string} source rating source identifier
+ * @returns {Promise<Array<BigInt>>} unique participant user ids
+ */
+async function fetchRatingParticipantIds (reviewDbClient, challengeId, source) {
+  const challengeResultUserIds = await fetchChallengeResultParticipantIds(reviewDbClient, challengeId)
+  if (challengeResultUserIds.length > 0 || source !== RATING_SOURCE_MARATHON_MATCH) {
+    return _.uniqBy(challengeResultUserIds, stringifyUserId)
+  }
+
+  return _.uniqBy(
+    await fetchMarathonMatchParticipantIds(reviewDbClient, getOptionalMmClientForRatingPath(), challengeId),
+    stringifyUserId
+  )
+}
+
+/**
+ * Filter discovered submitters down to members that exist in member-api storage.
+ * @param {Object} membersClient prisma members client
+ * @param {Array<BigInt>} participantIds discovered submitter ids
+ * @returns {Promise<Object>} existing member ids and skipped ids
+ */
+async function filterExistingRatingParticipantIds (membersClient, participantIds) {
+  const uniqueParticipantIds = _.uniqBy(participantIds, stringifyUserId)
+  if (uniqueParticipantIds.length === 0) {
+    return {
+      existingParticipantIds: [],
+      skippedParticipantIds: []
+    }
+  }
+
+  const existingMembers = await membersClient.member.findMany({
+    where: {
+      userId: {
+        in: uniqueParticipantIds
+      }
+    },
+    select: {
+      userId: true
+    }
+  })
+  const existingIds = existingMembers.map((member) => member.userId)
+  const existingIdSet = new Set(existingIds.map(stringifyUserId))
+
+  return {
+    existingParticipantIds: existingIds,
+    skippedParticipantIds: uniqueParticipantIds.filter((userId) => !existingIdSet.has(stringifyUserId(userId)))
+  }
+}
+
+/**
+ * Run one rating job for one member.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {BigInt} userId target member id
+ * @param {string} challengeId starting challenge id
+ * @param {Object} job rating job to execute
+ * @returns {Promise<Object>} engine rerate summary
+ */
+async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClient, userId, challengeId, job) {
+  if (job.ratingPath) {
+    return rerateMmTrack(
+      prisma,
+      challengeClient,
+      getOptionalMmClientForRatingPath(),
+      reviewDbClient,
+      userId,
+      challengeId,
+      {
+        ratingPath: job.ratingPath
+      }
+    )
+  }
+
+  if (job.source === RATING_SOURCE_DEVELOPMENT) {
+    return rerateDevTrack(
+      prisma,
+      challengeClient,
+      reviewDbClient,
+      userId,
+      challengeId
+    )
+  }
+
+  return rerateMmTrack(
+    prisma,
+    challengeClient,
+    prismaManager.getMmClient(),
+    reviewDbClient,
+    userId,
+    challengeId
+  )
 }
 
 function isLegacyMaxRatingPayload (value) {
@@ -1162,8 +1570,14 @@ function orderUnifiedHistoryRows (rows) {
   ], ['desc', 'desc', 'desc'])
 }
 
+/**
+ * Convert a normalized rating bucket start into the response field name.
+ * Ratings outside the documented 0-3999 distribution range are ignored.
+ * @param {Number} rangeStart normalized inclusive lower bound for a 100-point rating bucket
+ * @returns {String|null} distribution response key, or null when outside the supported range
+ */
 function getDistributionRangeKey (rangeStart) {
-  if (rangeStart < 0 || rangeStart > 3900) {
+  if (rangeStart < DISTRIBUTION_MIN_RATING || rangeStart >= DISTRIBUTION_MAX_RATING_EXCLUSIVE) {
     return null
   }
   if (rangeStart === 0) {
@@ -1728,11 +2142,19 @@ async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
 }
 
 /**
- * Get distribution statistics.
+ * Get current member rating distribution statistics.
+ * Resolves track/subTrack aliases to unified stats dimensions, aggregates rated
+ * memberStats rows into the documented 100-point buckets, and returns an empty
+ * histogram when matching stats exist but none have a rated value.
  * @param {Object} query the query parameters
- * @returns {Object} the distribution statistics
+ * @param {String} [query.track] optional track filter
+ * @param {String} [query.subTrack] optional subTrack/type filter
+ * @param {String} [query.fields] optional comma-separated response fields
+ * @returns {Object} distribution statistics for the requested filters
+ * @throws {NotFoundError} when filters cannot be resolved or no matching stats exist
  */
 async function getDistribution (query) {
+  const startedAt = Date.now()
   // validate and parse query parameter
   const fields = helper.parseCommaSeparatedString(query.fields, DISTRIBUTION_FIELDS_NO_DATE) || DISTRIBUTION_FIELDS_NO_DATE
   if (USE_LEGACY_STATS_READS) {
@@ -1740,17 +2162,23 @@ async function getDistribution (query) {
   }
 
   logger.info(`Calculating distribution on-the-fly for track='${query.track || ''}' subTrack='${query.subTrack || ''}'`)
+  const dimensionStartedAt = Date.now()
   const dimensionLookup = await getChallengeDimensionLookup()
   const hasTrackFilter = !_.isNil(query.track) && String(query.track).trim() !== ''
   const hasTypeFilter = !_.isNil(query.subTrack) && String(query.subTrack).trim() !== ''
   const trackId = hasTrackFilter ? resolveTrackIdFromLookup(dimensionLookup, query.track) : undefined
   const typeId = hasTypeFilter ? resolveStatsTypeFilterValue(dimensionLookup, query.subTrack) : undefined
+  logger.debug(`getDistribution resolved trackId='${trackId || ''}' typeId='${typeId || ''}' in ${Date.now() - dimensionStartedAt}ms`)
 
   if ((hasTrackFilter && !trackId) || (hasTypeFilter && !typeId)) {
     throw new errors.NotFoundError('No member distribution statistics is found.')
   }
 
-  const whereConditions = [Prisma.sql`"rating" IS NOT NULL`]
+  const whereConditions = [
+    Prisma.sql`"rating" IS NOT NULL`,
+    Prisma.sql`"rating" >= ${DISTRIBUTION_MIN_RATING}`,
+    Prisma.sql`"rating" < ${DISTRIBUTION_MAX_RATING_EXCLUSIVE}`
+  ]
   if (trackId) {
     whereConditions.push(Prisma.sql`"trackId" = ${trackId}`)
   }
@@ -1758,6 +2186,7 @@ async function getDistribution (query) {
     whereConditions.push(Prisma.sql`"typeId" = ${typeId}`)
   }
 
+  const queryStartedAt = Date.now()
   const rows = await prisma.$queryRaw`
     SELECT
       (FLOOR("rating" / 100.0)::int * 100) AS "rangeStart",
@@ -1767,8 +2196,10 @@ async function getDistribution (query) {
     GROUP BY (FLOOR("rating" / 100.0)::int * 100)
     ORDER BY "rangeStart" ASC
   `
+  const queryMs = Date.now() - queryStartedAt
 
   if (!rows || rows.length === 0) {
+    logger.info(`getDistribution found no rated rows for track='${query.track || ''}' subTrack='${query.subTrack || ''}' queryMs=${queryMs} totalMs=${Date.now() - startedAt}`)
     const matchingStatsRow = await prisma.memberStats.findFirst({
       where: _.omitBy({
         trackId,
@@ -1804,6 +2235,7 @@ async function getDistribution (query) {
       distribution[key] = Number(row.count)
     }
   })
+  const totalRatedMembers = _.sumBy(rows, row => Number(row.count) || 0)
 
   let result = {
     track: query.track,
@@ -1814,6 +2246,7 @@ async function getDistribution (query) {
   if (fields) {
     result = _.pick(result, fields)
   }
+  logger.info(`getDistribution calculated track='${query.track || ''}' subTrack='${query.subTrack || ''}' ranges=${rows.length} totalRatedMembers=${totalRatedMembers} queryMs=${queryMs} totalMs=${Date.now() - startedAt}`)
   return result
 }
 
@@ -2755,6 +3188,169 @@ refreshMemberStats.schema = {
 }
 
 /**
+ * Re-rate every existing submitter on a completed challenge for all applicable
+ * rating dimensions. This includes the native challenge track/type rating when
+ * supported and any configured named rating paths whose tags/skills match the
+ * challenge, such as the default AI path.
+ * @param {Object} currentUser the user who performs operation
+ * @param {Object} data rerate payload containing the completed challenge id
+ * @returns {Object} summary of participants, rating jobs, updates, and per-member failures
+ * @throws {errors.ForbiddenError} when the caller is not admin or M2M
+ * @throws {errors.NotFoundError} when the challenge does not exist
+ */
+async function rerateChallengeSubmitterRatings (currentUser, data) {
+  if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
+    throw new errors.ForbiddenError('You are not allowed to update the member stats.')
+  }
+
+  const payload = data || {}
+  if (_.isNil(payload.challengeId) || String(payload.challengeId).trim() === '') {
+    throw new errors.BadRequestError('challengeId is required.')
+  }
+
+  const challengeClient = prismaManager.getChallengesClient()
+  const reviewDbClient = getReviewDbClientOrThrow()
+  const challenge = await fetchChallengeForRatingUpdate(challengeClient, payload.challengeId)
+  if (!challenge) {
+    throw new errors.NotFoundError(`Challenge with id: ${payload.challengeId} doesn't exist`)
+  }
+
+  const challengeId = String(challenge.id)
+  const responseChallengeId = normalizeChallengeIdForResponse(challengeId)
+  const baseResponse = {
+    challengeId: responseChallengeId,
+    rerated: false,
+    ratings: [],
+    participantIds: [],
+    skippedParticipantIds: [],
+    membersProcessed: 0,
+    ratingsAttempted: 0,
+    ratingsUpdated: 0,
+    ratingFailures: []
+  }
+
+  if (!isCompletedChallenge(challenge)) {
+    return {
+      ...baseResponse,
+      skippedReason: 'challenge-not-completed'
+    }
+  }
+
+  const ratingJobs = buildChallengeRatingJobs(challenge)
+  const ratings = ratingJobs.map((job) => _.omitBy({
+    trackId: job.trackId,
+    typeId: job.typeId,
+    ratingName: job.ratingName,
+    ratingTags: job.ratingPath ? job.ratingPath.tags : undefined,
+    ratingSkillIds: job.ratingPath ? job.ratingPath.skillIds : undefined
+  }, _.isUndefined))
+
+  if (ratingJobs.length === 0) {
+    return {
+      ...baseResponse,
+      ratings,
+      skippedReason: 'no-supported-ratings'
+    }
+  }
+
+  const participantIdsBySource = new Map()
+  for (const job of ratingJobs) {
+    if (participantIdsBySource.has(job.source)) {
+      continue
+    }
+
+    participantIdsBySource.set(
+      job.source,
+      await fetchRatingParticipantIds(reviewDbClient, challengeId, job.source)
+    )
+  }
+
+  const participantIds = _.uniqBy(
+    Array.from(participantIdsBySource.values()).flat(),
+    stringifyUserId
+  )
+  if (participantIds.length === 0) {
+    return {
+      ...baseResponse,
+      ratings,
+      skippedReason: 'no-submitters'
+    }
+  }
+
+  const { existingParticipantIds, skippedParticipantIds } = await filterExistingRatingParticipantIds(
+    prisma,
+    participantIds
+  )
+
+  if (existingParticipantIds.length === 0) {
+    return {
+      ...baseResponse,
+      ratings,
+      participantIds: participantIds.map(stringifyUserId),
+      skippedParticipantIds: skippedParticipantIds.map(stringifyUserId),
+      skippedReason: 'no-existing-members'
+    }
+  }
+
+  const ratingFailures = []
+  let ratingsAttempted = 0
+  let ratingsUpdated = 0
+
+  for (const userId of existingParticipantIds) {
+    for (const job of ratingJobs) {
+      const sourceParticipantIds = participantIdsBySource.get(job.source) || []
+      const sourceParticipantIdSet = new Set(sourceParticipantIds.map(stringifyUserId))
+      if (!sourceParticipantIdSet.has(stringifyUserId(userId))) {
+        continue
+      }
+
+      ratingsAttempted += 1
+
+      try {
+        const result = await rerateChallengeRatingJobForMember(
+          challengeClient,
+          reviewDbClient,
+          userId,
+          challengeId,
+          job
+        )
+        ratingsUpdated += Number(result && result.ratingsUpdated) || 0
+      } catch (error) {
+        logger.warn(
+          `Unable to rerate ${job.ratingName || `${job.trackId}/${job.typeId}`} for userId=${stringifyUserId(userId)} challengeId=${challengeId}: ${error.message}`
+        )
+        ratingFailures.push(_.omitBy({
+          userId: stringifyUserId(userId),
+          trackId: job.trackId,
+          typeId: job.typeId,
+          ratingName: job.ratingName,
+          message: error.message
+        }, _.isUndefined))
+      }
+    }
+  }
+
+  return {
+    challengeId: responseChallengeId,
+    rerated: ratingsAttempted > 0 && ratingFailures.length < ratingsAttempted,
+    ratings,
+    participantIds: participantIds.map(stringifyUserId),
+    skippedParticipantIds: skippedParticipantIds.map(stringifyUserId),
+    membersProcessed: existingParticipantIds.length,
+    ratingsAttempted,
+    ratingsUpdated,
+    ratingFailures
+  }
+}
+
+rerateChallengeSubmitterRatings.schema = {
+  currentUser: Joi.any(),
+  data: Joi.object().keys({
+    challengeId: Joi.alternatives().try(Joi.string().uuid(), Joi.number().integer().strict()).required()
+  }).required()
+}
+
+/**
  * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / MARATHON_MATCH, or configured
  * tag- or skill-based rating path re-rating pass beginning with the supplied challenge.
  * The relevant review-api results are reprocessed in chronological order and
@@ -3096,6 +3692,7 @@ module.exports = {
   createMemberStats,
   partiallyUpdateMemberStats,
   refreshMemberStats,
+  rerateChallengeSubmitterRatings,
   rerateMemberStats,
   getMemberSkills,
   createMemberSkills,
