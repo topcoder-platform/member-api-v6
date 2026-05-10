@@ -61,6 +61,7 @@ if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
 const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
+const CHALLENGE_WINNER_HISTORY_TYPES = ['PLACEMENT', 'PASSED_REVIEW']
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -842,6 +843,43 @@ function buildStatsTrackTypeKey (trackId, typeId) {
   return `${trackId}::${typeId}`
 }
 
+/**
+ * Check whether a resolved challenge type is Marathon Match.
+ * @param {string|undefined} typeName canonical or raw type name
+ * @returns {boolean} true when the type should be exposed as Marathon Match
+ */
+function isMarathonMatchType (typeName) {
+  return getCanonicalTypeName(typeName) === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
+ * Resolve the public stats dimensions for a challenge-backed row.
+ * Marathon Match is part of the public DATA_SCIENCE bucket even when imported
+ * challenge metadata has a Development track.
+ * @param {Object} row row containing trackId and typeId
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Object} normalized track/type ids and names
+ */
+function resolveStatsDimensionForChallengeRow (row, dimensionLookup) {
+  const typeName = resolveTypeNameFromLookup(dimensionLookup, row.typeId)
+  if (isMarathonMatchType(typeName)) {
+    const dataScienceTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DATA_SCIENCE)
+    return {
+      trackId: dataScienceTrackId || row.trackId,
+      typeId: row.typeId,
+      trackName: TRACK_NAMES.DATA_SCIENCE,
+      typeName: TYPE_NAMES.MARATHON_MATCH
+    }
+  }
+
+  return {
+    trackId: row.trackId,
+    typeId: row.typeId,
+    trackName: resolveTrackNameFromLookup(dimensionLookup, row.trackId),
+    typeName
+  }
+}
+
 function getReviewDbClientOrThrow () {
   if (!reviewDb) {
     throw new Error('REVIEW_DB_URL must be configured to refresh or rerate member stats')
@@ -866,22 +904,25 @@ async function fetchReviewChallengeResultsForMember (reviewDbClient, userId) {
 }
 
 /**
- * Load placement winners for one member from challenge-api.
+ * Load placement-bearing winner rows for one member from challenge-api.
  * These rows provide a fallback history source for unrated tracks such as
- * First2Finish when review-api results are unavailable.
+ * First2Finish and MM imports whose history source is ChallengeWinner.
  * @param {Object} challengeClient prisma challenge client
  * @param {BigInt} userId member user id
- * @returns {Promise<Array<Object>>} placement winner rows with embedded challenge metadata
+ * @returns {Promise<Array<Object>>} winner rows with embedded challenge metadata
  */
 async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
   try {
     return await challengeClient.ChallengeWinner.findMany({
       where: {
         userId: helper.bigIntToNumber(userId),
-        type: 'PLACEMENT'
+        type: {
+          in: CHALLENGE_WINNER_HISTORY_TYPES
+        }
       },
       select: {
         challengeId: true,
+        type: true,
         placement: true,
         createdAt: true,
         challenge: {
@@ -1142,7 +1183,14 @@ function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
   })
 }
 
-function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataById) {
+/**
+ * Aggregate completed review-api results into unified stats rows.
+ * @param {Array<Object>} reviewRows review-api challenge result rows
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by challenge id
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Array<Object>} normalized aggregate rows
+ */
+function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataById, dimensionLookup) {
   const aggregateByKey = new Map()
 
   _.forEach(reviewRows, (row) => {
@@ -1151,8 +1199,12 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
+    const dimension = resolveStatsDimensionForChallengeRow({
+      trackId: String(challenge.trackId),
+      typeId: String(challenge.typeId)
+    }, dimensionLookup)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
     if (!trackId || !typeId) {
       return
     }
@@ -1258,19 +1310,23 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
+    const dimension = resolveStatsDimensionForChallengeRow({
+      trackId: String(challenge.trackId),
+      typeId: String(challenge.typeId)
+    }, dimensionLookup)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
     if (missingPairKeys && !missingPairKeys.has(pairKey)) {
       return
     }
 
-    const trackName = resolveTrackNameFromLookup(dimensionLookup, trackId)
+    const trackName = dimension.trackName
     if (!isSupportedUnifiedHistoryTrack(trackName)) {
       return
     }
 
-    const typeName = resolveTypeNameFromLookup(dimensionLookup, typeId)
+    const typeName = dimension.typeName
     const eventDate = toOptionalDate(challenge.endDate || row.createdAt)
     if (!eventDate) {
       return
@@ -1338,19 +1394,23 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
+    const dimension = resolveStatsDimensionForChallengeRow({
+      trackId: String(challenge.trackId),
+      typeId: String(challenge.typeId)
+    }, dimensionLookup)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
     if (missingPairKeys && !missingPairKeys.has(pairKey)) {
       return
     }
 
-    const trackName = resolveTrackNameFromLookup(dimensionLookup, trackId)
+    const trackName = dimension.trackName
     if (!isSupportedUnifiedHistoryTrack(trackName)) {
       return
     }
 
-    const typeName = resolveTypeNameFromLookup(dimensionLookup, typeId)
+    const typeName = dimension.typeName
     const eventDate = toOptionalDate(challenge.endDate || row.createdAt)
     if (!eventDate) {
       return
@@ -1555,6 +1615,58 @@ function mergeMissingHistoryRows (existingRows, fallbackRows) {
   })
 
   return mergedRows
+}
+
+/**
+ * Collapse duplicate history rows that point to the same normalized challenge card.
+ * This protects reads while old rows stored as Development/MM coexist with rerun
+ * rows normalized to DATA_SCIENCE/MM.
+ * @param {Array<Object>} rows persisted and/or transient history rows
+ * @returns {Array<Object>} history rows keyed by normalized track/type/challenge
+ */
+function dedupeUnifiedHistoryRows (rows) {
+  const dedupedByKey = new Map()
+
+  _.forEach(rows || [], (row) => {
+    const key = buildHistoryChallengeKey(row)
+    const existing = dedupedByKey.get(key)
+
+    if (!existing ||
+      (row.eventDate && existing.eventDate && row.eventDate > existing.eventDate) ||
+      (_.isNil(existing.newRating) && !_.isNil(row.newRating))) {
+      dedupedByKey.set(key, row)
+    }
+  })
+
+  return Array.from(dedupedByKey.values())
+}
+
+/**
+ * Recompute mostRecent flags after fallback and dimension normalization.
+ * Persisted rows may still be split across legacy dimensions, so the response
+ * needs one latest card per normalized track/type group.
+ * @param {Array<Object>} rows persisted and/or transient history rows
+ * @returns {Array<Object>} rows with normalized mostRecent flags
+ */
+function recomputeUnifiedHistoryMostRecentFlags (rows) {
+  const rowsByPairKey = _.groupBy(rows || [], row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+  const normalizedRows = []
+
+  _.forEach(rowsByPairKey, (pairRows) => {
+    const orderedRows = _.orderBy(pairRows, [
+      row => (row.eventDate ? row.eventDate.getTime() : 0),
+      row => row.challengeId
+    ], ['desc', 'desc'])
+
+    _.forEach(orderedRows, (row, index) => {
+      normalizedRows.push({
+        ...row,
+        mostRecent: index === 0
+      })
+    })
+  })
+
+  return normalizedRows
 }
 
 /**
@@ -1970,11 +2082,13 @@ function buildUnifiedHistoryRecordsFromPayload (payload, dimensionLookup) {
  * @returns {Array<Object>} rows annotated with trackName and typeName
  */
 function annotateUnifiedDimensionRows (rows, dimensionLookup) {
-  return _.map(rows || [], row => ({
-    ...row,
-    trackName: resolveTrackNameFromLookup(dimensionLookup, row.trackId),
-    typeName: resolveTypeNameFromLookup(dimensionLookup, row.typeId)
-  }))
+  return _.map(rows || [], (row) => {
+    const dimension = resolveStatsDimensionForChallengeRow(row, dimensionLookup)
+    return {
+      ...row,
+      ...dimension
+    }
+  })
 }
 
 /**
@@ -2332,13 +2446,13 @@ async function getHistoryStats (currentUser, handle, query) {
         _.uniq(_.map(historyRows, row => row.challengeId).concat(_.map(reviewRows, row => row.challengeId)))
       )
 
-      let annotatedRows = filterUnifiedHistoryRowsToCompletedChallenges(
+      let annotatedRows = dedupeUnifiedHistoryRows(filterUnifiedHistoryRowsToCompletedChallenges(
         enrichUnifiedHistoryRowsWithChallengeMetadata(
           annotateUnifiedDimensionRows(historyRows, dimensionLookup),
           challengeMetadataById
         ),
         challengeMetadataById
-      )
+      ))
 
       if (unresolvedPairKeys.size > 0 && reviewRows.length > 0) {
         const reviewFallbackRows = buildFallbackHistoryRowsFromReviewResults(
@@ -2382,7 +2496,7 @@ async function getHistoryStats (currentUser, handle, query) {
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, legacyCodeFallbackRows)
       }
 
-      const orderedRows = orderUnifiedHistoryRows(annotatedRows)
+      const orderedRows = orderUnifiedHistoryRows(recomputeUnifiedHistoryMostRecentFlags(annotatedRows))
       if (orderedRows.length > 0) {
         _.forEach(groupIds, (groupId) => {
           const scopedRows = _.map(orderedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
@@ -3130,7 +3244,8 @@ async function refreshMemberStats (currentUser, handle, data) {
     challengeClient,
     _.uniq(_.map(reviewRows, row => String(row.challengeId)))
   )
-  const aggregateRows = buildAggregatedStatsFromReviewResults(reviewRows, challengeMetadataById)
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const aggregateRows = buildAggregatedStatsFromReviewResults(reviewRows, challengeMetadataById, dimensionLookup)
 
   if (aggregateRows.length > 0) {
     await prisma.$transaction(async (tx) => {

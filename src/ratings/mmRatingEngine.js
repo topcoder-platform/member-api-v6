@@ -27,7 +27,6 @@ const {
 
 const TRACK_NAME = 'DATA_SCIENCE'
 const TYPE_NAME = 'MARATHON_MATCH'
-const CHALLENGE_TRACK_NAME = 'DATA_SCIENCE'
 const CHALLENGE_TYPE_NAME = 'MARATHON_MATCH'
 const DEVELOPMENT_CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
 const DEVELOPMENT_CHALLENGE_TYPE_NAME = 'Challenge'
@@ -426,15 +425,15 @@ function isChallengeRated (challenge) {
 
 /**
  * Resolve whether challenge metadata belongs to the MM scoring source.
+ * Marathon Match is identified by type because some imported challenge rows
+ * carry the Development track while still belonging to the MM rating stream.
  * @param {Object} challenge challenge metadata record
  * @returns {boolean} true when the challenge uses the MM rating source
  */
 function isMarathonMatchChallenge (challenge) {
   return !!(
     challenge &&
-    challenge.track &&
     challenge.type &&
-    normalizeChallengeDimension(challenge.track.name) === CHALLENGE_TRACK_NAME &&
     normalizeChallengeDimension(challenge.type.name) === CHALLENGE_TYPE_NAME
   )
 }
@@ -533,7 +532,9 @@ function isDevelopmentParticipantEligibleForRating (row) {
 /**
  * Fetch all final Marathon Match system results for the target member.
  * The reviewSummation table is submission-scoped, so the latest final summation
- * per submission is selected before replay history is built.
+ * per submission is selected before replay history is built. Some imported MM
+ * summations have a null isFinal flag; those are treated as final unless the
+ * row is explicitly marked false.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {BigInt} userId target member identifier
  * @returns {Promise<Array<Object>>} ordered result rows for the member
@@ -567,7 +568,7 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
         INNER JOIN "submission" s
           ON s."id" = rs."submissionId"
         WHERE s."memberId" = $1
-          AND rs."isFinal" = true
+          AND rs."isFinal" IS NOT FALSE
       )
       SELECT
         "submissionId",
@@ -619,7 +620,7 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, mmDbClient, chal
           ON s."id" = rs."submissionId"
         WHERE s."challengeId" = $1
           AND s."memberId" IS NOT NULL
-          AND rs."isFinal" = true
+          AND rs."isFinal" IS NOT FALSE
       ),
       "latestMemberSubmission" AS (
         SELECT

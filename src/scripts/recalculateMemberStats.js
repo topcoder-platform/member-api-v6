@@ -77,6 +77,7 @@ const { assertChallengeResultRelation, resolveChallengeResultRelation } = requir
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const {
   TYPE_NAMES,
+  clearChallengeDimensionLookupCache,
   getCanonicalTypeName: resolveTypeName,
   loadChallengeDimensionLookup,
   normalizeLookupKey,
@@ -95,6 +96,8 @@ const MAX_RAW_QUERY_PARAMS = 10000
 const MEMBER_STATS_BULK_UPSERT_PARAM_COUNT = 22
 const HISTORY_BULK_UPDATE_PARAM_COUNT = 4
 const HISTORY_BULK_INSERT_PARAM_COUNT = 9
+const CHALLENGE_WINNER_HISTORY_TYPES = ['PLACEMENT', 'PASSED_REVIEW']
+const CHALLENGE_WINNER_HISTORY_TYPE_SQL = CHALLENGE_WINNER_HISTORY_TYPES.map(type => `'${type}'`).join(', ')
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'recalculateMemberStats.processedUserIds.json'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 const NULL_PRESERVED_STAT_FIELDS = [
@@ -332,6 +335,57 @@ function buildTrackTypeKey (trackId, typeId) {
 }
 
 /**
+ * Check whether a ChallengeType id/name represents Marathon Match.
+ * @param {*} typeId raw ChallengeType id or name
+ * @returns {boolean} true when the type maps to Marathon Match
+ */
+function isMarathonMatchTypeId (typeId) {
+  const typeName = resolveTypeNameFromLookup(legacyLookupCache, typeId) || typeId
+  return resolveTypeName(typeName) === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
+ * Normalize challenge metadata dimensions into the public stats dimensions.
+ * Marathon Match stats/history belong to DATA_SCIENCE even when the source
+ * challenge row was imported with a Development track.
+ * @param {*} trackId raw ChallengeTrack id
+ * @param {*} typeId raw ChallengeType id
+ * @returns {Object} normalized trackId/typeId pair
+ */
+function normalizeChallengeStatsDimension (trackId, typeId) {
+  const normalizedTypeId = String(typeId)
+  if (legacyLookupCache && isMarathonMatchTypeId(normalizedTypeId) && legacyLookupCache.trackIds.DATA_SCIENCE) {
+    return {
+      trackId: legacyLookupCache.trackIds.DATA_SCIENCE,
+      typeId: normalizedTypeId
+    }
+  }
+
+  return {
+    trackId: String(trackId),
+    typeId: normalizedTypeId
+  }
+}
+
+/**
+ * Apply optional script track/type filters after challenge dimensions are normalized.
+ * @param {Object} dimension normalized track/type pair
+ * @param {Object} options script filters
+ * @returns {boolean} true when the row should be kept
+ */
+function matchesNormalizedStatsFilters (dimension, options) {
+  if (options.trackId && dimension.trackId !== options.trackId) {
+    return false
+  }
+
+  if (options.typeId && dimension.typeId !== options.typeId) {
+    return false
+  }
+
+  return true
+}
+
+/**
  * Build the composite lookup key for one user's unified stats row.
  * @param {BigInt} userId member user id
  * @param {string} trackId unified track id
@@ -365,11 +419,13 @@ async function initializeLegacyLookupCache (challengesClient) {
     return legacyLookupCache
   }
 
+  clearChallengeDimensionLookupCache()
   legacyLookupCache = await loadChallengeDimensionLookup(challengesClient)
 
   if (!legacyLookupCache.trackIds.DEVELOP ||
     !legacyLookupCache.trackIds.DESIGN ||
     !legacyLookupCache.trackIds.DATA_SCIENCE) {
+    legacyLookupCache = null
     throw new Error('Unable to resolve required challenge track ids for legacy stats migration')
   }
 
@@ -680,14 +736,11 @@ function buildReviewAggregateRecord (row, challenge, options) {
     return null
   }
 
-  const trackId = String(challenge.trackId)
-  const typeId = String(challenge.typeId)
+  const dimension = normalizeChallengeStatsDimension(challenge.trackId, challenge.typeId)
+  const trackId = dimension.trackId
+  const typeId = dimension.typeId
 
-  if (options.trackId && trackId !== options.trackId) {
-    return null
-  }
-
-  if (options.typeId && typeId !== options.typeId) {
+  if (!matchesNormalizedStatsFilters(dimension, options)) {
     return null
   }
 
@@ -890,9 +943,21 @@ async function getFilteredChallengeIds (challengesClient, options) {
     return null
   }
 
+  const includeMarathonByType = legacyLookupCache &&
+    options.trackId === legacyLookupCache.trackIds.DATA_SCIENCE &&
+    legacyLookupCache.typeIds.MARATHON_MATCH
+
   const rows = await challengesClient.challenge.findMany({
     where: {
-      ...(options.trackId ? { trackId: options.trackId } : {}),
+      ...(options.trackId && !includeMarathonByType ? { trackId: options.trackId } : {}),
+      ...(includeMarathonByType
+        ? {
+          OR: [
+            { trackId: options.trackId },
+            { typeId: legacyLookupCache.typeIds.MARATHON_MATCH }
+          ]
+        }
+        : {}),
       ...(options.typeId ? { typeId: options.typeId } : {})
     },
     select: {
@@ -1879,12 +1944,14 @@ async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
 }
 
 /**
- * Load completed placement winner rows for one member so history can be seeded
+ * Load completed winner rows for one member so history can be seeded
  * when a completed challenge never appeared in the legacy history tables.
+ * PLACEMENT and PASSED_REVIEW rows both represent visible challenge
+ * participation; wins are still counted separately from PLACEMENT rows only.
  * @param {Object} challengesClient prisma challenges client
  * @param {BigInt} userId member user id
  * @param {Object} [options] optional track/type filters
- * @returns {Promise<Array<Object>>} placement winner rows with embedded challenge metadata
+ * @returns {Promise<Array<Object>>} winner rows with embedded challenge metadata
  */
 async function fetchChallengeWinnerRowsForUser (challengesClient, userId, options = {}) {
   const { whereSql, params } = buildFilterQuery(options, userId)
@@ -1901,7 +1968,7 @@ async function fetchChallengeWinnerRowsForUser (challengesClient, userId, option
     FROM "ChallengeWinner" cw
     INNER JOIN "Challenge" c ON c.id = cw."challengeId"
     WHERE ${whereSql}
-      AND cw."type" = 'PLACEMENT'
+      AND cw."type" IN (${CHALLENGE_WINNER_HISTORY_TYPE_SQL})
       AND c.status::text = '${COMPLETED_CHALLENGE_STATUS}'
     ORDER BY cw."createdAt" ASC, cw."challengeId" ASC
     `,
@@ -1947,9 +2014,10 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
-    if ((options.trackId && trackId !== options.trackId) || (options.typeId && typeId !== options.typeId)) {
+    const dimension = normalizeChallengeStatsDimension(challenge.trackId, challenge.typeId)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
+    if (!matchesNormalizedStatsFilters(dimension, options)) {
       return
     }
 
@@ -1974,9 +2042,10 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
-    if ((options.trackId && trackId !== options.trackId) || (options.typeId && typeId !== options.typeId)) {
+    const dimension = normalizeChallengeStatsDimension(challenge.trackId, challenge.typeId)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
+    if (!matchesNormalizedStatsFilters(dimension, options)) {
       return
     }
 
@@ -2914,7 +2983,17 @@ function buildFilterQuery (options, includeUserFilter) {
   }
 
   if (options.trackId) {
-    addEqualsClause('c."trackId"', options.trackId)
+    if (legacyLookupCache &&
+      options.trackId === legacyLookupCache.trackIds.DATA_SCIENCE &&
+      legacyLookupCache.typeIds.MARATHON_MATCH) {
+      params.push(options.trackId)
+      const trackPlaceholder = `$${params.length}`
+      params.push(legacyLookupCache.typeIds.MARATHON_MATCH)
+      const marathonTypePlaceholder = `$${params.length}`
+      clauses.push(`(c."trackId" = ${trackPlaceholder} OR c."typeId" = ${marathonTypePlaceholder})`)
+    } else {
+      addEqualsClause('c."trackId"', options.trackId)
+    }
   }
 
   if (options.typeId) {
@@ -3053,28 +3132,38 @@ async function aggregateChallengeWinnerStatsForUser (challengesClient, userId, o
     ...params
   )
 
-  return rows.map((row) => ({
-    userId: normalizeBigInt(row.userId, 'user id'),
-    trackId: String(row.trackId),
-    typeId: String(row.typeId),
-    challenges: toInt(row.challenges),
-    wins: toInt(row.wins),
-    mostRecentEventDate: row.mostRecentEventDate ? new Date(row.mostRecentEventDate) : null,
-    mostRecentSubmission: row.mostRecentSubmission ? new Date(row.mostRecentSubmission) : null,
-    rating: null,
-    avgRank: null,
-    avgNumSubmissions: null,
-    bestRank: null,
-    globalRank: null,
-    countryRank: null,
-    schoolRank: null,
-    volatility: null,
-    maxRating: null,
-    minRating: null,
-    topFiveFinishes: null,
-    topTenFinishes: null,
-    isPrivate: false
-  }))
+  const aggregateLookup = new Map()
+  rows.forEach((row) => {
+    const dimension = normalizeChallengeStatsDimension(row.trackId, row.typeId)
+    if (!matchesNormalizedStatsFilters(dimension, options)) {
+      return
+    }
+
+    mergeAggregateRecord(aggregateLookup, {
+      userId: normalizeBigInt(row.userId, 'user id'),
+      trackId: dimension.trackId,
+      typeId: dimension.typeId,
+      challenges: toInt(row.challenges),
+      wins: toInt(row.wins),
+      mostRecentEventDate: row.mostRecentEventDate ? new Date(row.mostRecentEventDate) : null,
+      mostRecentSubmission: row.mostRecentSubmission ? new Date(row.mostRecentSubmission) : null,
+      rating: null,
+      avgRank: null,
+      avgNumSubmissions: null,
+      bestRank: null,
+      globalRank: null,
+      countryRank: null,
+      schoolRank: null,
+      volatility: null,
+      maxRating: null,
+      minRating: null,
+      topFiveFinishes: null,
+      topTenFinishes: null,
+      isPrivate: false
+    })
+  })
+
+  return Array.from(aggregateLookup.values())
 }
 
 async function aggregateStatsForUser (membersClient, challengesClient, userId, options, legacyIds = null) {

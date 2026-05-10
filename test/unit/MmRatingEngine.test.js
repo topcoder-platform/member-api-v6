@@ -12,6 +12,7 @@ const {
   getRatingColor,
   runQubitsRating
 } = require('../../src/ratings/qubitsAlgorithm')
+const { clearChallengeDimensionLookupCache } = require('../../src/common/statsDimensionHelper')
 const { normalizeRatingPathConfig } = require('../../src/ratings/ratingPathConfig')
 
 const should = chai.should()
@@ -509,6 +510,10 @@ function buildExpectedTargetState (targetUserId, opponentUserId, targetScore, op
 }
 
 describe('marathon match rating engine unit tests', () => {
+  beforeEach(() => {
+    clearChallengeDimensionLookupCache()
+  })
+
   const targetUserId = toBigInt(5005)
   const opponentUserId = toBigInt(6006)
   const challengeId = 'mm-challenge-1'
@@ -618,6 +623,61 @@ describe('marathon match rating engine unit tests', () => {
       should.equal(historyRow.oldRating, null)
       should.equal(historyRow.newRating, expectedTargetState.rating)
     })
+  })
+
+  it('rerateMmTrack should treat Development-track Marathon Match challenges as Data Science MM ratings', async () => {
+    const developmentTrackMmMetadata = {
+      [challengeId]: {
+        id: challengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Marathon Match' },
+        metadata: []
+      }
+    }
+    const scoringConfig = {
+      relativeScoringEnabled: true,
+      scoreDirection: 'MAXIMIZE'
+    }
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createMmReviewDbClient(baseReviewRows)
+    const challengeClient = createChallengeClient(developmentTrackMmMetadata)
+    const mmDbClient = createMmDbClient({
+      [challengeId]: scoringConfig
+    })
+
+    const expectedTargetState = buildExpectedTargetState(
+      targetUserId,
+      opponentUserId,
+      20,
+      10,
+      scoringConfig
+    )
+
+    const result = await rerateMmTrack(
+      membersClient,
+      challengeClient,
+      mmDbClient,
+      reviewDbClient,
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+
+    should.equal(statsRow.rating, expectedTargetState.rating)
+    should.equal(historyRow.newRating, expectedTargetState.rating)
   })
 
   it('rerateMmTrack should replay tagged Development Challenge and MM events under the configured destination track', async () => {

@@ -270,7 +270,12 @@ function loadStatisticsService (options = {}) {
         findMany: async () => challengeRows
       },
       ChallengeWinner: {
-        findMany: async () => challengeWinnerRows
+        findMany: async (args) => {
+          if (options.onChallengeWinnerFindMany) {
+            options.onChallengeWinnerFindMany(args)
+          }
+          return challengeWinnerRows
+        }
       }
     })
   })
@@ -1165,6 +1170,85 @@ describe('statistics service unit tests', () => {
       result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('Winner fallback challenge')
       result[0].DEVELOP.subTracks[0].history[0].placement.should.equal(1)
       result[0].DEVELOP.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should surface passed-review Marathon Match winners under Data Science', async () => {
+    const olderDate = new Date('2024-06-18T00:00:00.000Z')
+    const newerDate = new Date('2025-08-27T17:05:00.000Z')
+    let winnerFindManyArgs
+    const oldChallenge = {
+      id: 'old-mm-challenge',
+      legacyId: null,
+      name: 'Marathon Match 154',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: olderDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const newChallenge = {
+      id: 'new-mm-challenge',
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-dev-id',
+      typeId: 'type-mm-id',
+      endDate: newerDate
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'old-mm-challenge',
+            eventDate: olderDate,
+            newRating: 2680,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [oldChallenge],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'new-mm-challenge',
+        type: 'PASSED_REVIEW',
+        placement: 3,
+        createdAt: new Date('2026-01-29T21:08:01.332Z'),
+        challenge: newChallenge
+      }],
+      onChallengeWinnerFindMany: (args) => {
+        winnerFindManyArgs = args
+      }
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      winnerFindManyArgs.where.type.in.should.include('PASSED_REVIEW')
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      should.not.exist(result[0].DEVELOP)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(2)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeId.should.equal('new-mm-challenge')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(3)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].challengeId.should.equal('old-mm-challenge')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].mostRecent.should.equal(false)
     } finally {
       restore()
     }
