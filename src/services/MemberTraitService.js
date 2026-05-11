@@ -206,7 +206,7 @@ async function getTraits (currentUser, handle, query) {
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
-    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+    currentUser.handle.toLowerCase() === handle.toLowerCase()
 
   // can read private personalisation info on a member
   const canReadPrivate = isM2M || hasSensitiveDataRole || isSelf

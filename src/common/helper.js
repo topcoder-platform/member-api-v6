@@ -204,7 +204,7 @@ function checkIfExists (source, term) {
 async function getMemberByHandle (handle) {
   const ret = await prisma.member.findUnique({
     where: {
-      handleLower: handle.trim().toLowerCase()
+      handleLower: handle.toLowerCase()
     },
     include: { maxRating: true, phones: true }
   })

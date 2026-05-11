@@ -101,7 +101,7 @@ function omitMemberAttributes (currentUser, mb) {
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle && mb.handleLower &&
-    currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
+    currentUser.handle.toLowerCase() === mb.handleLower.toLowerCase()
   const canSeeIdentityVerified = isM2M || hasSensitiveDataRole || isSelf
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
   const canSeeFullAddress = canManageMember || hasSensitiveDataRole
@@ -207,7 +207,7 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
 
   const prismaFilter = {
     where: {
-      handleLower: handle.trim().toLowerCase()
+      handleLower: handle.toLowerCase()
     },
     include: {}
   }
@@ -251,7 +251,7 @@ async function getMember (currentUser, handle, query) {
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
-    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+    currentUser.handle.toLowerCase() === handle.toLowerCase()
 
   const canSeePhones = isM2M || hasSensitiveDataRole || isSelf
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
