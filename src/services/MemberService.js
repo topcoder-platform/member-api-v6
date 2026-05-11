@@ -345,7 +345,7 @@ getMember.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
-  })
+  }).unknown(true)
 }
 
 /**
@@ -586,7 +586,7 @@ getProfileCompleteness.schema = {
   query: Joi.object().keys({
     fields: Joi.string(),
     toast: Joi.string()
-  })
+  }).unknown(true)
 }
 
 /**
@@ -610,7 +610,7 @@ getMemberUserIdSignature.schema = {
   currentUser: Joi.any(),
   query: Joi.object().keys({
     type: Joi.string().valid('userflow').required()
-  }).required()
+  }).unknown(true).required()
 }
 
 /**
@@ -778,7 +778,7 @@ updateMember.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
-  }),
+  }).unknown(true),
   data: Joi.object().keys({
     handle: Joi.forbidden(),
     handleLower: Joi.forbidden(),
@@ -925,7 +925,7 @@ updateHandle.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
-  }),
+  }).unknown(true),
   data: Joi.object().keys({
     newHandle: Joi.string().required()
   }).required()
@@ -988,7 +988,7 @@ verifyEmail.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     token: Joi.string().required()
-  }).required()
+  }).unknown(true).required()
 }
 
 /**
