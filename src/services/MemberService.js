@@ -207,7 +207,7 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
 
   const prismaFilter = {
     where: {
-      handleLower: handle.toLowerCase()
+      handleLower: handle.trim().toLowerCase()
     },
     include: {}
   }
