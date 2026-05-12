@@ -278,9 +278,16 @@ async function getTraits (currentUser, handle, query) {
   return helper.convertBigIntDeep(result)
 }
 
+const handleSchema = Joi.any().custom((value, helpers) => {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return helpers.error('any.invalid')
+  }
+  return value
+}, 'handle validation').required()
+
 getTraits.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().unsafe().required(),
+  handle: handleSchema,
   query: Joi.object().keys({
     traitIds: Joi.string(),
     fields: Joi.string()
@@ -504,7 +511,7 @@ async function createTraits (currentUser, handle, data) {
 
 createTraits.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().unsafe().required(),
+  handle: handleSchema,
   data: Joi.array().items(Joi.object().keys({
     traitId: Joi.string().valid(...TRAIT_IDS).required(),
     categoryName: Joi.string(),
@@ -656,7 +663,7 @@ async function removeTraits (currentUser, handle, query) {
 
 removeTraits.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().unsafe().required(),
+  handle: handleSchema,
   query: Joi.object().keys({
     traitIds: Joi.string() // if not provided, then all member traits are removed
   }).unknown(true)
