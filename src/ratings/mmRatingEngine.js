@@ -25,8 +25,7 @@ const {
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
 const {
   RATING_METADATA_SELECT,
-  isChallengeRated,
-  parseBooleanLike
+  isChallengeRated
 } = require('./challengeRatingStatus')
 const {
   challengeMatchesRatingPath,
@@ -896,6 +895,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
  * Build the ordered rerate history for the target member.
  * Multiple submission-level rows for one challenge are collapsed to the latest
  * final system result so the rating pass replays each challenge only once.
+ * Challenge-level rating metadata decides whether the challenge is rated.
  * @param {Array<Object>} mmResultRows submission-level MM result rows
  * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by id
  * @returns {Array<Object>} ordered challenge history entries for rerating
@@ -904,11 +904,6 @@ function buildTargetHistory (mmResultRows, challengeMetadataById, ratingPath) {
   const historyByChallengeId = new Map()
 
   mmResultRows.forEach((row) => {
-    const rowRated = parseBooleanLike(row.rated)
-    if (rowRated === false) {
-      return
-    }
-
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !challenge.endDate) {
       return

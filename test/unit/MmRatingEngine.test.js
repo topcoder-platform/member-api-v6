@@ -656,6 +656,62 @@ describe('marathon match rating engine unit tests', () => {
     state.maxRatingRows.should.have.length(0)
   })
 
+  it('rerateMmTrack should rate MM summations when challenge metadata is rated despite stale row metadata', async () => {
+    const scoringConfig = {
+      relativeScoringEnabled: true,
+      scoreDirection: 'MAXIMIZE'
+    }
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const challengeClient = createChallengeClient({
+      [challengeId]: {
+        id: challengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'DATA_SCIENCE' },
+        type: { name: 'MARATHON_MATCH' },
+        metadata: [{ name: 'isRated', value: 'true' }]
+      }
+    })
+    const staleMetadataRows = baseReviewRows.map((row) => ({
+      ...cloneRow(row),
+      rated: false
+    }))
+    const expectedTargetState = buildExpectedTargetState(
+      targetUserId,
+      opponentUserId,
+      20,
+      10,
+      scoringConfig
+    )
+
+    const result = await rerateMmTrack(
+      membersClient,
+      challengeClient,
+      null,
+      createMmReviewDbClient(staleMetadataRows),
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+
+    should.equal(statsRow.rating, expectedTargetState.rating)
+    should.equal(statsRow.volatility, expectedTargetState.volatility)
+    should.equal(historyRow.newRating, expectedTargetState.rating)
+    should.equal(historyRow.placement, 1)
+  })
+
   it('rerateMmTrack should match review submissions by legacyChallengeId while storing canonical history', async () => {
     const canonicalChallengeId = 'mm-canonical-challenge-id'
     const legacyChallengeId = 30012345
