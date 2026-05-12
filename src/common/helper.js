@@ -201,7 +201,12 @@ function checkIfExists (source, term) {
  * @param {String} handle the member handle
  * @returns {Promise<Object>} the member of given handle
  */
-async function getMemberByHandle (handle) {
+async function getMemberByHandle (handle) { 
+  const normalizedHandle = handle.trim().toLowerCase()
+   if (!normalizedHandle) {
+    throw new errors.BadRequestError('Member handle must not be blank.')
+  }
+
   const ret = await prisma.member.findUnique({
     where: {
       handleLower: handle.trim().toLowerCase()

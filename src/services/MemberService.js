@@ -342,7 +342,7 @@ async function getMember (currentUser, handle, query) {
 
 getMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true)
@@ -416,7 +416,7 @@ async function getMemberSendgridEmails (currentUser, handle) {
 
 getMemberSendgridEmails.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required()
+  handle: Joi.string().unsafe().required()
 }
 
 /**
@@ -582,7 +582,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
 getProfileCompleteness.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   query: Joi.object().keys({
     fields: Joi.string(),
     toast: Joi.string()
@@ -775,7 +775,7 @@ async function updateMember (currentUser, handle, query, data) {
 
 updateMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true),
@@ -922,7 +922,7 @@ async function updateHandle (currentUser, handle, query, data) {
 
 updateHandle.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true),
@@ -985,7 +985,7 @@ async function verifyEmail (currentUser, handle, query) {
 
 verifyEmail.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   query: Joi.object().keys({
     token: Joi.string().required()
   }).unknown(true).required()
@@ -1262,7 +1262,7 @@ async function updateIdentityRecords (userId, handle, email, timestamp) {
 
 uploadPhoto.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   files: Joi.object().keys({
     photo: Joi.object().required()
   }).required()
@@ -1270,7 +1270,7 @@ uploadPhoto.schema = {
 
 deleteMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   data: Joi.object().keys({
     ticketUrl: Joi.string().uri().required()
   }).required()
@@ -1309,7 +1309,7 @@ async function confirmProfileData (currentUser, handle) {
 
 confirmProfileData.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required()
+  handle: Joi.string().unsafe().required()
 }
 
 /**
@@ -1958,7 +1958,7 @@ async function downloadProfile (currentUser, handle) {
 
 downloadProfile.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required()
+  handle: Joi.string().unsafe().required()
 }
 
 /**
@@ -2206,7 +2206,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
 
 getMemberSkill.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().unsafe().required(),
   skillId: Joi.string().uuid().required()
 }
 
