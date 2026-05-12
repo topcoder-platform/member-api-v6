@@ -80,6 +80,7 @@ model member {
   @@index([status, handleLower])
   @@index([lastLoginDate])
   @@index([availableForGigs])
+  @@index([status, availableForGigs])
   @@schema("members")
 }
 
