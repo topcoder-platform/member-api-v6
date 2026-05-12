@@ -202,16 +202,17 @@ function checkIfExists (source, term) {
  * @returns {Promise<Object>} the member of given handle
  */
 async function getMemberByHandle (handle) {
-  const trimmedHandle = handle.trim().toLowerCase()
+  const handleStr = (handle == null) ? '' : String(handle)
+  const trimmed = handleStr.trim().toLowerCase()
   
   let ret = await prisma.member.findUnique({
-    where: { handleLower: trimmedHandle },
+    where: { handleLower: trimmed },
     include: { maxRating: true, phones: true }
   })
 
-  if ((!ret || !ret.userId) && trimmedHandle !== handle.toLowerCase()) {
+  if ((!ret || !ret.userId) && trimmed !== handleStr.toLowerCase()) {
     ret = await prisma.member.findUnique({
-      where: { handleLower: handle.toLowerCase() },
+      where: { handleLower: handleStr.toLowerCase() },
       include: { maxRating: true, phones: true }
     })
   }
