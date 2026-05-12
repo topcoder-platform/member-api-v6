@@ -110,6 +110,46 @@ describe('stats dimension helper unit tests', () => {
     result.DEVELOP.subTracks[0].rank.should.deep.equal({})
   })
 
+  it('buildUnifiedStatsResponse should expose custom data science rating paths', () => {
+    const result = prismaHelper.buildUnifiedStatsResponse(
+      {
+        userId: global.BigInt(15391415),
+        handle: 'winterflame',
+        handleLower: 'winterflame',
+        maxRating: null
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-ds-id',
+          typeId: 'AI',
+          trackName: TRACK_NAMES.DATA_SCIENCE,
+          typeName: 'AI',
+          challenges: 3,
+          wins: null,
+          rating: 1422,
+          volatility: 331,
+          mostRecentSubmission: null,
+          mostRecentEventDate: new Date('2024-06-01T00:00:00.000Z')
+        }
+      ]
+    )
+
+    should.exist(result.DATA_SCIENCE)
+    should.exist(result.DATA_SCIENCE.AI)
+    result.DATA_SCIENCE.AI.challenges.should.equal(3)
+    result.DATA_SCIENCE.AI.rank.should.deep.equal({
+      rating: 1422,
+      volatility: 331
+    })
+    result.maxRating.should.deep.equal({
+      rating: 1422,
+      track: TRACK_NAMES.DATA_SCIENCE,
+      subTrack: 'AI',
+      ratingColor: '#616BD5'
+    })
+  })
+
   it('buildUnifiedStatsHistoryResponse should preserve canonical challenge ids and names', () => {
     const ratingDate = new Date('2024-01-01T00:00:00.000Z')
     const result = prismaHelper.buildUnifiedStatsHistoryResponse(

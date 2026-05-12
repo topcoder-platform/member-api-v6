@@ -597,6 +597,27 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
           }, _.isNil)
         }
         item.DATA_SCIENCE.MARATHON_MATCH = marathonItem
+      } else if (typeName) {
+        item.DATA_SCIENCE[typeName] = {
+          challenges: toNumber(row.challenges),
+          wins: toNumber(row.wins),
+          mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
+          mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
+          rank: _.omitBy({
+            rating: row.rating,
+            rank: row.globalRank,
+            countryRank: row.countryRank,
+            schoolRank: row.schoolRank,
+            volatility: row.volatility,
+            maximumRating: row.maxRating,
+            minimumRating: row.minRating,
+            avgRank: row.avgRank,
+            avgNumSubmissions: row.avgNumSubmissions,
+            bestRank: row.bestRank,
+            topFiveFinishes: row.topFiveFinishes,
+            topTenFinishes: row.topTenFinishes
+          }, _.isNil)
+        }
       }
     } else if (trackName === 'COPILOT') {
       item.COPILOT = _.omitBy({
@@ -661,6 +682,8 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
             ratingDate: historyDate ? historyDate.getTime() : null,
             mostRecent: !!h.mostRecent,
             oldRating: h.oldRating,
+            oldVolatility: h.oldVolatility,
+            newVolatility: h.newVolatility,
             oldGlobalRank: h.oldGlobalRank,
             newGlobalRank: h.newGlobalRank,
             oldCountryRank: h.oldCountryRank,
@@ -691,6 +714,8 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
           percentile: h.percentile,
           mostRecent: !!h.mostRecent,
           oldRating: h.oldRating,
+          oldVolatility: h.oldVolatility,
+          newVolatility: h.newVolatility,
           oldGlobalRank: h.oldGlobalRank,
           newGlobalRank: h.newGlobalRank,
           oldCountryRank: h.oldCountryRank,

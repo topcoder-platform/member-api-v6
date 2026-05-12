@@ -8953,6 +8953,10 @@ export namespace Prisma {
     userId: number | null
     oldRating: number | null
     newRating: number | null
+    placement: number | null
+    percentile: number | null
+    oldVolatility: number | null
+    newVolatility: number | null
     oldGlobalRank: number | null
     newGlobalRank: number | null
     oldCountryRank: number | null
@@ -8966,6 +8970,10 @@ export namespace Prisma {
     userId: bigint | null
     oldRating: number | null
     newRating: number | null
+    placement: number | null
+    percentile: number | null
+    oldVolatility: number | null
+    newVolatility: number | null
     oldGlobalRank: number | null
     newGlobalRank: number | null
     oldCountryRank: number | null
@@ -8983,6 +8991,10 @@ export namespace Prisma {
     mostRecent: boolean | null
     oldRating: number | null
     newRating: number | null
+    placement: number | null
+    percentile: number | null
+    oldVolatility: number | null
+    newVolatility: number | null
     oldGlobalRank: number | null
     newGlobalRank: number | null
     oldCountryRank: number | null
@@ -9005,6 +9017,10 @@ export namespace Prisma {
     mostRecent: boolean | null
     oldRating: number | null
     newRating: number | null
+    placement: number | null
+    percentile: number | null
+    oldVolatility: number | null
+    newVolatility: number | null
     oldGlobalRank: number | null
     newGlobalRank: number | null
     oldCountryRank: number | null
@@ -9027,6 +9043,10 @@ export namespace Prisma {
     mostRecent: number
     oldRating: number
     newRating: number
+    placement: number
+    percentile: number
+    oldVolatility: number
+    newVolatility: number
     oldGlobalRank: number
     newGlobalRank: number
     oldCountryRank: number
@@ -9047,6 +9067,10 @@ export namespace Prisma {
     userId?: true
     oldRating?: true
     newRating?: true
+    placement?: true
+    percentile?: true
+    oldVolatility?: true
+    newVolatility?: true
     oldGlobalRank?: true
     newGlobalRank?: true
     oldCountryRank?: true
@@ -9060,6 +9084,10 @@ export namespace Prisma {
     userId?: true
     oldRating?: true
     newRating?: true
+    placement?: true
+    percentile?: true
+    oldVolatility?: true
+    newVolatility?: true
     oldGlobalRank?: true
     newGlobalRank?: true
     oldCountryRank?: true
@@ -9077,6 +9105,10 @@ export namespace Prisma {
     mostRecent?: true
     oldRating?: true
     newRating?: true
+    placement?: true
+    percentile?: true
+    oldVolatility?: true
+    newVolatility?: true
     oldGlobalRank?: true
     newGlobalRank?: true
     oldCountryRank?: true
@@ -9099,6 +9131,10 @@ export namespace Prisma {
     mostRecent?: true
     oldRating?: true
     newRating?: true
+    placement?: true
+    percentile?: true
+    oldVolatility?: true
+    newVolatility?: true
     oldGlobalRank?: true
     newGlobalRank?: true
     oldCountryRank?: true
@@ -9121,6 +9157,10 @@ export namespace Prisma {
     mostRecent?: true
     oldRating?: true
     newRating?: true
+    placement?: true
+    percentile?: true
+    oldVolatility?: true
+    newVolatility?: true
     oldGlobalRank?: true
     newGlobalRank?: true
     oldCountryRank?: true
@@ -9230,6 +9270,10 @@ export namespace Prisma {
     mostRecent: boolean
     oldRating: number | null
     newRating: number | null
+    placement: number | null
+    percentile: number | null
+    oldVolatility: number | null
+    newVolatility: number | null
     oldGlobalRank: number | null
     newGlobalRank: number | null
     oldCountryRank: number | null
@@ -9271,6 +9315,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
+    placement?: boolean
+    percentile?: boolean
+    oldVolatility?: boolean
+    newVolatility?: boolean
     oldGlobalRank?: boolean
     newGlobalRank?: boolean
     oldCountryRank?: boolean
@@ -9294,6 +9342,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
+    placement?: boolean
+    percentile?: boolean
+    oldVolatility?: boolean
+    newVolatility?: boolean
     oldGlobalRank?: boolean
     newGlobalRank?: boolean
     oldCountryRank?: boolean
@@ -9317,6 +9369,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
+    placement?: boolean
+    percentile?: boolean
+    oldVolatility?: boolean
+    newVolatility?: boolean
     oldGlobalRank?: boolean
     newGlobalRank?: boolean
     oldCountryRank?: boolean
@@ -9340,6 +9396,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: boolean
     newRating?: boolean
+    placement?: boolean
+    percentile?: boolean
+    oldVolatility?: boolean
+    newVolatility?: boolean
     oldGlobalRank?: boolean
     newGlobalRank?: boolean
     oldCountryRank?: boolean
@@ -9353,7 +9413,7 @@ export namespace Prisma {
     updatedBy?: boolean
   }
 
-  export type memberStatsHistoryOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "userId" | "trackId" | "typeId" | "challengeId" | "mostRecent" | "oldRating" | "newRating" | "oldGlobalRank" | "newGlobalRank" | "oldCountryRank" | "newCountryRank" | "oldSchoolRank" | "newSchoolRank" | "eventDate" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberStatsHistory"]>
+  export type memberStatsHistoryOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "userId" | "trackId" | "typeId" | "challengeId" | "mostRecent" | "oldRating" | "newRating" | "placement" | "percentile" | "oldVolatility" | "newVolatility" | "oldGlobalRank" | "newGlobalRank" | "oldCountryRank" | "newCountryRank" | "oldSchoolRank" | "newSchoolRank" | "eventDate" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberStatsHistory"]>
   export type memberStatsHistoryInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     member?: boolean | memberDefaultArgs<ExtArgs>
   }
@@ -9378,6 +9438,10 @@ export namespace Prisma {
       mostRecent: boolean
       oldRating: number | null
       newRating: number | null
+      placement: number | null
+      percentile: number | null
+      oldVolatility: number | null
+      newVolatility: number | null
       oldGlobalRank: number | null
       newGlobalRank: number | null
       oldCountryRank: number | null
@@ -9821,6 +9885,10 @@ export namespace Prisma {
     readonly mostRecent: FieldRef<"memberStatsHistory", 'Boolean'>
     readonly oldRating: FieldRef<"memberStatsHistory", 'Int'>
     readonly newRating: FieldRef<"memberStatsHistory", 'Int'>
+    readonly placement: FieldRef<"memberStatsHistory", 'Int'>
+    readonly percentile: FieldRef<"memberStatsHistory", 'Float'>
+    readonly oldVolatility: FieldRef<"memberStatsHistory", 'Int'>
+    readonly newVolatility: FieldRef<"memberStatsHistory", 'Int'>
     readonly oldGlobalRank: FieldRef<"memberStatsHistory", 'Int'>
     readonly newGlobalRank: FieldRef<"memberStatsHistory", 'Int'>
     readonly oldCountryRank: FieldRef<"memberStatsHistory", 'Int'>
@@ -24850,6 +24918,10 @@ export namespace Prisma {
     mostRecent: 'mostRecent',
     oldRating: 'oldRating',
     newRating: 'newRating',
+    placement: 'placement',
+    percentile: 'percentile',
+    oldVolatility: 'oldVolatility',
+    newVolatility: 'newVolatility',
     oldGlobalRank: 'oldGlobalRank',
     newGlobalRank: 'newGlobalRank',
     oldCountryRank: 'oldCountryRank',
@@ -25850,6 +25922,10 @@ export namespace Prisma {
     mostRecent?: BoolFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableFilter<"memberStatsHistory"> | number | null
+    placement?: IntNullableFilter<"memberStatsHistory"> | number | null
+    percentile?: FloatNullableFilter<"memberStatsHistory"> | number | null
+    oldVolatility?: IntNullableFilter<"memberStatsHistory"> | number | null
+    newVolatility?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
     newGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldCountryRank?: IntNullableFilter<"memberStatsHistory"> | number | null
@@ -25873,6 +25949,10 @@ export namespace Prisma {
     mostRecent?: SortOrder
     oldRating?: SortOrderInput | SortOrder
     newRating?: SortOrderInput | SortOrder
+    placement?: SortOrderInput | SortOrder
+    percentile?: SortOrderInput | SortOrder
+    oldVolatility?: SortOrderInput | SortOrder
+    newVolatility?: SortOrderInput | SortOrder
     oldGlobalRank?: SortOrderInput | SortOrder
     newGlobalRank?: SortOrderInput | SortOrder
     oldCountryRank?: SortOrderInput | SortOrder
@@ -25899,6 +25979,10 @@ export namespace Prisma {
     mostRecent?: BoolFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableFilter<"memberStatsHistory"> | number | null
+    placement?: IntNullableFilter<"memberStatsHistory"> | number | null
+    percentile?: FloatNullableFilter<"memberStatsHistory"> | number | null
+    oldVolatility?: IntNullableFilter<"memberStatsHistory"> | number | null
+    newVolatility?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
     newGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldCountryRank?: IntNullableFilter<"memberStatsHistory"> | number | null
@@ -25922,6 +26006,10 @@ export namespace Prisma {
     mostRecent?: SortOrder
     oldRating?: SortOrderInput | SortOrder
     newRating?: SortOrderInput | SortOrder
+    placement?: SortOrderInput | SortOrder
+    percentile?: SortOrderInput | SortOrder
+    oldVolatility?: SortOrderInput | SortOrder
+    newVolatility?: SortOrderInput | SortOrder
     oldGlobalRank?: SortOrderInput | SortOrder
     newGlobalRank?: SortOrderInput | SortOrder
     oldCountryRank?: SortOrderInput | SortOrder
@@ -25952,6 +26040,10 @@ export namespace Prisma {
     mostRecent?: BoolWithAggregatesFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
+    placement?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
+    percentile?: FloatNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
+    oldVolatility?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
+    newVolatility?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
     newGlobalRank?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
     oldCountryRank?: IntNullableWithAggregatesFilter<"memberStatsHistory"> | number | null
@@ -27706,6 +27798,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
+    placement?: number | null
+    percentile?: number | null
+    oldVolatility?: number | null
+    newVolatility?: number | null
     oldGlobalRank?: number | null
     newGlobalRank?: number | null
     oldCountryRank?: number | null
@@ -27729,6 +27825,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
+    placement?: number | null
+    percentile?: number | null
+    oldVolatility?: number | null
+    newVolatility?: number | null
     oldGlobalRank?: number | null
     newGlobalRank?: number | null
     oldCountryRank?: number | null
@@ -27750,6 +27850,10 @@ export namespace Prisma {
     mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
+    placement?: NullableIntFieldUpdateOperationsInput | number | null
+    percentile?: NullableFloatFieldUpdateOperationsInput | number | null
+    oldVolatility?: NullableIntFieldUpdateOperationsInput | number | null
+    newVolatility?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     newGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     oldCountryRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -27773,6 +27877,10 @@ export namespace Prisma {
     mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
+    placement?: NullableIntFieldUpdateOperationsInput | number | null
+    percentile?: NullableFloatFieldUpdateOperationsInput | number | null
+    oldVolatility?: NullableIntFieldUpdateOperationsInput | number | null
+    newVolatility?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     newGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     oldCountryRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -27795,6 +27903,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
+    placement?: number | null
+    percentile?: number | null
+    oldVolatility?: number | null
+    newVolatility?: number | null
     oldGlobalRank?: number | null
     newGlobalRank?: number | null
     oldCountryRank?: number | null
@@ -27816,6 +27928,10 @@ export namespace Prisma {
     mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
+    placement?: NullableIntFieldUpdateOperationsInput | number | null
+    percentile?: NullableFloatFieldUpdateOperationsInput | number | null
+    oldVolatility?: NullableIntFieldUpdateOperationsInput | number | null
+    newVolatility?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     newGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     oldCountryRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -27838,6 +27954,10 @@ export namespace Prisma {
     mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
+    placement?: NullableIntFieldUpdateOperationsInput | number | null
+    percentile?: NullableFloatFieldUpdateOperationsInput | number | null
+    oldVolatility?: NullableIntFieldUpdateOperationsInput | number | null
+    newVolatility?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     newGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     oldCountryRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -29867,6 +29987,10 @@ export namespace Prisma {
     mostRecent?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
+    placement?: SortOrder
+    percentile?: SortOrder
+    oldVolatility?: SortOrder
+    newVolatility?: SortOrder
     oldGlobalRank?: SortOrder
     newGlobalRank?: SortOrder
     oldCountryRank?: SortOrder
@@ -29885,6 +30009,10 @@ export namespace Prisma {
     userId?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
+    placement?: SortOrder
+    percentile?: SortOrder
+    oldVolatility?: SortOrder
+    newVolatility?: SortOrder
     oldGlobalRank?: SortOrder
     newGlobalRank?: SortOrder
     oldCountryRank?: SortOrder
@@ -29902,6 +30030,10 @@ export namespace Prisma {
     mostRecent?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
+    placement?: SortOrder
+    percentile?: SortOrder
+    oldVolatility?: SortOrder
+    newVolatility?: SortOrder
     oldGlobalRank?: SortOrder
     newGlobalRank?: SortOrder
     oldCountryRank?: SortOrder
@@ -29924,6 +30056,10 @@ export namespace Prisma {
     mostRecent?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
+    placement?: SortOrder
+    percentile?: SortOrder
+    oldVolatility?: SortOrder
+    newVolatility?: SortOrder
     oldGlobalRank?: SortOrder
     newGlobalRank?: SortOrder
     oldCountryRank?: SortOrder
@@ -29942,6 +30078,10 @@ export namespace Prisma {
     userId?: SortOrder
     oldRating?: SortOrder
     newRating?: SortOrder
+    placement?: SortOrder
+    percentile?: SortOrder
+    oldVolatility?: SortOrder
+    newVolatility?: SortOrder
     oldGlobalRank?: SortOrder
     newGlobalRank?: SortOrder
     oldCountryRank?: SortOrder
@@ -32469,6 +32609,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
+    placement?: number | null
+    percentile?: number | null
+    oldVolatility?: number | null
+    newVolatility?: number | null
     oldGlobalRank?: number | null
     newGlobalRank?: number | null
     oldCountryRank?: number | null
@@ -32490,6 +32634,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
+    placement?: number | null
+    percentile?: number | null
+    oldVolatility?: number | null
+    newVolatility?: number | null
     oldGlobalRank?: number | null
     newGlobalRank?: number | null
     oldCountryRank?: number | null
@@ -32761,6 +32909,10 @@ export namespace Prisma {
     mostRecent?: BoolFilter<"memberStatsHistory"> | boolean
     oldRating?: IntNullableFilter<"memberStatsHistory"> | number | null
     newRating?: IntNullableFilter<"memberStatsHistory"> | number | null
+    placement?: IntNullableFilter<"memberStatsHistory"> | number | null
+    percentile?: FloatNullableFilter<"memberStatsHistory"> | number | null
+    oldVolatility?: IntNullableFilter<"memberStatsHistory"> | number | null
+    newVolatility?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
     newGlobalRank?: IntNullableFilter<"memberStatsHistory"> | number | null
     oldCountryRank?: IntNullableFilter<"memberStatsHistory"> | number | null
@@ -35860,6 +36012,10 @@ export namespace Prisma {
     mostRecent?: boolean
     oldRating?: number | null
     newRating?: number | null
+    placement?: number | null
+    percentile?: number | null
+    oldVolatility?: number | null
+    newVolatility?: number | null
     oldGlobalRank?: number | null
     newGlobalRank?: number | null
     oldCountryRank?: number | null
@@ -36034,6 +36190,10 @@ export namespace Prisma {
     mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
+    placement?: NullableIntFieldUpdateOperationsInput | number | null
+    percentile?: NullableFloatFieldUpdateOperationsInput | number | null
+    oldVolatility?: NullableIntFieldUpdateOperationsInput | number | null
+    newVolatility?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     newGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     oldCountryRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -36055,6 +36215,10 @@ export namespace Prisma {
     mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
+    placement?: NullableIntFieldUpdateOperationsInput | number | null
+    percentile?: NullableFloatFieldUpdateOperationsInput | number | null
+    oldVolatility?: NullableIntFieldUpdateOperationsInput | number | null
+    newVolatility?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     newGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     oldCountryRank?: NullableIntFieldUpdateOperationsInput | number | null
@@ -36076,6 +36240,10 @@ export namespace Prisma {
     mostRecent?: BoolFieldUpdateOperationsInput | boolean
     oldRating?: NullableIntFieldUpdateOperationsInput | number | null
     newRating?: NullableIntFieldUpdateOperationsInput | number | null
+    placement?: NullableIntFieldUpdateOperationsInput | number | null
+    percentile?: NullableFloatFieldUpdateOperationsInput | number | null
+    oldVolatility?: NullableIntFieldUpdateOperationsInput | number | null
+    newVolatility?: NullableIntFieldUpdateOperationsInput | number | null
     oldGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     newGlobalRank?: NullableIntFieldUpdateOperationsInput | number | null
     oldCountryRank?: NullableIntFieldUpdateOperationsInput | number | null

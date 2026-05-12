@@ -7,21 +7,28 @@
 
 'use strict'
 
-const challengeResultRelationCache = new WeakMap()
+const relationCache = new WeakMap()
 
 function quotePgIdentifier (value) {
   return `"${String(value).replace(/"/g, '""')}"`
 }
 
 /**
- * Resolve the schema-qualified challengeResult relation name.
+ * Resolve a schema-qualified review-api relation name.
  * @param {Object} reviewDbClient raw pg pool/client
+ * @param {string} relationName unquoted relation name
  * @returns {Promise<string>} quoted schema-qualified relation name
  * @throws {Error} if the relation cannot be found in the configured review DB
  */
-async function resolveChallengeResultRelation (reviewDbClient) {
-  if (challengeResultRelationCache.has(reviewDbClient)) {
-    return challengeResultRelationCache.get(reviewDbClient)
+async function resolveReviewDbRelation (reviewDbClient, relationName) {
+  let clientCache = relationCache.get(reviewDbClient)
+  if (!clientCache) {
+    clientCache = new Map()
+    relationCache.set(reviewDbClient, clientCache)
+  }
+
+  if (clientCache.has(relationName)) {
+    return clientCache.get(relationName)
   }
 
   const result = await reviewDbClient.query(`
@@ -29,7 +36,7 @@ async function resolveChallengeResultRelation (reviewDbClient) {
     FROM pg_catalog.pg_class c
     INNER JOIN pg_catalog.pg_namespace n
       ON n.oid = c.relnamespace
-    WHERE c.relname = 'challengeResult'
+    WHERE c.relname = $1
       AND c.relkind IN ('r', 'p', 'v', 'm')
     ORDER BY
       CASE
@@ -39,16 +46,26 @@ async function resolveChallengeResultRelation (reviewDbClient) {
       END,
       n.nspname ASC
     LIMIT 1
-  `)
+  `, [relationName])
 
   const schemaName = result.rows[0] && result.rows[0].schemaName
   if (!schemaName) {
-    throw new Error('REVIEW_DB_URL does not expose challengeResult. Verify REVIEW_DB_URL points to the review-api database and that review-api-v6 migrations have been deployed.')
+    throw new Error(`REVIEW_DB_URL does not expose ${relationName}. Verify REVIEW_DB_URL points to the review-api database and that review-api-v6 migrations have been deployed.`)
   }
 
-  const relation = `${quotePgIdentifier(schemaName)}."challengeResult"`
-  challengeResultRelationCache.set(reviewDbClient, relation)
+  const relation = `${quotePgIdentifier(schemaName)}.${quotePgIdentifier(relationName)}`
+  clientCache.set(relationName, relation)
   return relation
+}
+
+/**
+ * Resolve the schema-qualified challengeResult relation name.
+ * @param {Object} reviewDbClient raw pg pool/client
+ * @returns {Promise<string>} quoted schema-qualified relation name
+ * @throws {Error} if the relation cannot be found in the configured review DB
+ */
+async function resolveChallengeResultRelation (reviewDbClient) {
+  return resolveReviewDbRelation(reviewDbClient, 'challengeResult')
 }
 
 /**
@@ -61,6 +78,7 @@ async function assertChallengeResultRelation (reviewDbClient) {
 }
 
 module.exports = {
+  resolveReviewDbRelation,
   resolveChallengeResultRelation,
   assertChallengeResultRelation
 }

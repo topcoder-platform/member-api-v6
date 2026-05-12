@@ -488,6 +488,126 @@ describe('develop rating engine unit tests', () => {
     )
   })
 
+  it('rerateDevTrack should seed rerates from historical volatility checkpoints', async () => {
+    const targetUserId = toBigInt(1011)
+    const opponentUserId = toBigInt(2022)
+    const challengeOneId = 'volatility-seed-1'
+    const challengeTwoId = 'volatility-seed-2'
+    const opponentSeedChallengeId = 'opponent-volatility-seed'
+
+    const targetSeedRating = 1500
+    const targetSeedVolatility = 220
+    const opponentSeedRating = 1600
+    const opponentSeedVolatility = 780
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [
+        {
+          id: toBigInt(101),
+          userId: targetUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: challengeOneId,
+          mostRecent: false,
+          oldRating: null,
+          newRating: targetSeedRating,
+          oldVolatility: null,
+          newVolatility: targetSeedVolatility,
+          eventDate: new Date('2024-01-01T00:00:00.000Z')
+        },
+        {
+          id: toBigInt(102),
+          userId: opponentUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: opponentSeedChallengeId,
+          mostRecent: false,
+          oldRating: null,
+          newRating: opponentSeedRating,
+          oldVolatility: null,
+          newVolatility: opponentSeedVolatility,
+          eventDate: new Date('2024-01-01T00:00:00.000Z')
+        }
+      ],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId: challengeOneId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2024-01-01T09:00:00.000Z')
+      },
+      {
+        challengeId: challengeTwoId,
+        userId: targetUserId,
+        finalScore: 50,
+        placement: 2,
+        rated: true,
+        createdAt: new Date('2024-02-01T10:00:00.000Z')
+      },
+      {
+        challengeId: challengeTwoId,
+        userId: opponentUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2024-02-01T09:00:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [challengeOneId]: {
+        id: challengeOneId,
+        endDate: new Date('2024-01-01T00:00:00.000Z'),
+        track: { name: 'DEVELOPMENT' },
+        type: { name: 'Challenge' }
+      },
+      [challengeTwoId]: {
+        id: challengeTwoId,
+        endDate: new Date('2024-02-01T00:00:00.000Z'),
+        track: { name: 'DEVELOPMENT' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, targetSeedRating, targetSeedVolatility, 1, 50),
+      createParticipant(opponentUserId, opponentSeedRating, opponentSeedVolatility, 1, 100)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      challengeTwoId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === CHALLENGE_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeTwoId)
+
+    should.equal(statsRow.rating, expectedTarget.rating)
+    should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(historyRow.oldRating, targetSeedRating)
+    should.equal(historyRow.oldVolatility, targetSeedVolatility)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+    should.equal(historyRow.newVolatility, expectedTarget.volatility)
+  })
+
   it('rerateDevTrack should preserve a higher Marathon Match memberMaxRating', async () => {
     const targetUserId = toBigInt(3003)
     const opponentUserId = toBigInt(4004)

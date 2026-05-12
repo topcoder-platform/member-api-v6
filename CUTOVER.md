@@ -83,6 +83,7 @@ Recommended rollout:
 | D1 | `POST /members/:handle/stats/rerate` | `{ "challengeId": "<earliest-dev-challenge-uuid>", "trackId": "DEVELOP", "typeId": "Challenge" }` | Use the earliest Development/Challenge `challengeId` for a full-history rerate |
 | D2 | `POST /members/:handle/stats/rerate` | `{ "challengeId": "<starting-dev-challenge-uuid>", "trackId": "DEVELOP", "typeId": "Challenge" }` | Re-rates Development/Challenge data from a specific challenge forward |
 | D3 | `POST /members/:handle/stats/rerate` | `{ "challengeId": "<starting-mm-challenge-uuid>", "trackId": "DATA_SCIENCE", "typeId": "MARATHON_MATCH" }` | Use the earliest Marathon Match `challengeId` for full history, or a later one for a partial rerate |
+| D4 | `node src/scripts/rerateMarathonMatches.js --dry-run` then `node src/scripts/rerateMarathonMatches.js --concurrency 5` | n/a | Bulk rerates native Marathon Match ratings for every discovered competitor from the beginning. Challenge discovery uses only the Marathon Match `ChallengeType` id, so Data Science and Development-track MM imports are replayed together into `DATA_SCIENCE / MARATHON_MATCH`; no `MM_DB_URL` or marathon-match-api schema is required |
 
 - Auth: Bearer token with `rerate:member_stats` scope, or admin JWT
 - `challengeId` is required for rerates; use the earliest applicable challenge when you need a full-history rerate.

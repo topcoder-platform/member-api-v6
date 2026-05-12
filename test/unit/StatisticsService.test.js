@@ -18,6 +18,7 @@ const developRatingEnginePath = path.resolve(__dirname, '../../src/ratings/devel
 const mmRatingEnginePath = path.resolve(__dirname, '../../src/ratings/mmRatingEngine.js')
 const prismaHelperPath = path.resolve(__dirname, '../../src/common/prismaHelper.js')
 const joiPath = require.resolve('joi')
+const configPath = require.resolve('config')
 
 function setStubModule (modulePath, exports) {
   delete require.cache[modulePath]
@@ -207,9 +208,11 @@ function loadStatisticsService (options = {}) {
     [developRatingEnginePath]: require.cache[developRatingEnginePath],
     [mmRatingEnginePath]: require.cache[mmRatingEnginePath],
     [prismaHelperPath]: require.cache[prismaHelperPath],
-    [joiPath]: require.cache[joiPath]
+    [joiPath]: require.cache[joiPath],
+    [configPath]: require.cache[configPath]
   }
   const originalFetch = global.fetch
+  const realConfig = originalEntries[configPath] ? originalEntries[configPath].exports : require('config')
 
   const statsDimensionHelper = createStatsDimensionHelperStub()
   const member = options.member || {
@@ -219,6 +222,9 @@ function loadStatisticsService (options = {}) {
   }
   const prismaStub = options.prismaStub || {
     $queryRaw: async () => [],
+    member: {
+      findMany: async () => []
+    },
     memberStats: {
       findFirst: async () => null,
       findMany: async () => []
@@ -239,9 +245,11 @@ function loadStatisticsService (options = {}) {
     getMemberByHandle: async () => member,
     getAllowedGroupIds: async () => options.groupIds || ['10'],
     canManageMember: () => true,
+    hasAdminRole: () => true,
     bigIntToNumber: (value) => (value ? Number(value) : null)
   })
   setStubModule(loggerPath, {
+    debug: () => {},
     info: () => {},
     warn: () => {},
     error: () => {},
@@ -255,12 +263,19 @@ function loadStatisticsService (options = {}) {
     },
     getClient: () => prismaStub,
     getSkillsClient: () => ({}),
+    getMmClient: () => options.mmClient || {},
     getChallengesClient: () => ({
       challenge: {
+        findFirst: async () => options.challengeRow || null,
         findMany: async () => challengeRows
       },
       ChallengeWinner: {
-        findMany: async () => challengeWinnerRows
+        findMany: async (args) => {
+          if (options.onChallengeWinnerFindMany) {
+            options.onChallengeWinnerFindMany(args)
+          }
+          return challengeWinnerRows
+        }
       }
     })
   })
@@ -271,11 +286,17 @@ function loadStatisticsService (options = {}) {
     resolveChallengeResultRelation: async () => 'reviews."challengeResult"'
   })
   setStubModule(joiPath, createJoiStub())
+  setStubModule(configPath, {
+    ...realConfig,
+    RATING_PATHS: options.ratingPaths || realConfig.RATING_PATHS
+  })
   setStubModule(developRatingEnginePath, {
-    rerateDevTrack: async () => ({})
+    rerateDevTrack: options.rerateDevTrack || (async () => ({}))
   })
   setStubModule(mmRatingEnginePath, {
-    rerateMmTrack: async () => ({})
+    fetchRatingPathParticipantsForChallenge: options.fetchRatingPathParticipantsForChallenge || (async () => ({ participantRows: [] })),
+    resolveRatingPathParticipantId: options.resolveRatingPathParticipantId || ((row) => global.BigInt(row.memberId || row.userId)),
+    rerateMmTrack: options.rerateMmTrack || (async () => ({}))
   })
 
   delete require.cache[servicePath]
@@ -328,6 +349,217 @@ describe('statistics service unit tests', () => {
       result.subTrack.should.equal('First2Finish')
       result.distribution.ratingRange0To099.should.equal(0)
       Object.values(result.distribution).every(value => value === 0).should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getDistribution should map grouped rating rows into supported buckets', async () => {
+    let queryCalls = 0
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => {
+          queryCalls += 1
+          return [
+            { rangeStart: 0, count: 3 },
+            { rangeStart: 100, count: 5 },
+            { rangeStart: 3900, count: 2 },
+            { rangeStart: 4000, count: 9 }
+          ]
+        },
+        memberStats: {
+          findFirst: async () => {
+            throw new Error('findFirst should not run when rated distribution rows exist')
+          },
+          findMany: async () => []
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      }
+    })
+
+    try {
+      const result = await service.getDistribution({
+        track: 'DATA_SCIENCE',
+        subTrack: 'AI'
+      })
+
+      queryCalls.should.equal(1)
+      result.track.should.equal('DATA_SCIENCE')
+      result.subTrack.should.equal('AI')
+      result.distribution.ratingRange0To099.should.equal(3)
+      result.distribution.ratingRange100To199.should.equal(5)
+      result.distribution.ratingRange3900To3999.should.equal(2)
+      should.not.exist(result.distribution.ratingRange4000To4099)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rerateMemberStats should route configured rating paths to the Marathon Match engine', async () => {
+    let capturedOptions
+    const { service, restore } = loadStatisticsService({
+      rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
+        capturedOptions = options
+        should.equal(mmClient, null)
+        should.equal(String(userId), '88770025')
+        should.equal(challengeId, 'ai-target-challenge')
+        return {
+          challengesProcessed: 1,
+          ratingPathChallengesProcessed: 2,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateMemberStats({ isMachine: true }, 'devtest1400', {
+        challengeId: 'ai-target-challenge',
+        ratingName: 'AI'
+      })
+
+      should.exist(capturedOptions)
+      capturedOptions.ratingPath.name.should.equal('AI')
+      capturedOptions.ratingPath.tags.should.deep.equal(['AI', 'AI Exponential League'])
+      result.trackId.should.equal('DATA_SCIENCE')
+      result.typeId.should.equal('AI')
+      result.ratingName.should.equal('AI')
+      result.ratingTags.should.deep.equal(['AI', 'AI Exponential League'])
+      result.ratingPathChallengesProcessed.should.equal(2)
+      result.ratingsUpdated.should.equal(1)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rerateMemberStats should expose configured rating path skill ids in the rerate summary', async () => {
+    const skillIds = [
+      '9d3f5b4d-0000-4000-8000-000000000001',
+      '9d3f5b4d-0000-4000-8000-000000000002'
+    ]
+    let capturedOptions
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [{
+        name: 'Java MySQL',
+        track: 'DEVELOPMENT',
+        skillIds
+      }],
+      rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
+        capturedOptions = options
+        should.equal(mmClient, null)
+        should.equal(String(userId), '88770025')
+        should.equal(challengeId, 'java-mysql-target-challenge')
+        return {
+          challengesProcessed: 1,
+          ratingPathChallengesProcessed: 2,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateMemberStats({ isMachine: true }, 'devtest1400', {
+        challengeId: 'java-mysql-target-challenge',
+        ratingName: 'Java MySQL'
+      })
+
+      should.exist(capturedOptions)
+      capturedOptions.ratingPath.name.should.equal('Java MySQL')
+      capturedOptions.ratingPath.skillIds.should.deep.equal(skillIds)
+      result.trackId.should.equal('DEVELOP')
+      result.typeId.should.equal('Java MySQL')
+      result.ratingName.should.equal('Java MySQL')
+      result.ratingSkillIds.should.deep.equal(skillIds)
+      result.ratingPathChallengesProcessed.should.equal(2)
+      result.ratingsUpdated.should.equal(1)
+    } finally {
+      restore()
+    }
+  })
+
+  it('rerateChallengeSubmitterRatings should rerate native and matching named ratings for every submitter', async () => {
+    const devRerateCalls = []
+    const namedRerateCalls = []
+    const { service, restore } = loadStatisticsService({
+      challengeRow: {
+        id: 'ai-target-challenge',
+        status: 'COMPLETED',
+        endDate: new Date('2026-01-15T00:00:00.000Z'),
+        trackId: 'track-dev-id',
+        typeId: 'type-challenge-id',
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['AI'],
+        skills: [],
+        metadata: []
+      },
+      reviewRows: [
+        { challengeId: 'ai-target-challenge', userId: '101', finalScore: 98, placement: 1 },
+        { challengeId: 'ai-target-challenge', userId: '102', finalScore: 87, placement: 2 },
+        { challengeId: 'ai-target-challenge', userId: '101', finalScore: 96, placement: 3 }
+      ],
+      prismaStub: {
+        member: {
+          findMany: async ({ where }) => where.userId.in.map((userId) => ({ userId }))
+        }
+      },
+      rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, challengeId) => {
+        devRerateCalls.push({
+          userId: String(userId),
+          challengeId
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      },
+      rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
+        should.equal(mmClient, null)
+        namedRerateCalls.push({
+          userId: String(userId),
+          challengeId,
+          ratingName: options.ratingPath.name
+        })
+        return {
+          challengesProcessed: 1,
+          ratingPathChallengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateChallengeSubmitterRatings({ isMachine: true }, {
+        challengeId: 'ai-target-challenge'
+      })
+
+      result.rerated.should.equal(true)
+      result.membersProcessed.should.equal(2)
+      result.ratingsAttempted.should.equal(4)
+      result.ratingsUpdated.should.equal(4)
+      result.participantIds.should.deep.equal(['101', '102'])
+      result.ratings.should.deep.equal([
+        {
+          trackId: 'DEVELOP',
+          typeId: 'Challenge'
+        },
+        {
+          trackId: 'DATA_SCIENCE',
+          typeId: 'AI',
+          ratingName: 'AI',
+          ratingTags: ['AI', 'AI Exponential League'],
+          ratingSkillIds: []
+        }
+      ])
+      devRerateCalls.should.deep.equal([
+        { userId: '101', challengeId: 'ai-target-challenge' },
+        { userId: '102', challengeId: 'ai-target-challenge' }
+      ])
+      namedRerateCalls.should.deep.equal([
+        { userId: '101', challengeId: 'ai-target-challenge', ratingName: 'AI' },
+        { userId: '102', challengeId: 'ai-target-challenge', ratingName: 'AI' }
+      ])
     } finally {
       restore()
     }
@@ -941,6 +1173,151 @@ describe('statistics service unit tests', () => {
       result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('Winner fallback challenge')
       result[0].DEVELOP.subTracks[0].history[0].placement.should.equal(1)
       result[0].DEVELOP.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should offset persisted passed-review placements by paid winners', async () => {
+    const ratingDate = new Date('2025-08-27T17:05:00.000Z')
+    const challenge = {
+      id: 'mm-challenge-uuid',
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: ratingDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null,
+      winners: [{
+        placement: 1
+      }]
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-challenge-uuid',
+            eventDate: ratingDate,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [challenge],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'mm-challenge-uuid',
+        type: 'PASSED_REVIEW',
+        placement: 3,
+        createdAt: new Date('2025-08-27T17:05:00.000Z'),
+        challenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(4)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should surface passed-review Marathon Match winners under Data Science', async () => {
+    const olderDate = new Date('2024-06-18T00:00:00.000Z')
+    const newerDate = new Date('2025-08-27T17:05:00.000Z')
+    let winnerFindManyArgs
+    const oldChallenge = {
+      id: 'old-mm-challenge',
+      legacyId: null,
+      name: 'Marathon Match 154',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: olderDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const newChallenge = {
+      id: 'new-mm-challenge',
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-dev-id',
+      typeId: 'type-mm-id',
+      endDate: newerDate,
+      winners: [{
+        placement: 1
+      }]
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'old-mm-challenge',
+            eventDate: olderDate,
+            newRating: 2680,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [oldChallenge],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'new-mm-challenge',
+        type: 'PASSED_REVIEW',
+        placement: 3,
+        createdAt: new Date('2026-01-29T21:08:01.332Z'),
+        challenge: newChallenge
+      }],
+      onChallengeWinnerFindMany: (args) => {
+        winnerFindManyArgs = args
+      }
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      winnerFindManyArgs.where.type.in.should.include('PASSED_REVIEW')
+      should.exist(winnerFindManyArgs.select.challenge.select.winners)
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      should.not.exist(result[0].DEVELOP)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(2)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeId.should.equal('new-mm-challenge')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(4)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].challengeId.should.equal('old-mm-challenge')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].mostRecent.should.equal(false)
     } finally {
       restore()
     }

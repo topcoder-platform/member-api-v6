@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "TopCoder Member V6 API",
   "main": "app.js",
+  "packageManager": "pnpm@10.33.2",
   "scripts": {
     "postinstall": "prisma generate --schema=prisma/schema.prisma && prisma generate --schema=prisma/identity-schema.prisma && prisma generate --schema=prisma/challenge-schema.prisma",
     "start": "node app.js",
@@ -15,7 +16,9 @@
     "test": "mocha -t 20000 test/unit/*.test.js --exit",
     "test:cov": "nyc --reporter=html --reporter=text npm test",
     "migrate-dynamo-data": "node src/scripts/migrate-dynamo-data.js",
-    "recalculate-member-stats": "node src/scripts/recalculateMemberStats.js"
+    "recalculate-member-stats": "node src/scripts/recalculateMemberStats.js",
+    "rerate-rating-path": "node src/scripts/rerateRatingPath.js",
+    "rerate-marathon-matches": "node src/scripts/rerateMarathonMatches.js"
   },
   "author": "TCSCODER",
   "license": "none",

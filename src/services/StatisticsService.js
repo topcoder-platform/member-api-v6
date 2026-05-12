@@ -16,7 +16,20 @@ const prismaHelper = require('../common/prismaHelper')
 const reviewDb = require('../common/reviewDb')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
-const { rerateMmTrack } = require('../ratings/mmRatingEngine')
+const {
+  RATING_METADATA_SELECT,
+  isChallengeRated
+} = require('../ratings/challengeRatingStatus')
+const {
+  fetchRatingPathParticipantsForChallenge,
+  resolveRatingPathParticipantId,
+  rerateMmTrack
+} = require('../ratings/mmRatingEngine')
+const {
+  challengeMatchesRatingPath,
+  getConfiguredRatingPath,
+  normalizeRatingPathConfigs
+} = require('../ratings/ratingPathConfig')
 const {
   TRACK_NAMES,
   TYPE_NAMES,
@@ -43,11 +56,18 @@ const MEMBER_STATS_FIELDS = ['userId', 'groupId', 'handle', 'handleLower', 'maxR
 const LEGACY_STATS_READ_SOURCE = 'legacy'
 const SUPPORTED_STATS_READ_SOURCES = ['unified', LEGACY_STATS_READ_SOURCE]
 const DISTRIBUTION_RANGES = _.range(0, 4000, 100)
+const DISTRIBUTION_MIN_RATING = 0
+const DISTRIBUTION_MAX_RATING_EXCLUSIVE = 4000
 const configuredStatsReadSource = _.toLower(String(config.STATS_READ_SOURCE || 'unified').trim())
 if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
   logger.warn(`Invalid STATS_READ_SOURCE='${config.STATS_READ_SOURCE}'. Falling back to 'unified'.`)
 }
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
+const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
+const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
+const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
+const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
+const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -283,6 +303,350 @@ function resolveTypeName (typeId) {
   return getCanonicalTypeName(typeId)
 }
 
+/**
+ * Resolve a configured rating path from the service config.
+ * @param {*} ratingName requested rating path name
+ * @returns {Object|null} normalized rating path config, or null when no name is supplied
+ * @throws {errors.BadRequestError} when the requested rating path is not configured
+ */
+function resolveConfiguredRatingPath (ratingName) {
+  if (_.isNil(ratingName) || String(ratingName).trim() === '') {
+    return null
+  }
+
+  const ratingPath = getConfiguredRatingPath(config.RATING_PATHS, ratingName)
+  if (!ratingPath) {
+    throw new errors.BadRequestError(`Rating path '${ratingName}' is not configured.`)
+  }
+
+  return ratingPath
+}
+
+/**
+ * Convert a member identifier into the BigInt shape used by Prisma relations.
+ * @param {*} value raw member user id
+ * @returns {BigInt} normalized user id
+ */
+function toBigIntUserId (value) {
+  if (Object.prototype.toString.call(value) === '[object BigInt]') {
+    return value
+  }
+
+  if (typeof global.BigInt !== 'function') {
+    throw new Error('BigInt is not supported in this runtime')
+  }
+
+  return global.BigInt(String(value).trim())
+}
+
+/**
+ * Convert a user id into a stable response/cache key.
+ * @param {*} value raw user id
+ * @returns {string} string user id
+ */
+function stringifyUserId (value) {
+  return String(value)
+}
+
+/**
+ * Resolve whether challenge metadata allows rating updates.
+ * Missing rating metadata defaults to rated, matching the rating engines'
+ * historical replay behavior for older challenges.
+ * @param {Object} challenge challenge metadata row
+ * @returns {boolean} true when the challenge should be considered rated
+ */
+function isChallengeRatingEnabled (challenge) {
+  return isChallengeRated(challenge)
+}
+
+/**
+ * Load challenge metadata needed to decide which ratings apply.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {string|number} challengeId challenge UUID or legacy numeric id
+ * @returns {Promise<Object|null>} challenge metadata or null when absent
+ */
+async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
+  const normalizedChallengeId = String(challengeId || '').trim()
+  if (!normalizedChallengeId) {
+    return null
+  }
+
+  const numericChallengeId = /^\d+$/.test(normalizedChallengeId)
+    ? Number(normalizedChallengeId)
+    : null
+  const where = numericChallengeId && Number.isSafeInteger(numericChallengeId)
+    ? {
+      OR: [
+        { id: normalizedChallengeId },
+        { legacyId: numericChallengeId },
+        {
+          legacyRecord: {
+            is: {
+              legacySystemId: numericChallengeId
+            }
+          }
+        }
+      ]
+    }
+    : { id: normalizedChallengeId }
+
+  return challengeClient.challenge.findFirst({
+    where,
+    select: {
+      id: true,
+      status: true,
+      endDate: true,
+      trackId: true,
+      typeId: true,
+      track: {
+        select: {
+          name: true
+        }
+      },
+      type: {
+        select: {
+          name: true
+        }
+      },
+      tags: true,
+      skills: {
+        select: {
+          skillId: true
+        }
+      },
+      metadata: RATING_METADATA_SELECT
+    }
+  })
+}
+
+/**
+ * Resolve the rating source supported by the engines for a challenge.
+ * @param {Object} challenge challenge metadata row
+ * @returns {string|null} source identifier or null when unsupported
+ */
+function resolveChallengeRatingSource (challenge) {
+  const trackName = getCanonicalTrackName(_.get(challenge, 'track.name') || _.get(challenge, 'trackId'))
+  const typeName = getCanonicalTypeName(_.get(challenge, 'type.name') || _.get(challenge, 'typeId'))
+
+  if (trackName === TRACK_NAMES.DEVELOP && typeName === TYPE_NAMES.CHALLENGE) {
+    return RATING_SOURCE_DEVELOPMENT
+  }
+
+  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.MARATHON_MATCH) {
+    return RATING_SOURCE_MARATHON_MATCH
+  }
+
+  return null
+}
+
+/**
+ * Build the native track/type rating job for a supported challenge.
+ * @param {Object} challenge challenge metadata row
+ * @param {string|null} source resolved challenge rating source
+ * @returns {Object|null} rating job or null when unsupported/unrated
+ */
+function buildBaseRatingJob (challenge, source) {
+  if (!source || !isChallengeRatingEnabled(challenge)) {
+    return null
+  }
+
+  if (source === RATING_SOURCE_DEVELOPMENT) {
+    return {
+      source,
+      trackId: TRACK_NAMES.DEVELOP,
+      typeId: TYPE_NAMES.CHALLENGE
+    }
+  }
+
+  if (source === RATING_SOURCE_MARATHON_MATCH) {
+    return {
+      source,
+      trackId: TRACK_NAMES.DATA_SCIENCE,
+      typeId: TYPE_NAMES.MARATHON_MATCH
+    }
+  }
+
+  return null
+}
+
+/**
+ * Build all rating jobs that apply to one completed challenge.
+ * The base track/type job is included for supported rated challenges, and
+ * configured named rating paths are included when their tags/skills match.
+ * @param {Object} challenge challenge metadata row
+ * @returns {Array<Object>} rating jobs to run
+ */
+function buildChallengeRatingJobs (challenge) {
+  const source = resolveChallengeRatingSource(challenge)
+  const jobs = []
+  const baseJob = buildBaseRatingJob(challenge, source)
+  if (baseJob) {
+    jobs.push(baseJob)
+  }
+
+  if (!source || !isChallengeRatingEnabled(challenge)) {
+    return jobs
+  }
+
+  normalizeRatingPathConfigs(config.RATING_PATHS).forEach((ratingPath) => {
+    if (!challengeMatchesRatingPath(challenge, ratingPath)) {
+      return
+    }
+
+    jobs.push({
+      source,
+      trackId: ratingPath.trackName,
+      typeId: ratingPath.name,
+      ratingName: ratingPath.name,
+      ratingPath
+    })
+  })
+
+  return _.uniqBy(jobs, (job) => `${job.ratingName || ''}::${job.trackId}::${job.typeId}`)
+}
+
+/**
+ * Fetch review-api challengeResult participants with score or placement data.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|number} challengeId challenge identifier
+ * @returns {Promise<Array<BigInt>>} participant user ids
+ */
+async function fetchChallengeResultParticipantIds (reviewDbClient, challengeId) {
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
+  const result = await reviewDbClient.query(
+    `
+      SELECT DISTINCT "userId"
+      FROM ${challengeResultRelation}
+      WHERE "challengeId" = $1
+        AND "userId" IS NOT NULL
+        AND (
+          "finalScore" IS NOT NULL OR
+          ("placement" IS NOT NULL AND "placement" > 0)
+        )
+      ORDER BY "userId" ASC
+    `,
+    [String(challengeId)]
+  )
+
+  return result.rows.map((row) => toBigIntUserId(row.userId))
+}
+
+/**
+ * Fetch Marathon Match participants from review summations when challengeResult
+ * rows are not available yet.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|number} challengeId challenge identifier
+ * @returns {Promise<Array<BigInt>>} participant user ids
+ */
+async function fetchMarathonMatchParticipantIds (reviewDbClient, challengeId) {
+  const { participantRows } = await fetchRatingPathParticipantsForChallenge(
+    reviewDbClient,
+    {
+      challengeId: String(challengeId),
+      source: RATING_SOURCE_MARATHON_MATCH
+    }
+  )
+
+  return participantRows.map((row) => resolveRatingPathParticipantId(row, RATING_SOURCE_MARATHON_MATCH))
+}
+
+/**
+ * Resolve submitter ids for the challenge and rating source.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|number} challengeId challenge identifier
+ * @param {string} source rating source identifier
+ * @returns {Promise<Array<BigInt>>} unique participant user ids
+ */
+async function fetchRatingParticipantIds (reviewDbClient, challengeId, source) {
+  const challengeResultUserIds = await fetchChallengeResultParticipantIds(reviewDbClient, challengeId)
+  if (challengeResultUserIds.length > 0 || source !== RATING_SOURCE_MARATHON_MATCH) {
+    return _.uniqBy(challengeResultUserIds, stringifyUserId)
+  }
+
+  return _.uniqBy(
+    await fetchMarathonMatchParticipantIds(reviewDbClient, challengeId),
+    stringifyUserId
+  )
+}
+
+/**
+ * Filter discovered submitters down to members that exist in member-api storage.
+ * @param {Object} membersClient prisma members client
+ * @param {Array<BigInt>} participantIds discovered submitter ids
+ * @returns {Promise<Object>} existing member ids and skipped ids
+ */
+async function filterExistingRatingParticipantIds (membersClient, participantIds) {
+  const uniqueParticipantIds = _.uniqBy(participantIds, stringifyUserId)
+  if (uniqueParticipantIds.length === 0) {
+    return {
+      existingParticipantIds: [],
+      skippedParticipantIds: []
+    }
+  }
+
+  const existingMembers = await membersClient.member.findMany({
+    where: {
+      userId: {
+        in: uniqueParticipantIds
+      }
+    },
+    select: {
+      userId: true
+    }
+  })
+  const existingIds = existingMembers.map((member) => member.userId)
+  const existingIdSet = new Set(existingIds.map(stringifyUserId))
+
+  return {
+    existingParticipantIds: existingIds,
+    skippedParticipantIds: uniqueParticipantIds.filter((userId) => !existingIdSet.has(stringifyUserId(userId)))
+  }
+}
+
+/**
+ * Run one rating job for one member.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {BigInt} userId target member id
+ * @param {string} challengeId starting challenge id
+ * @param {Object} job rating job to execute
+ * @returns {Promise<Object>} engine rerate summary
+ */
+async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClient, userId, challengeId, job) {
+  if (job.ratingPath) {
+    return rerateMmTrack(
+      prisma,
+      challengeClient,
+      null,
+      reviewDbClient,
+      userId,
+      challengeId,
+      {
+        ratingPath: job.ratingPath
+      }
+    )
+  }
+
+  if (job.source === RATING_SOURCE_DEVELOPMENT) {
+    return rerateDevTrack(
+      prisma,
+      challengeClient,
+      reviewDbClient,
+      userId,
+      challengeId
+    )
+  }
+
+  return rerateMmTrack(
+    prisma,
+    challengeClient,
+    null,
+    reviewDbClient,
+    userId,
+    challengeId
+  )
+}
+
 function isLegacyMaxRatingPayload (value) {
   return _.isPlainObject(value) && !_.isNil(value.rating) && !_.isNil(value.ratingColor)
 }
@@ -396,6 +760,43 @@ function buildStatsTrackTypeKey (trackId, typeId) {
   return `${trackId}::${typeId}`
 }
 
+/**
+ * Check whether a resolved challenge type is Marathon Match.
+ * @param {string|undefined} typeName canonical or raw type name
+ * @returns {boolean} true when the type should be exposed as Marathon Match
+ */
+function isMarathonMatchType (typeName) {
+  return getCanonicalTypeName(typeName) === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
+ * Resolve the public stats dimensions for a challenge-backed row.
+ * Marathon Match is part of the public DATA_SCIENCE bucket even when imported
+ * challenge metadata has a Development track.
+ * @param {Object} row row containing trackId and typeId
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Object} normalized track/type ids and names
+ */
+function resolveStatsDimensionForChallengeRow (row, dimensionLookup) {
+  const typeName = resolveTypeNameFromLookup(dimensionLookup, row.typeId)
+  if (isMarathonMatchType(typeName)) {
+    const dataScienceTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DATA_SCIENCE)
+    return {
+      trackId: dataScienceTrackId || row.trackId,
+      typeId: row.typeId,
+      trackName: TRACK_NAMES.DATA_SCIENCE,
+      typeName: TYPE_NAMES.MARATHON_MATCH
+    }
+  }
+
+  return {
+    trackId: row.trackId,
+    typeId: row.typeId,
+    trackName: resolveTrackNameFromLookup(dimensionLookup, row.trackId),
+    typeName
+  }
+}
+
 function getReviewDbClientOrThrow () {
   if (!reviewDb) {
     throw new Error('REVIEW_DB_URL must be configured to refresh or rerate member stats')
@@ -420,22 +821,25 @@ async function fetchReviewChallengeResultsForMember (reviewDbClient, userId) {
 }
 
 /**
- * Load placement winners for one member from challenge-api.
+ * Load placement-bearing winner rows for one member from challenge-api.
  * These rows provide a fallback history source for unrated tracks such as
- * First2Finish when review-api results are unavailable.
+ * First2Finish and MM imports whose history source is ChallengeWinner.
  * @param {Object} challengeClient prisma challenge client
  * @param {BigInt} userId member user id
- * @returns {Promise<Array<Object>>} placement winner rows with embedded challenge metadata
+ * @returns {Promise<Array<Object>>} winner rows with embedded challenge metadata
  */
 async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
   try {
     return await challengeClient.ChallengeWinner.findMany({
       where: {
         userId: helper.bigIntToNumber(userId),
-        type: 'PLACEMENT'
+        type: {
+          in: CHALLENGE_WINNER_HISTORY_TYPES
+        }
       },
       select: {
         challengeId: true,
+        type: true,
         placement: true,
         createdAt: true,
         challenge: {
@@ -445,7 +849,18 @@ async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
             status: true,
             trackId: true,
             typeId: true,
-            endDate: true
+            endDate: true,
+            winners: {
+              where: {
+                type: CHALLENGE_WINNER_PLACEMENT_TYPE
+              },
+              select: {
+                placement: true
+              },
+              orderBy: {
+                placement: 'asc'
+              }
+            }
           }
         }
       }
@@ -525,17 +940,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
           name: true
         }
       },
-      metadata: {
-        where: {
-          name: {
-            in: ['rated', 'isRated', 'unrated']
-          }
-        },
-        select: {
-          name: true,
-          value: true
-        }
-      },
+      metadata: RATING_METADATA_SELECT,
       legacyRecord: {
         select: {
           legacySystemId: true
@@ -631,6 +1036,48 @@ function toVisiblePlacement (value) {
 }
 
 /**
+ * Determine the absolute placement offset for a passed-review winner row.
+ * ChallengeWinner stores PASSED_REVIEW placements relative to the passed-review
+ * bucket, so visible rank must be shifted by the highest paid placement rank.
+ * @param {Object} row challenge winner row with nested challenge placement winners
+ * @returns {number} placement offset to add to PASSED_REVIEW placements
+ */
+function getPassedReviewPlacementOffset (row) {
+  const placementWinners = _.get(row, 'challenge.winners')
+  if (!_.isArray(placementWinners) || placementWinners.length === 0) {
+    return 0
+  }
+
+  const placements = _.chain(placementWinners)
+    .map(winner => toVisiblePlacement(winner.placement))
+    .filter(placement => Number.isInteger(placement))
+    .value()
+
+  return placements.length > 0 ? _.max(placements) : 0
+}
+
+/**
+ * Normalize a ChallengeWinner placement into the overall visible challenge rank.
+ * PLACEMENT rows are already absolute; PASSED_REVIEW rows are offset by the
+ * highest paid placement rank when that context is available.
+ * @param {Object} row challenge winner row
+ * @returns {number|undefined} visible placement when available
+ */
+function toVisibleChallengeWinnerPlacement (row) {
+  const placement = toVisiblePlacement(row && row.placement)
+  if (!placement) {
+    return undefined
+  }
+
+  const winnerType = String(row.type || '').trim().toUpperCase()
+  if (winnerType !== CHALLENGE_WINNER_PASSED_REVIEW_TYPE) {
+    return placement
+  }
+
+  return placement + getPassedReviewPlacementOffset(row)
+}
+
+/**
  * Determine whether any history rows are missing a usable placement value.
  * @param {Array<Object>} rows history rows already shaped for response building
  * @returns {boolean} true when a row still needs placement enrichment
@@ -649,7 +1096,7 @@ function buildChallengeWinnerPlacementLookup (winnerRows) {
   const placementByChallengeId = new Map()
 
   _.forEach(winnerRows || [], (row) => {
-    const placement = toVisiblePlacement(row.placement)
+    const placement = toVisibleChallengeWinnerPlacement(row)
     const challengeId = _.get(row, 'challenge.id') || row.challengeId
     const challengeKey = _.isNil(challengeId) ? null : String(challengeId).trim()
 
@@ -696,7 +1143,14 @@ function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
   })
 }
 
-function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataById) {
+/**
+ * Aggregate completed review-api results into unified stats rows.
+ * @param {Array<Object>} reviewRows review-api challenge result rows
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by challenge id
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @returns {Array<Object>} normalized aggregate rows
+ */
+function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataById, dimensionLookup) {
   const aggregateByKey = new Map()
 
   _.forEach(reviewRows, (row) => {
@@ -705,8 +1159,12 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
+    const dimension = resolveStatsDimensionForChallengeRow({
+      trackId: String(challenge.trackId),
+      typeId: String(challenge.typeId)
+    }, dimensionLookup)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
     if (!trackId || !typeId) {
       return
     }
@@ -812,19 +1270,23 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
+    const dimension = resolveStatsDimensionForChallengeRow({
+      trackId: String(challenge.trackId),
+      typeId: String(challenge.typeId)
+    }, dimensionLookup)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
     if (missingPairKeys && !missingPairKeys.has(pairKey)) {
       return
     }
 
-    const trackName = resolveTrackNameFromLookup(dimensionLookup, trackId)
+    const trackName = dimension.trackName
     if (!isSupportedUnifiedHistoryTrack(trackName)) {
       return
     }
 
-    const typeName = resolveTypeNameFromLookup(dimensionLookup, typeId)
+    const typeName = dimension.typeName
     const eventDate = toOptionalDate(challenge.endDate || row.createdAt)
     if (!eventDate) {
       return
@@ -892,26 +1354,30 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
+    const dimension = resolveStatsDimensionForChallengeRow({
+      trackId: String(challenge.trackId),
+      typeId: String(challenge.typeId)
+    }, dimensionLookup)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
     if (missingPairKeys && !missingPairKeys.has(pairKey)) {
       return
     }
 
-    const trackName = resolveTrackNameFromLookup(dimensionLookup, trackId)
+    const trackName = dimension.trackName
     if (!isSupportedUnifiedHistoryTrack(trackName)) {
       return
     }
 
-    const typeName = resolveTypeNameFromLookup(dimensionLookup, typeId)
+    const typeName = dimension.typeName
     const eventDate = toOptionalDate(challenge.endDate || row.createdAt)
     if (!eventDate) {
       return
     }
 
     const createdAt = toOptionalDate(row.createdAt) || eventDate
-    const placement = toVisiblePlacement(row.placement)
+    const placement = toVisibleChallengeWinnerPlacement(row)
     const challengeId = String(challenge.id || row.challengeId)
     const challengeKey = `${pairKey}::${challengeId}`
     const existing = fallbackRowsByChallengeKey.get(challengeKey)
@@ -1112,6 +1578,58 @@ function mergeMissingHistoryRows (existingRows, fallbackRows) {
 }
 
 /**
+ * Collapse duplicate history rows that point to the same normalized challenge card.
+ * This protects reads while old rows stored as Development/MM coexist with rerun
+ * rows normalized to DATA_SCIENCE/MM.
+ * @param {Array<Object>} rows persisted and/or transient history rows
+ * @returns {Array<Object>} history rows keyed by normalized track/type/challenge
+ */
+function dedupeUnifiedHistoryRows (rows) {
+  const dedupedByKey = new Map()
+
+  _.forEach(rows || [], (row) => {
+    const key = buildHistoryChallengeKey(row)
+    const existing = dedupedByKey.get(key)
+
+    if (!existing ||
+      (row.eventDate && existing.eventDate && row.eventDate > existing.eventDate) ||
+      (_.isNil(existing.newRating) && !_.isNil(row.newRating))) {
+      dedupedByKey.set(key, row)
+    }
+  })
+
+  return Array.from(dedupedByKey.values())
+}
+
+/**
+ * Recompute mostRecent flags after fallback and dimension normalization.
+ * Persisted rows may still be split across legacy dimensions, so the response
+ * needs one latest card per normalized track/type group.
+ * @param {Array<Object>} rows persisted and/or transient history rows
+ * @returns {Array<Object>} rows with normalized mostRecent flags
+ */
+function recomputeUnifiedHistoryMostRecentFlags (rows) {
+  const rowsByPairKey = _.groupBy(rows || [], row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+  const normalizedRows = []
+
+  _.forEach(rowsByPairKey, (pairRows) => {
+    const orderedRows = _.orderBy(pairRows, [
+      row => (row.eventDate ? row.eventDate.getTime() : 0),
+      row => row.challengeId
+    ], ['desc', 'desc'])
+
+    _.forEach(orderedRows, (row, index) => {
+      normalizedRows.push({
+        ...row,
+        mostRecent: index === 0
+      })
+    })
+  })
+
+  return normalizedRows
+}
+
+/**
  * Apply the stable ordering expected by the unified history response builders.
  * @param {Array<Object>} rows persisted and/or transient history rows
  * @returns {Array<Object>} rows ordered by mostRecent and event recency
@@ -1124,8 +1642,14 @@ function orderUnifiedHistoryRows (rows) {
   ], ['desc', 'desc', 'desc'])
 }
 
+/**
+ * Convert a normalized rating bucket start into the response field name.
+ * Ratings outside the documented 0-3999 distribution range are ignored.
+ * @param {Number} rangeStart normalized inclusive lower bound for a 100-point rating bucket
+ * @returns {String|null} distribution response key, or null when outside the supported range
+ */
 function getDistributionRangeKey (rangeStart) {
-  if (rangeStart < 0 || rangeStart > 3900) {
+  if (rangeStart < DISTRIBUTION_MIN_RATING || rangeStart >= DISTRIBUTION_MAX_RATING_EXCLUSIVE) {
     return null
   }
   if (rangeStart === 0) {
@@ -1488,6 +2012,10 @@ function buildUnifiedHistoryRecordsFromPayload (payload, dimensionLookup) {
       challengeId: String(item.challengeId),
       oldRating: toOptionalInt(item.oldRating),
       newRating: toOptionalInt(item.newRating),
+      placement: toOptionalInt(item.placement),
+      percentile: toOptionalFloat(item.percentile),
+      oldVolatility: toOptionalInt(item.oldVolatility),
+      newVolatility: toOptionalInt(item.newVolatility),
       oldGlobalRank: toOptionalInt(item.oldGlobalRank),
       newGlobalRank: toOptionalInt(item.newGlobalRank),
       oldCountryRank: toOptionalInt(item.oldCountryRank),
@@ -1518,17 +2046,37 @@ function buildUnifiedHistoryRecordsFromPayload (payload, dimensionLookup) {
  * @returns {Array<Object>} rows annotated with trackName and typeName
  */
 function annotateUnifiedDimensionRows (rows, dimensionLookup) {
-  return _.map(rows || [], row => ({
-    ...row,
-    trackName: resolveTrackNameFromLookup(dimensionLookup, row.trackId),
-    typeName: resolveTypeNameFromLookup(dimensionLookup, row.typeId)
-  }))
+  return _.map(rows || [], (row) => {
+    const dimension = resolveStatsDimensionForChallengeRow(row, dimensionLookup)
+    return {
+      ...row,
+      ...dimension
+    }
+  })
 }
 
 /**
- * Resolve optional unified stats filter parameters into stored UUID ids.
- * A missing filter remains undefined; an invalid non-empty filter resolves to undefined
- * with its corresponding has* flag still true so callers can short-circuit to no results.
+ * Resolve a stats type filter to the stored value.
+ * Known challenge types resolve to UUIDs, while custom rating path names
+ * are stored directly in memberStats.typeId and must remain queryable by name.
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @param {*} value raw request filter value
+ * @returns {string|undefined} stored filter value
+ */
+function resolveStatsTypeFilterValue (dimensionLookup, value) {
+  const resolvedValue = resolveTypeIdFromLookup(dimensionLookup, value)
+  if (resolvedValue) {
+    return resolvedValue
+  }
+
+  const rawValue = String(value || '').trim()
+  return rawValue || undefined
+}
+
+/**
+ * Resolve optional unified stats filter parameters into stored ids.
+ * Track filters resolve to challenge UUIDs. Type filters also accept custom
+ * rating path names that are stored directly as type ids.
  * @param {Object} query request query params
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @returns {Object} resolved filter payload
@@ -1541,7 +2089,7 @@ function resolveUnifiedDimensionFilters (query, dimensionLookup) {
     hasTrackFilter,
     hasTypeFilter,
     trackId: hasTrackFilter ? resolveTrackIdFromLookup(dimensionLookup, query.trackId) : undefined,
-    typeId: hasTypeFilter ? resolveTypeIdFromLookup(dimensionLookup, query.typeId) : undefined
+    typeId: hasTypeFilter ? resolveStatsTypeFilterValue(dimensionLookup, query.typeId) : undefined
   }
 }
 
@@ -1555,8 +2103,9 @@ function getUniqueTrackTypePairs (records) {
 /**
  * Recompute the mostRecent marker for each affected (trackId, typeId) pair.
  * Exactly one row per pair is marked as mostRecent=true when rows exist.
- * The latest row's newRating is aligned with the current memberStats rating when available.
- * The latest row's oldRating is aligned with the prior history event for the same pair.
+ * The latest row's new rating and volatility are aligned with current memberStats
+ * values when available. Old rating and volatility are aligned with the prior
+ * history event for the same pair.
  *
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId user id
@@ -1597,7 +2146,8 @@ async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
           typeId: pair.typeId
         },
         select: {
-          rating: true
+          rating: true,
+          volatility: true
         }
       })
       const previous = await tx.memberStatsHistory.findFirst({
@@ -1609,17 +2159,20 @@ async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
         orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
         skip: 1,
         select: {
-          newRating: true
+          newRating: true,
+          newVolatility: true
         }
       })
 
       const latestUpdateData = {
         mostRecent: true,
         oldRating: previous ? previous.newRating : null,
+        oldVolatility: previous ? previous.newVolatility : null,
         updatedBy: operatorId
       }
       if (currentStats) {
         latestUpdateData.newRating = currentStats.rating
+        latestUpdateData.newVolatility = currentStats.volatility
       }
 
       await tx.memberStatsHistory.update({
@@ -1631,8 +2184,8 @@ async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
 }
 
 /**
- * Synchronize newRating on the most recent history row per (trackId, typeId) pair
- * with the current value in memberStats.rating.
+ * Synchronize new rating and volatility on the most recent history row per
+ * (trackId, typeId) pair with the current values in memberStats.
  *
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId user id
@@ -1649,7 +2202,8 @@ async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
         typeId: pair.typeId
       },
       select: {
-        rating: true
+        rating: true,
+        volatility: true
       }
     })
     if (!currentStats) {
@@ -1665,6 +2219,7 @@ async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
       },
       data: {
         newRating: currentStats.rating,
+        newVolatility: currentStats.volatility,
         updatedBy: operatorId
       }
     })
@@ -1672,11 +2227,19 @@ async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
 }
 
 /**
- * Get distribution statistics.
+ * Get current member rating distribution statistics.
+ * Resolves track/subTrack aliases to unified stats dimensions, aggregates rated
+ * memberStats rows into the documented 100-point buckets, and returns an empty
+ * histogram when matching stats exist but none have a rated value.
  * @param {Object} query the query parameters
- * @returns {Object} the distribution statistics
+ * @param {String} [query.track] optional track filter
+ * @param {String} [query.subTrack] optional subTrack/type filter
+ * @param {String} [query.fields] optional comma-separated response fields
+ * @returns {Object} distribution statistics for the requested filters
+ * @throws {NotFoundError} when filters cannot be resolved or no matching stats exist
  */
 async function getDistribution (query) {
+  const startedAt = Date.now()
   // validate and parse query parameter
   const fields = helper.parseCommaSeparatedString(query.fields, DISTRIBUTION_FIELDS_NO_DATE) || DISTRIBUTION_FIELDS_NO_DATE
   if (USE_LEGACY_STATS_READS) {
@@ -1684,17 +2247,23 @@ async function getDistribution (query) {
   }
 
   logger.info(`Calculating distribution on-the-fly for track='${query.track || ''}' subTrack='${query.subTrack || ''}'`)
+  const dimensionStartedAt = Date.now()
   const dimensionLookup = await getChallengeDimensionLookup()
   const hasTrackFilter = !_.isNil(query.track) && String(query.track).trim() !== ''
   const hasTypeFilter = !_.isNil(query.subTrack) && String(query.subTrack).trim() !== ''
   const trackId = hasTrackFilter ? resolveTrackIdFromLookup(dimensionLookup, query.track) : undefined
-  const typeId = hasTypeFilter ? resolveTypeIdFromLookup(dimensionLookup, query.subTrack) : undefined
+  const typeId = hasTypeFilter ? resolveStatsTypeFilterValue(dimensionLookup, query.subTrack) : undefined
+  logger.debug(`getDistribution resolved trackId='${trackId || ''}' typeId='${typeId || ''}' in ${Date.now() - dimensionStartedAt}ms`)
 
   if ((hasTrackFilter && !trackId) || (hasTypeFilter && !typeId)) {
     throw new errors.NotFoundError('No member distribution statistics is found.')
   }
 
-  const whereConditions = [Prisma.sql`"rating" IS NOT NULL`]
+  const whereConditions = [
+    Prisma.sql`"rating" IS NOT NULL`,
+    Prisma.sql`"rating" >= ${DISTRIBUTION_MIN_RATING}`,
+    Prisma.sql`"rating" < ${DISTRIBUTION_MAX_RATING_EXCLUSIVE}`
+  ]
   if (trackId) {
     whereConditions.push(Prisma.sql`"trackId" = ${trackId}`)
   }
@@ -1702,6 +2271,7 @@ async function getDistribution (query) {
     whereConditions.push(Prisma.sql`"typeId" = ${typeId}`)
   }
 
+  const queryStartedAt = Date.now()
   const rows = await prisma.$queryRaw`
     SELECT
       (FLOOR("rating" / 100.0)::int * 100) AS "rangeStart",
@@ -1711,8 +2281,10 @@ async function getDistribution (query) {
     GROUP BY (FLOOR("rating" / 100.0)::int * 100)
     ORDER BY "rangeStart" ASC
   `
+  const queryMs = Date.now() - queryStartedAt
 
   if (!rows || rows.length === 0) {
+    logger.info(`getDistribution found no rated rows for track='${query.track || ''}' subTrack='${query.subTrack || ''}' queryMs=${queryMs} totalMs=${Date.now() - startedAt}`)
     const matchingStatsRow = await prisma.memberStats.findFirst({
       where: _.omitBy({
         trackId,
@@ -1748,6 +2320,7 @@ async function getDistribution (query) {
       distribution[key] = Number(row.count)
     }
   })
+  const totalRatedMembers = _.sumBy(rows, row => Number(row.count) || 0)
 
   let result = {
     track: query.track,
@@ -1758,6 +2331,7 @@ async function getDistribution (query) {
   if (fields) {
     result = _.pick(result, fields)
   }
+  logger.info(`getDistribution calculated track='${query.track || ''}' subTrack='${query.subTrack || ''}' ranges=${rows.length} totalRatedMembers=${totalRatedMembers} queryMs=${queryMs} totalMs=${Date.now() - startedAt}`)
   return result
 }
 
@@ -1843,13 +2417,13 @@ async function getHistoryStats (currentUser, handle, query) {
         _.uniq(_.map(historyRows, row => row.challengeId).concat(_.map(reviewRows, row => row.challengeId)))
       )
 
-      let annotatedRows = filterUnifiedHistoryRowsToCompletedChallenges(
+      let annotatedRows = dedupeUnifiedHistoryRows(filterUnifiedHistoryRowsToCompletedChallenges(
         enrichUnifiedHistoryRowsWithChallengeMetadata(
           annotateUnifiedDimensionRows(historyRows, dimensionLookup),
           challengeMetadataById
         ),
         challengeMetadataById
-      )
+      ))
 
       if (unresolvedPairKeys.size > 0 && reviewRows.length > 0) {
         const reviewFallbackRows = buildFallbackHistoryRowsFromReviewResults(
@@ -1893,7 +2467,7 @@ async function getHistoryStats (currentUser, handle, query) {
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, legacyCodeFallbackRows)
       }
 
-      const orderedRows = orderUnifiedHistoryRows(annotatedRows)
+      const orderedRows = orderUnifiedHistoryRows(recomputeUnifiedHistoryMostRecentFlags(annotatedRows))
       if (orderedRows.length > 0) {
         _.forEach(groupIds, (groupId) => {
           const scopedRows = _.map(orderedRows, row => ({ ...row, groupId: _.toNumber(groupId) }))
@@ -2018,6 +2592,10 @@ createHistoryStats.schema = {
     mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
+    placement: Joi.number(),
+    percentile: Joi.number(),
+    oldVolatility: Joi.number(),
+    newVolatility: Joi.number(),
     oldGlobalRank: Joi.number(),
     newGlobalRank: Joi.number(),
     oldCountryRank: Joi.number(),
@@ -2034,6 +2612,10 @@ createHistoryStats.schema = {
       mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
+      placement: Joi.number(),
+      percentile: Joi.number(),
+      oldVolatility: Joi.number(),
+      newVolatility: Joi.number(),
       oldGlobalRank: Joi.number(),
       newGlobalRank: Joi.number(),
       oldCountryRank: Joi.number(),
@@ -2148,6 +2730,10 @@ partiallyUpdateHistoryStats.schema = {
     mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
+    placement: Joi.number(),
+    percentile: Joi.number(),
+    oldVolatility: Joi.number(),
+    newVolatility: Joi.number(),
     oldGlobalRank: Joi.number(),
     newGlobalRank: Joi.number(),
     oldCountryRank: Joi.number(),
@@ -2164,6 +2750,10 @@ partiallyUpdateHistoryStats.schema = {
       mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
+      placement: Joi.number(),
+      percentile: Joi.number(),
+      oldVolatility: Joi.number(),
+      newVolatility: Joi.number(),
       oldGlobalRank: Joi.number(),
       newGlobalRank: Joi.number(),
       oldCountryRank: Joi.number(),
@@ -2641,7 +3231,8 @@ async function refreshMemberStats (currentUser, handle, data) {
     challengeClient,
     _.uniq(_.map(reviewRows, row => String(row.challengeId)))
   )
-  const aggregateRows = buildAggregatedStatsFromReviewResults(reviewRows, challengeMetadataById)
+  const dimensionLookup = await getChallengeDimensionLookup()
+  const aggregateRows = buildAggregatedStatsFromReviewResults(reviewRows, challengeMetadataById, dimensionLookup)
 
   if (aggregateRows.length > 0) {
     await prisma.$transaction(async (tx) => {
@@ -2699,10 +3290,173 @@ refreshMemberStats.schema = {
 }
 
 /**
- * Trigger a DEVELOPMENT / Challenge or DATA_SCIENCE / MARATHON_MATCH re-rating pass
- * beginning with the supplied challenge. The relevant review-api results are
- * reprocessed in chronological order and persisted into the existing unified
- * rating tables for the member.
+ * Re-rate every existing submitter on a completed challenge for all applicable
+ * rating dimensions. This includes the native challenge track/type rating when
+ * supported and any configured named rating paths whose tags/skills match the
+ * challenge, such as the default AI path.
+ * @param {Object} currentUser the user who performs operation
+ * @param {Object} data rerate payload containing the completed challenge id
+ * @returns {Object} summary of participants, rating jobs, updates, and per-member failures
+ * @throws {errors.ForbiddenError} when the caller is not admin or M2M
+ * @throws {errors.NotFoundError} when the challenge does not exist
+ */
+async function rerateChallengeSubmitterRatings (currentUser, data) {
+  if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
+    throw new errors.ForbiddenError('You are not allowed to update the member stats.')
+  }
+
+  const payload = data || {}
+  if (_.isNil(payload.challengeId) || String(payload.challengeId).trim() === '') {
+    throw new errors.BadRequestError('challengeId is required.')
+  }
+
+  const challengeClient = prismaManager.getChallengesClient()
+  const reviewDbClient = getReviewDbClientOrThrow()
+  const challenge = await fetchChallengeForRatingUpdate(challengeClient, payload.challengeId)
+  if (!challenge) {
+    throw new errors.NotFoundError(`Challenge with id: ${payload.challengeId} doesn't exist`)
+  }
+
+  const challengeId = String(challenge.id)
+  const responseChallengeId = normalizeChallengeIdForResponse(challengeId)
+  const baseResponse = {
+    challengeId: responseChallengeId,
+    rerated: false,
+    ratings: [],
+    participantIds: [],
+    skippedParticipantIds: [],
+    membersProcessed: 0,
+    ratingsAttempted: 0,
+    ratingsUpdated: 0,
+    ratingFailures: []
+  }
+
+  if (!isCompletedChallenge(challenge)) {
+    return {
+      ...baseResponse,
+      skippedReason: 'challenge-not-completed'
+    }
+  }
+
+  const ratingJobs = buildChallengeRatingJobs(challenge)
+  const ratings = ratingJobs.map((job) => _.omitBy({
+    trackId: job.trackId,
+    typeId: job.typeId,
+    ratingName: job.ratingName,
+    ratingTags: job.ratingPath ? job.ratingPath.tags : undefined,
+    ratingSkillIds: job.ratingPath ? job.ratingPath.skillIds : undefined
+  }, _.isUndefined))
+
+  if (ratingJobs.length === 0) {
+    return {
+      ...baseResponse,
+      ratings,
+      skippedReason: 'no-supported-ratings'
+    }
+  }
+
+  const participantIdsBySource = new Map()
+  for (const job of ratingJobs) {
+    if (participantIdsBySource.has(job.source)) {
+      continue
+    }
+
+    participantIdsBySource.set(
+      job.source,
+      await fetchRatingParticipantIds(reviewDbClient, challengeId, job.source)
+    )
+  }
+
+  const participantIds = _.uniqBy(
+    Array.from(participantIdsBySource.values()).flat(),
+    stringifyUserId
+  )
+  if (participantIds.length === 0) {
+    return {
+      ...baseResponse,
+      ratings,
+      skippedReason: 'no-submitters'
+    }
+  }
+
+  const { existingParticipantIds, skippedParticipantIds } = await filterExistingRatingParticipantIds(
+    prisma,
+    participantIds
+  )
+
+  if (existingParticipantIds.length === 0) {
+    return {
+      ...baseResponse,
+      ratings,
+      participantIds: participantIds.map(stringifyUserId),
+      skippedParticipantIds: skippedParticipantIds.map(stringifyUserId),
+      skippedReason: 'no-existing-members'
+    }
+  }
+
+  const ratingFailures = []
+  let ratingsAttempted = 0
+  let ratingsUpdated = 0
+
+  for (const userId of existingParticipantIds) {
+    for (const job of ratingJobs) {
+      const sourceParticipantIds = participantIdsBySource.get(job.source) || []
+      const sourceParticipantIdSet = new Set(sourceParticipantIds.map(stringifyUserId))
+      if (!sourceParticipantIdSet.has(stringifyUserId(userId))) {
+        continue
+      }
+
+      ratingsAttempted += 1
+
+      try {
+        const result = await rerateChallengeRatingJobForMember(
+          challengeClient,
+          reviewDbClient,
+          userId,
+          challengeId,
+          job
+        )
+        ratingsUpdated += Number(result && result.ratingsUpdated) || 0
+      } catch (error) {
+        logger.warn(
+          `Unable to rerate ${job.ratingName || `${job.trackId}/${job.typeId}`} for userId=${stringifyUserId(userId)} challengeId=${challengeId}: ${error.message}`
+        )
+        ratingFailures.push(_.omitBy({
+          userId: stringifyUserId(userId),
+          trackId: job.trackId,
+          typeId: job.typeId,
+          ratingName: job.ratingName,
+          message: error.message
+        }, _.isUndefined))
+      }
+    }
+  }
+
+  return {
+    challengeId: responseChallengeId,
+    rerated: ratingsAttempted > 0 && ratingFailures.length < ratingsAttempted,
+    ratings,
+    participantIds: participantIds.map(stringifyUserId),
+    skippedParticipantIds: skippedParticipantIds.map(stringifyUserId),
+    membersProcessed: existingParticipantIds.length,
+    ratingsAttempted,
+    ratingsUpdated,
+    ratingFailures
+  }
+}
+
+rerateChallengeSubmitterRatings.schema = {
+  currentUser: Joi.any(),
+  data: Joi.object().keys({
+    challengeId: Joi.alternatives().try(Joi.string().uuid(), Joi.number().integer().strict()).required()
+  }).required()
+}
+
+/**
+ * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / MARATHON_MATCH, or configured
+ * tag- or skill-based rating path re-rating pass beginning with the supplied challenge.
+ * The relevant review-api results are reprocessed in chronological order and
+ * persisted into the existing unified rating tables for the member.
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
  * @param {Object} data the rerate payload whose challengeId is echoed back as a string
@@ -2716,13 +3470,26 @@ async function rerateMemberStats (currentUser, handle, data) {
     throw new errors.ForbiddenError('You are not allowed to update the member stats.')
   }
 
-  const trackId = resolveTrackName(payload.trackId || TRACK_NAMES.DEVELOP)
-  const typeId = resolveTypeName(payload.typeId || TYPE_NAMES.CHALLENGE)
+  const ratingPath = resolveConfiguredRatingPath(payload.ratingName)
+  const trackId = ratingPath ? ratingPath.trackName : resolveTrackName(payload.trackId || TRACK_NAMES.DEVELOP)
+  const typeId = ratingPath ? ratingPath.name : resolveTypeName(payload.typeId || TYPE_NAMES.CHALLENGE)
   const challengeClient = prismaManager.getChallengesClient()
   const reviewDbClient = getReviewDbClientOrThrow()
 
   let result
-  if (trackId === TRACK_NAMES.DEVELOP && typeId === TYPE_NAMES.CHALLENGE) {
+  if (ratingPath) {
+    result = await rerateMmTrack(
+      prisma,
+      challengeClient,
+      null,
+      reviewDbClient,
+      member.userId,
+      payload.challengeId,
+      {
+        ratingPath
+      }
+    )
+  } else if (trackId === TRACK_NAMES.DEVELOP && typeId === TYPE_NAMES.CHALLENGE) {
     result = await rerateDevTrack(
       prisma,
       challengeClient,
@@ -2734,7 +3501,7 @@ async function rerateMemberStats (currentUser, handle, data) {
     result = await rerateMmTrack(
       prisma,
       challengeClient,
-      prismaManager.getMmClient(),
+      null,
       reviewDbClient,
       member.userId,
       payload.challengeId
@@ -2749,8 +3516,12 @@ async function rerateMemberStats (currentUser, handle, data) {
     challengeId: normalizeChallengeIdForResponse(payload.challengeId),
     trackId,
     typeId,
+    ratingName: ratingPath ? ratingPath.name : undefined,
+    ratingTags: ratingPath ? ratingPath.tags : undefined,
+    ratingSkillIds: ratingPath ? ratingPath.skillIds : undefined,
     challengesRerated: Math.max(result.challengesProcessed - 1, 0),
     challengesProcessed: result.challengesProcessed,
+    ratingPathChallengesProcessed: result.ratingPathChallengesProcessed,
     ratingsUpdated: result.ratingsUpdated
   }
 }
@@ -2760,6 +3531,7 @@ rerateMemberStats.schema = {
   handle: Joi.string().required(),
   data: Joi.object().keys({
     challengeId: Joi.alternatives().try(Joi.string().uuid(), Joi.number().integer().strict()).required(),
+    ratingName: Joi.string(),
     trackId: Joi.string().valid(TRACK_NAMES.DEVELOP, TRACK_NAMES.DATA_SCIENCE).insensitive(),
     typeId: Joi.string().valid(TYPE_NAMES.CHALLENGE, TYPE_NAMES.MARATHON_MATCH).insensitive()
   }).required()
@@ -3022,6 +3794,7 @@ module.exports = {
   createMemberStats,
   partiallyUpdateMemberStats,
   refreshMemberStats,
+  rerateChallengeSubmitterRatings,
   rerateMemberStats,
   getMemberSkills,
   createMemberSkills,
