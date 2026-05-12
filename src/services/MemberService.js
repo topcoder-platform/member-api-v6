@@ -248,6 +248,8 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
 async function getMember (currentUser, handle, query) {
   // Check if user has permission to see phones
   // Phones are visible to: self, users with sensitive data roles (Talent Manager, admin) and M2M
+  handle = handle.trim()
+  const operatorId = currentUser.userId || currentUser.sub
   const normalizedHandle = decodeURIComponent(handle).trim()
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
@@ -343,7 +345,7 @@ async function getMember (currentUser, handle, query) {
 
 getMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true)
@@ -388,6 +390,7 @@ function buildSendgridEmailActivityQuery (email, startTime, endTime) {
  * @returns {Array} up to the most recent SendGrid message activity records
  */
 async function getMemberSendgridEmails (currentUser, handle) {
+  handle = handle.trim()
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     throw new errors.ForbiddenError('You are not allowed to view SendGrid email activity.')
   }
@@ -435,7 +438,7 @@ async function getMemberSendgridEmails (currentUser, handle) {
 
 getMemberSendgridEmails.schema = {
   currentUser: Joi.any(),
-handle: Joi.string().trim().required()
+handle: Joi.string().required()
 }
 
 /**
@@ -446,6 +449,7 @@ handle: Joi.string().trim().required()
  * @returns {Object} the member profile data
  */
 async function getProfileCompleteness (currentUser, handle, query) {
+  handle = handle.trim()
   // Don't pass the query parameter to the trait service - we want *all* traits and member data
   // to come back for calculation of the completeness
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
@@ -601,7 +605,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
 getProfileCompleteness.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string(),
     toast: Joi.string()
@@ -794,7 +798,7 @@ async function updateMember (currentUser, handle, query, data) {
 
 updateMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true),
@@ -839,6 +843,7 @@ updateMember.schema = {
  * @returns {Object} the updated member data
  */
 async function updateHandle (currentUser, handle, query, data) {
+  handle = handle.trim()
   const operatorId = currentUser.userId || currentUser.sub
   const member = await helper.getMemberByHandle(handle)
 
@@ -941,7 +946,7 @@ async function updateHandle (currentUser, handle, query, data) {
 
 updateHandle.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true),
@@ -961,6 +966,7 @@ updateHandle.schema = {
  * @returns {Object} the verification result
  */
 async function verifyEmail (currentUser, handle, query) {
+  handle = handle.trim()
   const member = await helper.getMemberByHandle(handle)
   if (!helper.canManageMember(currentUser, member)) {
     throw new errors.ForbiddenError('You are not allowed to update the member.')
@@ -1007,7 +1013,7 @@ async function verifyEmail (currentUser, handle, query) {
 
 verifyEmail.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   query: Joi.object().keys({
     token: Joi.string().required()
   }).unknown(true).required()
@@ -1021,6 +1027,7 @@ verifyEmail.schema = {
  * @returns {Object} the upload result
  */
 async function uploadPhoto (currentUser, handle, files) {
+  handle = handle.trim()
   const member = await helper.getMemberByHandle(handle)
   // check authorization
   if (!helper.canManageMember(currentUser, member)) {
@@ -1092,6 +1099,7 @@ async function uploadPhoto (currentUser, handle, files) {
  * @returns {Object} the deletion result
  */
 async function deleteMember (currentUser, handle, data) {
+  handle = handle.trim()
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     throw new errors.ForbiddenError('You are not allowed to delete the member.')
   }
@@ -1284,7 +1292,7 @@ async function updateIdentityRecords (userId, handle, email, timestamp) {
 
 uploadPhoto.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   files: Joi.object().keys({
     photo: Joi.object().required()
   }).required()
@@ -1292,7 +1300,7 @@ uploadPhoto.schema = {
 
 deleteMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   data: Joi.object().keys({
     ticketUrl: Joi.string().uri().required()
   }).required()
@@ -1305,6 +1313,7 @@ deleteMember.schema = {
  * @returns {Object} the updated member profile data
  */
 async function confirmProfileData (currentUser, handle) {
+  handle = handle.trim()
   const member = await helper.getMemberByHandle(handle)
   // check authorization - only the profile owner or admin can confirm
   if (!helper.canManageMember(currentUser, member)) {
@@ -1331,7 +1340,7 @@ async function confirmProfileData (currentUser, handle) {
 
 confirmProfileData.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required()
+  handle: Joi.string().required()
 }
 
 /**
@@ -1961,6 +1970,7 @@ async function aggregatePDFData (currentUser, handle) {
  * @returns {Stream} PDF stream
  */
 async function downloadProfile (currentUser, handle) {
+  handle = handle.trim()
   // Validate handle exists
   const member = await helper.getMemberByHandle(handle)
 
@@ -1980,7 +1990,7 @@ async function downloadProfile (currentUser, handle) {
 
 downloadProfile.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required()
+  handle: Joi.string().required()
 }
 
 /**
@@ -1991,6 +2001,7 @@ downloadProfile.schema = {
  * @returns {Object} the member skill data
  */
 async function getMemberSkill (currentUser, handle, skillId) {
+  handle = handle.trim()
   // Get member data first to get userId
   const member = await getMemberData(handle, {})
 
@@ -2228,7 +2239,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
 
 getMemberSkill.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().trim().required(),
+  handle: Joi.string().required(),
   skillId: Joi.string().uuid().required()
 }
 
