@@ -248,6 +248,7 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
 async function getMember (currentUser, handle, query) {
   // Check if user has permission to see phones
   // Phones are visible to: self, users with sensitive data roles (Talent Manager, admin) and M2M
+  const normalizedHandle = decodeURIComponent(handle).trim()
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
@@ -342,12 +343,30 @@ async function getMember (currentUser, handle, query) {
 
 getMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true)
 }
 
+// In the controller that calls getMemberService.getMember:
+async function getMemberController(req, res, next) {
+  try {
+    // Safely decode and normalize the handle
+    let handle = req.params.handle
+    try {
+      handle = decodeURIComponent(handle).trim()
+    } catch (e) {
+      // If decoding fails (malformed URI), use as-is trimmed
+      handle = handle.trim()
+    }
+    
+    const result = await memberService.getMember(req.authUser, handle, req.query)
+    res.json(result)
+  } catch (err) {
+    next(err)
+  }
+}
 /**
  * Build query string for SendGrid email activity API.
  * @param {String} email recipient email
@@ -416,7 +435,7 @@ async function getMemberSendgridEmails (currentUser, handle) {
 
 getMemberSendgridEmails.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required()
+handle: Joi.string().trim().required()
 }
 
 /**
@@ -582,7 +601,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
 getProfileCompleteness.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   query: Joi.object().keys({
     fields: Joi.string(),
     toast: Joi.string()
@@ -775,7 +794,7 @@ async function updateMember (currentUser, handle, query, data) {
 
 updateMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true),
@@ -922,12 +941,15 @@ async function updateHandle (currentUser, handle, query, data) {
 
 updateHandle.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   query: Joi.object().keys({
     fields: Joi.string()
   }).unknown(true),
   data: Joi.object().keys({
-    newHandle: Joi.string().required()
+    newHandle: Joi.string()
+      .trim()
+      .pattern(/^[^<>]+$/, 'no angle brackets')
+      .required()
   }).required()
 }
 
@@ -985,7 +1007,7 @@ async function verifyEmail (currentUser, handle, query) {
 
 verifyEmail.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   query: Joi.object().keys({
     token: Joi.string().required()
   }).unknown(true).required()
@@ -1262,7 +1284,7 @@ async function updateIdentityRecords (userId, handle, email, timestamp) {
 
 uploadPhoto.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   files: Joi.object().keys({
     photo: Joi.object().required()
   }).required()
@@ -1270,7 +1292,7 @@ uploadPhoto.schema = {
 
 deleteMember.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   data: Joi.object().keys({
     ticketUrl: Joi.string().uri().required()
   }).required()
@@ -1309,7 +1331,7 @@ async function confirmProfileData (currentUser, handle) {
 
 confirmProfileData.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required()
+  handle: Joi.string().trim().required()
 }
 
 /**
@@ -1958,7 +1980,7 @@ async function downloadProfile (currentUser, handle) {
 
 downloadProfile.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required()
+  handle: Joi.string().trim().required()
 }
 
 /**
@@ -2206,7 +2228,7 @@ async function getMemberSkill (currentUser, handle, skillId) {
 
 getMemberSkill.schema = {
   currentUser: Joi.any(),
-  handle: Joi.string().required(),
+  handle: Joi.string().trim().required(),
   skillId: Joi.string().uuid().required()
 }
 
