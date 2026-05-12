@@ -8,7 +8,6 @@
  * - DATABASE_URL (member database)
  * - CHALLENGES_DB_URL (challenge database)
  * - REVIEW_DB_URL (review database)
- * - MM_DB_URL when matching rating path challenges include Marathon Matches
  *
  * Usage examples:
  * - Dry-run discovery:
@@ -25,6 +24,8 @@
  *   configured rating path challenges and persists rows for each discovered user.
  * - Each member is replayed from the start of the configured path so complete
  *   path history is written without needing an explicit challengeId.
+ * - Marathon Match events are read from reviewSummation only; the
+ *   marathon-match-api schema is not required for historical rerates.
  * - The script is idempotent and safe to run multiple times. Writes use the
  *   existing configured rating path upserts in the rating engine.
  */
@@ -38,8 +39,7 @@ const config = require('config')
 const reviewDb = require('../common/reviewDb')
 const {
   getMembersClient,
-  getChallengesClient,
-  getMmClient
+  getChallengesClient
 } = require('../common/prisma')
 const { getConfiguredRatingPath } = require('../ratings/ratingPathConfig')
 const {
@@ -157,6 +157,10 @@ function parseArgs (argv) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
+
+    if (arg === '--') {
+      continue
+    }
 
     if (arg === '--rating-name' || arg === '--ratingName') {
       const next = argv[index + 1]
@@ -309,23 +313,6 @@ function buildProcessedUserIdsWriter (outputPath) {
 }
 
 /**
- * Load the MM config client only when available.
- * Development-only path sets can be discovered and rerated without MM_DB_URL.
- * @returns {Object|null} MM config client or null when MM_DB_URL is absent
- */
-function getOptionalMmClientForRatingPath () {
-  try {
-    return getMmClient()
-  } catch (error) {
-    if (error && String(error.message || '').includes('MM_DB_URL')) {
-      return null
-    }
-
-    throw error
-  }
-}
-
-/**
  * Connect a Prisma-style client when it exposes $connect.
  * @param {Object} client database client
  * @returns {Promise<void>}
@@ -357,7 +344,6 @@ async function disconnectClient (client) {
  * The first matching challenge is retained for logging and dry-run summaries,
  * but the rerate pass replays from the start of the full path for completeness.
  * @param {Object} reviewDbClient raw pg review database client
- * @param {Object|null} mmDbClient MM config client, required only for MM events
  * @param {Array<Object>} pathHistory ordered rating path event history
  * @param {Object} options discovery controls and optional test doubles
  * @param {Array<string>} options.userIds optional user ID allow-list
@@ -366,7 +352,7 @@ async function disconnectClient (client) {
  * @param {Function} options.resolveParticipantId optional participant id resolver
  * @returns {Promise<Object>} discovery summary containing members and scan counts
  */
-async function discoverRatingPathMembers (reviewDbClient, mmDbClient, pathHistory, options = {}) {
+async function discoverRatingPathMembers (reviewDbClient, pathHistory, options = {}) {
   const fetchParticipants = options.fetchParticipants || fetchRatingPathParticipantsForChallenge
   const resolveParticipantId = options.resolveParticipantId || resolveRatingPathParticipantId
   const userFilter = new Set((options.userIds || []).map(userId => String(userId)))
@@ -375,7 +361,7 @@ async function discoverRatingPathMembers (reviewDbClient, mmDbClient, pathHistor
   let participantRowsScanned = 0
 
   for (const historyEntry of pathHistory) {
-    const { participantRows } = await fetchParticipants(reviewDbClient, mmDbClient, historyEntry)
+    const { participantRows } = await fetchParticipants(reviewDbClient, historyEntry)
     challengesScanned += 1
     participantRowsScanned += participantRows.length
 
@@ -431,9 +417,6 @@ async function run (options, dependencies = {}) {
   const reviewDbClient = Object.prototype.hasOwnProperty.call(dependencies, 'reviewDbClient')
     ? dependencies.reviewDbClient
     : reviewDb
-  const mmDbClient = Object.prototype.hasOwnProperty.call(dependencies, 'mmDbClient')
-    ? dependencies.mmDbClient
-    : getOptionalMmClientForRatingPath()
   const shouldDisconnect = dependencies.disconnect !== false
   const startedAt = startTimer()
 
@@ -462,7 +445,7 @@ async function run (options, dependencies = {}) {
       }
     }
 
-    const discovery = await discoverRatingPathMembers(reviewDbClient, mmDbClient, pathHistory, {
+    const discovery = await discoverRatingPathMembers(reviewDbClient, pathHistory, {
       userIds: options.userIds,
       limit: options.limit,
       fetchParticipants: dependencies.fetchParticipants,
@@ -505,7 +488,7 @@ async function run (options, dependencies = {}) {
         const result = await (dependencies.rerateMmTrack || rerateMmTrack)(
           membersClient,
           challengeClient,
-          mmDbClient,
+          null,
           reviewDbClient,
           member.userId,
           null,
@@ -558,7 +541,6 @@ async function run (options, dependencies = {}) {
     if (shouldDisconnect) {
       await disconnectClient(membersClient)
       await disconnectClient(challengeClient)
-      await disconnectClient(mmDbClient)
       await disconnectClient(reviewDbClient)
     }
   }

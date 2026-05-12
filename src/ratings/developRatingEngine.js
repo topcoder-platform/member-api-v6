@@ -17,6 +17,10 @@ const {
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
+const {
+  RATING_METADATA_SELECT,
+  isChallengeRated
+} = require('./challengeRatingStatus')
 
 const TRACK_NAME = 'DEVELOP'
 const TYPE_NAME = 'Challenge'
@@ -58,75 +62,6 @@ function normalizeChallengeDimension (value) {
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, '_')
-}
-
-/**
- * Parse a boolean-like value from review rows or metadata payloads.
- * @param {*} value candidate boolean value
- * @returns {boolean|undefined} parsed boolean or undefined when indeterminate
- */
-function parseBooleanLike (value) {
-  if (typeof value === 'boolean') {
-    return value
-  }
-
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase()
-    if (normalized === 'true') {
-      return true
-    }
-    if (normalized === 'false') {
-      return false
-    }
-  }
-
-  return undefined
-}
-
-/**
- * Resolve whether challenge metadata marks a challenge as rated.
- * Missing or indeterminate metadata defaults to rated so legacy backfills with
- * null review flags can still rerate unless the challenge is explicitly unrated.
- * @param {Object} challenge challenge metadata record
- * @returns {boolean} true when the challenge should be rerated
- */
-function isChallengeRated (challenge) {
-  if (!challenge) {
-    return false
-  }
-
-  const directRated = parseBooleanLike(challenge.isRated)
-  if (directRated !== undefined) {
-    return directRated
-  }
-
-  const legacyRated = parseBooleanLike(challenge.rated)
-  if (legacyRated !== undefined) {
-    return legacyRated
-  }
-
-  if (!Array.isArray(challenge.metadata)) {
-    return true
-  }
-
-  for (const entry of challenge.metadata) {
-    const name = normalizeChallengeDimension(entry && entry.name)
-    const value = parseBooleanLike(entry && entry.value)
-
-    if (value === undefined) {
-      continue
-    }
-
-    if (name === 'UNRATED') {
-      return !value
-    }
-
-    if (name === 'RATED' || name === 'ISRATED' || name === 'IS_RATED') {
-      return value
-    }
-  }
-
-  return true
 }
 
 function createDefaultState () {
@@ -180,8 +115,8 @@ async function resolveUnifiedDimensionIds (challengeClient) {
 
 /**
  * Build a rerate seed state from the latest authoritative history row before a challenge.
- * Unified memberStatsHistory does not checkpoint volatility, so rated history seeds fall
- * back to the default Qubits volatility until the rerate pass advances them.
+ * Historical volatility is used when available. Older history rows that predate
+ * volatility checkpoints fall back to the default Qubits volatility.
  * @param {Array<Object>} historyRows participant history rows sorted by event date and id
  * @param {number} seedIndex index of the last history row before the target challenge
  * @returns {Object} seeded rating state
@@ -195,7 +130,9 @@ function createHistorySeedState (historyRows, seedIndex) {
     rating: Number.isFinite(Number(historyRows[seedIndex].newRating))
       ? Number(historyRows[seedIndex].newRating)
       : 0,
-    volatility: DEFAULT_VOLATILITY,
+    volatility: Number.isFinite(Number(historyRows[seedIndex].newVolatility))
+      ? Number(historyRows[seedIndex].newVolatility)
+      : DEFAULT_VOLATILITY,
     numRatings: seedIndex + 1
   }
 }
@@ -375,17 +312,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
           name: true
         }
       },
-      metadata: {
-        where: {
-          name: {
-            in: ['rated', 'isRated', 'unrated']
-          }
-        },
-        select: {
-          name: true,
-          value: true
-        }
-      }
+      metadata: RATING_METADATA_SELECT
     }
   })
 
@@ -476,6 +403,7 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       userId: true,
       challengeId: true,
       newRating: true,
+      newVolatility: true,
       eventDate: true
     }
   })
@@ -497,6 +425,7 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       id: row.id,
       challengeId: String(row.challengeId),
       newRating: row.newRating,
+      newVolatility: row.newVolatility,
       eventDate
     })
   })
@@ -539,7 +468,10 @@ async function loadParticipantStates (membersClient, participantIds, targetUserI
   return stateByUserId
 }
 
-async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, eventDate, dimensionIds) {
+async function upsertHistoryRow (tx, userId, challengeId, previousState, updatedState, eventDate, dimensionIds) {
+  const hasPreviousRating = previousState && previousState.numRatings > 0
+  const oldRating = hasPreviousRating ? previousState.rating : null
+  const oldVolatility = hasPreviousRating ? previousState.volatility : null
   const existingHistory = await tx.memberStatsHistory.findFirst({
     where: {
       userId,
@@ -559,7 +491,9 @@ async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, 
       },
       data: {
         oldRating,
-        newRating,
+        newRating: updatedState.rating,
+        oldVolatility,
+        newVolatility: updatedState.volatility,
         eventDate,
         updatedBy: RERATE_ACTOR
       }
@@ -575,7 +509,9 @@ async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, 
       challengeId,
       mostRecent: false,
       oldRating,
-      newRating,
+      newRating: updatedState.rating,
+      oldVolatility,
+      newVolatility: updatedState.volatility,
       eventDate,
       createdBy: RERATE_ACTOR,
       updatedBy: RERATE_ACTOR
@@ -679,7 +615,8 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
       typeId: dimensionIds.typeId
     },
     select: {
-      rating: true
+      rating: true,
+      volatility: true
     }
   })
 
@@ -692,18 +629,23 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
     orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
     skip: 1,
     select: {
-      newRating: true
+      newRating: true,
+      newVolatility: true
     }
   })
 
   const latestUpdate = {
     mostRecent: true,
     oldRating: previousHistory ? previousHistory.newRating : null,
+    oldVolatility: previousHistory ? previousHistory.newVolatility : null,
     updatedBy: RERATE_ACTOR
   }
 
   if (currentStats && currentStats.rating !== null) {
     latestUpdate.newRating = currentStats.rating
+  }
+  if (currentStats && currentStats.volatility !== null) {
+    latestUpdate.newVolatility = currentStats.volatility
   }
 
   await tx.memberStatsHistory.update({
@@ -846,8 +788,8 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
         tx,
         normalizedUserId,
         historyEntry.challengeId,
-        targetStateBeforeRun.numRatings > 0 ? targetStateBeforeRun.rating : null,
-        updatedTarget.rating,
+        targetStateBeforeRun,
+        updatedTarget,
         historyEntry.eventDate,
         dimensionIds
       )

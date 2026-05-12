@@ -192,6 +192,8 @@ describe('recalculateMemberStats unit tests', () => {
             challengeId: 'challenge-ds',
             date: '2024-02-03T00:00:00.000Z',
             rating: 1700,
+            placement: 2,
+            percentile: 85.5,
             subTrack: 'Challenge',
             subTrackId: null
           }]
@@ -228,10 +230,16 @@ describe('recalculateMemberStats unit tests', () => {
     rawQueries.should.have.length(2)
     rawQueries[0].sql.should.include('UPDATE "members"."memberStatsHistory"')
     rawQueries[0].sql.should.include('CAST(data."newRating" AS INTEGER)')
+    rawQueries[0].sql.should.include('CAST(data."placement" AS INTEGER)')
+    rawQueries[0].sql.should.include('CAST(data."percentile" AS DOUBLE PRECISION)')
     rawQueries[0].sql.should.include('CAST(data."id" AS BIGINT)')
     rawQueries[1].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
     rawQueries[1].sql.should.include('CAST(data."userId" AS BIGINT)')
     rawQueries[1].sql.should.include('CAST(data."newRating" AS INTEGER)')
+    rawQueries[1].sql.should.include('CAST(data."placement" AS INTEGER)')
+    rawQueries[1].sql.should.include('CAST(data."percentile" AS DOUBLE PRECISION)')
+    rawQueries[1].params.should.include(2)
+    rawQueries[1].params.should.include(85.5)
   })
 
   it('should supplement history rows from completed review and winner challenges', async () => {
@@ -304,7 +312,10 @@ describe('recalculateMemberStats unit tests', () => {
     const rawQueries = transactionCalls[0].filter((query) => query.action === 'executeRawUnsafe')
     rawQueries.should.have.length(1)
     rawQueries[0].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
+    rawQueries[0].sql.should.include('CAST(data."placement" AS INTEGER)')
+    rawQueries[0].params.should.include(2)
     winnerQuerySql.should.include('cw."type" IN (\'PLACEMENT\', \'PASSED_REVIEW\')')
+    winnerQuerySql.should.include('cw."placement" AS "placement"')
   })
 
   it('should normalize Development-track Marathon Match history to Data Science', async () => {

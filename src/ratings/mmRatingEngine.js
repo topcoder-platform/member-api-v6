@@ -5,14 +5,17 @@
  * Match rerates. Configured rating paths also include tagged or skilled
  * Development / Challenge rows from challengeResult. In both cases it resolves challenge
  * metadata from challenge-api, applies the Qubits math one challenge at a time,
- * and persists the target member's rating state into memberStats,
- * memberStatsHistory, and memberMaxRating.
+ * and persists the target member's rating state and placement metadata into
+ * memberStats, memberStatsHistory, and memberMaxRating.
  */
 
 'use strict'
 
 const errors = require('../common/errors')
-const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
+const {
+  resolveChallengeResultRelation,
+  resolveReviewDbRelation
+} = require('../common/reviewDbHelper')
 const {
   clearChallengeDimensionLookupCache,
   loadChallengeDimensionLookup,
@@ -20,6 +23,11 @@ const {
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
+const {
+  RATING_METADATA_SELECT,
+  isChallengeRated,
+  parseBooleanLike
+} = require('./challengeRatingStatus')
 const {
   challengeMatchesRatingPath,
   normalizeRatingPathName
@@ -34,6 +42,23 @@ const RERATE_ACTOR = 'rerate-mm-stats'
 const SCORE_DIRECTION_MINIMIZE = 'MINIMIZE'
 const RATING_PATH_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_PATH_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
+const DEFAULT_MM_SCORING_CONFIG = Object.freeze({
+  relativeScoringEnabled: true,
+  scoreDirection: 'MAXIMIZE'
+})
+
+/**
+ * Build the default Marathon Match scoring configuration used for historical
+ * reviewSummation replay. Historical data is sourced from review-api only, and
+ * aggregateScore is treated as the already-normalized higher-is-better result.
+ * @returns {Object} scoring configuration for MM participant normalization
+ */
+function getDefaultMmScoringConfig () {
+  return {
+    relativeScoringEnabled: DEFAULT_MM_SCORING_CONFIG.relativeScoringEnabled,
+    scoreDirection: DEFAULT_MM_SCORING_CONFIG.scoreDirection
+  }
+}
 
 /**
  * Determine whether the supplied value is a BigInt.
@@ -86,6 +111,87 @@ function createDefaultState () {
     volatility: 0,
     numRatings: 0
   }
+}
+
+/**
+ * Add a non-empty challenge identifier candidate to the supplied set.
+ * @param {Set<string>} candidates target candidate set
+ * @param {*} value challenge identifier value
+ * @returns {void}
+ */
+function addChallengeIdCandidate (candidates, value) {
+  if (value === null || value === undefined) {
+    return
+  }
+
+  const normalized = String(value).trim()
+  if (normalized) {
+    candidates.add(normalized)
+  }
+}
+
+/**
+ * Build all review-database challenge identifiers known for a challenge entry.
+ * Challenge-api exposes canonical UUIDs while migrated review rows may still
+ * store legacy numeric ids, so replay queries need to try each stable alias.
+ * @param {*} challengeRef challenge id, challenge metadata row, or history entry
+ * @returns {Array<string>} unique challenge id candidates
+ */
+function buildChallengeIdCandidates (challengeRef) {
+  const candidates = new Set()
+
+  if (Array.isArray(challengeRef)) {
+    challengeRef.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    return Array.from(candidates)
+  }
+
+  if (challengeRef && typeof challengeRef === 'object' && !(challengeRef instanceof Date)) {
+    addChallengeIdCandidate(candidates, challengeRef.challengeId)
+    addChallengeIdCandidate(candidates, challengeRef.id)
+    addChallengeIdCandidate(candidates, challengeRef.legacyId)
+
+    if (Array.isArray(challengeRef.reviewChallengeIds)) {
+      challengeRef.reviewChallengeIds.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (Array.isArray(challengeRef.challengeIds)) {
+      challengeRef.challengeIds.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (Array.isArray(challengeRef.challengeIdCandidates)) {
+      challengeRef.challengeIdCandidates.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (challengeRef.legacyRecord) {
+      addChallengeIdCandidate(candidates, challengeRef.legacyRecord.legacySystemId)
+    }
+
+    return Array.from(candidates)
+  }
+
+  addChallengeIdCandidate(candidates, challengeRef)
+  return Array.from(candidates)
+}
+
+/**
+ * Merge challenge metadata aliases with an optional source row id.
+ * @param {Object} challenge challenge-api metadata row
+ * @param {*} [sourceChallengeId] challenge id observed in review data
+ * @returns {Array<string>} unique review challenge id candidates
+ */
+function buildReviewChallengeIds (challenge, sourceChallengeId) {
+  const candidates = new Set()
+  addChallengeIdCandidate(candidates, sourceChallengeId)
+  buildChallengeIdCandidates(challenge).forEach((candidate) => candidates.add(candidate))
+  return Array.from(candidates)
+}
+
+/**
+ * Test whether a history entry can be addressed by the supplied challenge id.
+ * @param {Object} historyEntry rerate history entry
+ * @param {*} challengeId requested challenge id
+ * @returns {boolean} true when the entry has the challenge id as an alias
+ */
+function historyEntryMatchesChallengeId (historyEntry, challengeId) {
+  const normalizedChallengeId = String(challengeId).trim()
+  return buildChallengeIdCandidates(historyEntry).includes(normalizedChallengeId)
 }
 
 /**
@@ -244,8 +350,8 @@ async function resolveUnifiedDimensionIds (challengeClient, ratingPath) {
 
 /**
  * Build a rerate seed state from the latest authoritative history row before a challenge.
- * Unified memberStatsHistory does not checkpoint volatility, so rated history seeds fall
- * back to the default Qubits volatility until the rerate pass advances them.
+ * Historical volatility is used when available. Older history rows that predate
+ * volatility checkpoints fall back to the default Qubits volatility.
  * @param {Array<Object>} historyRows participant history rows sorted by event date and id
  * @param {number} seedIndex index of the last history row before the target challenge
  * @returns {Object} seeded rating state
@@ -259,7 +365,9 @@ function createHistorySeedState (historyRows, seedIndex) {
     rating: Number.isFinite(Number(historyRows[seedIndex].newRating))
       ? Number(historyRows[seedIndex].newRating)
       : 0,
-    volatility: DEFAULT_VOLATILITY,
+    volatility: Number.isFinite(Number(historyRows[seedIndex].newVolatility))
+      ? Number(historyRows[seedIndex].newVolatility)
+      : DEFAULT_VOLATILITY,
     numRatings: seedIndex + 1
   }
 }
@@ -267,14 +375,14 @@ function createHistorySeedState (historyRows, seedIndex) {
 /**
  * Find the history row index for a challenge within one participant timeline.
  * @param {Array<Object>} historyRows participant history rows sorted by event date and id
- * @param {string} challengeId challenge identifier
+ * @param {string|Object} challengeId challenge identifier or history entry with aliases
  * @returns {number} index of the matching row or -1 when absent
  */
 function findHistoryIndexForChallenge (historyRows, challengeId) {
-  const normalizedChallengeId = String(challengeId)
+  const challengeIds = new Set(buildChallengeIdCandidates(challengeId))
 
   for (let index = historyRows.length - 1; index >= 0; index -= 1) {
-    if (String(historyRows[index].challengeId) === normalizedChallengeId) {
+    if (challengeIds.has(String(historyRows[index].challengeId))) {
       return index
     }
   }
@@ -296,7 +404,7 @@ function findHistorySeedIndexForChallenge (historyRows, challengeEntry) {
     return -1
   }
 
-  const currentChallengeIndex = findHistoryIndexForChallenge(historyRows, challengeEntry.challengeId)
+  const currentChallengeIndex = findHistoryIndexForChallenge(historyRows, challengeEntry)
   if (currentChallengeIndex >= 0) {
     return currentChallengeIndex - 1
   }
@@ -354,73 +462,6 @@ function normalizeChallengeDimension (value) {
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, '_')
-}
-
-/**
- * Parse a loosely-typed boolean-like value.
- * @param {*} value candidate value
- * @returns {boolean|undefined} parsed boolean or undefined when indeterminate
- */
-function parseBooleanLike (value) {
-  if (typeof value === 'boolean') {
-    return value
-  }
-
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase()
-    if (normalized === 'true') {
-      return true
-    }
-    if (normalized === 'false') {
-      return false
-    }
-  }
-
-  return undefined
-}
-
-/**
- * Resolve whether a challenge should be treated as rated.
- * @param {Object} challenge challenge metadata record
- * @returns {boolean} true when the challenge is rated or rating status is unspecified
- */
-function isChallengeRated (challenge) {
-  if (!challenge) {
-    return false
-  }
-
-  const directRated = parseBooleanLike(challenge.isRated)
-  if (directRated !== undefined) {
-    return directRated
-  }
-
-  const legacyRated = parseBooleanLike(challenge.rated)
-  if (legacyRated !== undefined) {
-    return legacyRated
-  }
-
-  if (!Array.isArray(challenge.metadata)) {
-    return true
-  }
-
-  for (const entry of challenge.metadata) {
-    const name = normalizeChallengeDimension(entry && entry.name)
-    const value = parseBooleanLike(entry && entry.value)
-
-    if (value === undefined) {
-      continue
-    }
-
-    if (name === 'UNRATED') {
-      return !value
-    }
-
-    if (name === 'RATED' || name === 'ISRATED' || name === 'IS_RATED') {
-      return value
-    }
-  }
-
-  return true
 }
 
 /**
@@ -530,6 +571,71 @@ function isDevelopmentParticipantEligibleForRating (row) {
 }
 
 /**
+ * Normalize a placement value so only positive integer ranks are persisted.
+ * @param {*} value raw source placement value
+ * @returns {number|undefined} positive placement or undefined when unavailable
+ */
+function toOptionalPlacement (value) {
+  const placement = Number(value)
+  return Number.isInteger(placement) && placement > 0 ? placement : undefined
+}
+
+/**
+ * Compute deterministic competition placements from participant scores.
+ * @param {Array<Object>} participants Qubits participants containing coderId and score
+ * @returns {Map<string, number>} placement keyed by coder id
+ */
+function computePlacementByCoderId (participants) {
+  const placementByCoderId = new Map()
+  const sortedParticipants = (participants || []).slice().sort((left, right) => {
+    const leftScore = Number.isFinite(Number(left.score)) ? Number(left.score) : 0
+    const rightScore = Number.isFinite(Number(right.score)) ? Number(right.score) : 0
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore
+    }
+
+    return String(left.coderId).localeCompare(String(right.coderId))
+  })
+
+  let currentPlacement = 0
+  let previousScore
+  sortedParticipants.forEach((participant, index) => {
+    const score = Number(participant.score)
+    if (index === 0 || score !== previousScore) {
+      currentPlacement = index + 1
+      previousScore = score
+    }
+
+    placementByCoderId.set(String(participant.coderId), currentPlacement)
+  })
+
+  return placementByCoderId
+}
+
+/**
+ * Build optional history metadata for the target participant.
+ * Source-provided placements are preferred; score ordering is the fallback for
+ * historical MM submissions that do not expose a stored placement.
+ * @param {Array<Object>} participants rated participant states for one challenge
+ * @param {string} targetUserKey normalized target user id
+ * @param {Object} sourceRow source participant row for the target user
+ * @returns {Object} persisted memberStatsHistory metadata
+ */
+function buildHistoryResultFields (participants, targetUserKey, sourceRow) {
+  const sourcePlacement = toOptionalPlacement(sourceRow && sourceRow.placement)
+  if (sourcePlacement) {
+    return {
+      placement: sourcePlacement
+    }
+  }
+
+  const computedPlacement = computePlacementByCoderId(participants).get(String(targetUserKey))
+  return omitUndefinedFields({
+    placement: computedPlacement
+  })
+}
+
+/**
  * Fetch all final Marathon Match system results for the target member.
  * The reviewSummation table is submission-scoped, so the latest final summation
  * per submission is selected before replay history is built. Some imported MM
@@ -540,13 +646,17 @@ function isDevelopmentParticipantEligibleForRating (row) {
  * @returns {Promise<Array<Object>>} ordered result rows for the member
  */
 async function fetchMmResultsForUser (reviewDbClient, userId) {
+  const reviewSummationRelation = await resolveReviewDbRelation(reviewDbClient, 'reviewSummation')
+  const submissionRelation = await resolveReviewDbRelation(reviewDbClient, 'submission')
   const result = await reviewDbClient.query(
     `
       WITH "latestSubmissionSummation" AS (
         SELECT
           rs."submissionId",
           s."memberId",
-          s."challengeId",
+          COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
+          s."legacyChallengeId",
+          s."placement",
           rs."aggregateScore",
           rs."reviewedDate",
           rs."createdAt",
@@ -564,16 +674,19 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
               rs."createdAt" DESC,
               rs."aggregateScore" DESC
           ) AS "summationRank"
-        FROM "reviewSummation" rs
-        INNER JOIN "submission" s
+        FROM ${reviewSummationRelation} rs
+        INNER JOIN ${submissionRelation} s
           ON s."id" = rs."submissionId"
         WHERE s."memberId" = $1
+          AND (s."challengeId" IS NOT NULL OR s."legacyChallengeId" IS NOT NULL)
           AND rs."isFinal" IS NOT FALSE
       )
       SELECT
         "submissionId",
         "memberId",
         "challengeId",
+        "legacyChallengeId",
+        "placement",
         "aggregateScore",
         "reviewedDate",
         "createdAt",
@@ -590,20 +703,33 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
 
 /**
  * Fetch all challenge participants using the latest scored submission per member.
- * Relative scoring config is loaded from the Marathon Match database for score normalization.
+ * Historical Marathon Match data is read from review-api only; reviewSummation
+ * aggregateScore is treated as already normalized for higher-is-better ordering.
+ * Both submission.challengeId and submission.legacyChallengeId are considered.
  * @param {Object} reviewDbClient raw pg review database client
- * @param {Object} mmDbClient prisma Marathon Match client
- * @param {string} challengeId challenge identifier
+ * @param {string|Object} challengeId challenge identifier or history entry with legacy aliases
  * @returns {Promise<Object>} participant rows and scoring config for the challenge
  */
-async function fetchMmParticipantsForChallenge (reviewDbClient, mmDbClient, challengeId) {
+async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
+  const challengeIds = buildChallengeIdCandidates(challengeId)
+  if (challengeIds.length === 0) {
+    return {
+      participantRows: [],
+      scoringConfig: getDefaultMmScoringConfig()
+    }
+  }
+
+  const reviewSummationRelation = await resolveReviewDbRelation(reviewDbClient, 'reviewSummation')
+  const submissionRelation = await resolveReviewDbRelation(reviewDbClient, 'submission')
   const result = await reviewDbClient.query(
     `
       WITH "latestSubmissionSummation" AS (
         SELECT
           rs."submissionId",
           s."memberId",
-          s."challengeId",
+          COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
+          s."legacyChallengeId",
+          s."placement",
           s."createdAt" AS "submissionCreatedAt",
           rs."aggregateScore",
           rs."reviewedDate",
@@ -615,10 +741,13 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, mmDbClient, chal
               rs."createdAt" DESC,
               rs."aggregateScore" DESC
           ) AS "summationRank"
-        FROM "reviewSummation" rs
-        INNER JOIN "submission" s
+        FROM ${reviewSummationRelation} rs
+        INNER JOIN ${submissionRelation} s
           ON s."id" = rs."submissionId"
-        WHERE s."challengeId" = $1
+        WHERE (
+            s."challengeId" = ANY($1::text[])
+            OR s."legacyChallengeId"::text = ANY($1::text[])
+          )
           AND s."memberId" IS NOT NULL
           AND rs."isFinal" IS NOT FALSE
       ),
@@ -627,6 +756,8 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, mmDbClient, chal
           "submissionId",
           "memberId",
           "challengeId",
+          "legacyChallengeId",
+          "placement",
           "aggregateScore",
           "reviewedDate",
           "createdAt",
@@ -642,6 +773,8 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, mmDbClient, chal
         "submissionId",
         "memberId",
         "challengeId",
+        "legacyChallengeId",
+        "placement",
         "aggregateScore",
         "reviewedDate",
         "createdAt",
@@ -650,25 +783,12 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, mmDbClient, chal
       WHERE "memberRank" = 1
       ORDER BY "submissionCreatedAt" ASC, "submissionId" ASC
     `,
-    [String(challengeId)]
+    [challengeIds]
   )
-
-  const config = await mmDbClient.marathonMatchConfig.findUnique({
-    where: {
-      challengeId: String(challengeId)
-    },
-    select: {
-      relativeScoringEnabled: true,
-      scoreDirection: true
-    }
-  })
 
   return {
     participantRows: result.rows,
-    scoringConfig: {
-      relativeScoringEnabled: config ? config.relativeScoringEnabled !== false : true,
-      scoreDirection: config ? config.scoreDirection : 'MAXIMIZE'
-    }
+    scoringConfig: getDefaultMmScoringConfig()
   }
 }
 
@@ -696,24 +816,51 @@ async function fetchDevelopmentParticipantsForChallenge (reviewDbClient, challen
 /**
  * Load challenge metadata required for MM rerating from challenge-api.
  * Rated metadata is loaded defensively from challenge metadata key/value rows
- * when no top-level rated flag is available.
+ * when no top-level rated flag is available. The returned map is keyed by both
+ * canonical UUID id and legacy numeric aliases so migrated review rows resolve.
  * @param {Object} challengeClient prisma challenge client
  * @param {Array<string>} challengeIds challenge identifiers
- * @returns {Promise<Map<string, Object>>} challenge metadata keyed by challenge id
+ * @returns {Promise<Map<string, Object>>} challenge metadata keyed by UUID and legacy id
  */
 async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
-  if (!challengeIds || challengeIds.length === 0) {
+  const normalizedChallengeIds = buildChallengeIdCandidates(challengeIds)
+  if (normalizedChallengeIds.length === 0) {
     return new Map()
   }
 
-  const challenges = await challengeClient.challenge.findMany({
-    where: {
-      id: {
-        in: challengeIds
+  const numericChallengeIds = normalizedChallengeIds
+    .filter((challengeId) => /^\d+$/.test(challengeId))
+    .map((challengeId) => Number(challengeId))
+    .filter(Number.isSafeInteger)
+
+  const whereClauses = [{
+    id: {
+      in: normalizedChallengeIds
+    }
+  }]
+
+  if (numericChallengeIds.length > 0) {
+    whereClauses.push({
+      legacyId: {
+        in: numericChallengeIds
       }
-    },
+    })
+    whereClauses.push({
+      legacyRecord: {
+        is: {
+          legacySystemId: {
+            in: numericChallengeIds
+          }
+        }
+      }
+    })
+  }
+
+  const challenges = await challengeClient.challenge.findMany({
+    where: whereClauses.length === 1 ? whereClauses[0] : { OR: whereClauses },
     select: {
       id: true,
+      legacyId: true,
       endDate: true,
       track: {
         select: {
@@ -726,21 +873,23 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
         }
       },
       tags: true,
-      metadata: {
-        where: {
-          name: {
-            in: ['rated', 'isRated', 'unrated']
-          }
-        },
+      metadata: RATING_METADATA_SELECT,
+      legacyRecord: {
         select: {
-          name: true,
-          value: true
+          legacySystemId: true
         }
       }
     }
   })
 
-  return new Map(challenges.map((challenge) => [challenge.id, challenge]))
+  const metadataByChallengeId = new Map()
+  challenges.forEach((challenge) => {
+    buildReviewChallengeIds(challenge).forEach((candidate) => {
+      metadataByChallengeId.set(candidate, challenge)
+    })
+  })
+
+  return metadataByChallengeId
 }
 
 /**
@@ -783,8 +932,10 @@ function buildTargetHistory (mmResultRows, challengeMetadataById, ratingPath) {
       return
     }
 
-    historyByChallengeId.set(String(row.challengeId), {
-      challengeId: String(row.challengeId),
+    const canonicalChallengeId = String(challenge.id)
+    historyByChallengeId.set(canonicalChallengeId, {
+      challengeId: canonicalChallengeId,
+      reviewChallengeIds: buildReviewChallengeIds(challenge, row.challengeId),
       createdAt: scoreDate,
       endDate: normalizeDate(challenge.endDate, scoreDate),
       eventDate
@@ -839,6 +990,7 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       userId: true,
       challengeId: true,
       newRating: true,
+      newVolatility: true,
       eventDate: true
     }
   })
@@ -860,6 +1012,7 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       id: row.id,
       challengeId: String(row.challengeId),
       newRating: row.newRating,
+      newVolatility: row.newVolatility,
       eventDate
     })
   })
@@ -959,12 +1112,16 @@ async function upsertRatingStatsRow (tx, userId, updatedTarget, dimensionIds, st
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId member identifier
  * @param {string} challengeId challenge identifier
- * @param {number|null} oldRating rating before the challenge
- * @param {number} newRating rating after the challenge
+ * @param {Object} previousState target state before the challenge
+ * @param {Object} updatedState target state after the challenge
  * @param {Date} eventDate challenge event date
+ * @param {Object} historyFields optional placement and percentile history metadata
  * @returns {Promise<void>} resolves when the history row is written
  */
-async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, eventDate, dimensionIds) {
+async function upsertHistoryRow (tx, userId, challengeId, previousState, updatedState, eventDate, dimensionIds, historyFields = {}) {
+  const hasPreviousRating = previousState && previousState.numRatings > 0
+  const oldRating = hasPreviousRating ? previousState.rating : null
+  const oldVolatility = hasPreviousRating ? previousState.volatility : null
   const existingHistory = await tx.memberStatsHistory.findFirst({
     where: {
       userId,
@@ -976,18 +1133,23 @@ async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, 
       id: true
     }
   })
+  const historyData = omitUndefinedFields({
+    oldRating,
+    newRating: updatedState.rating,
+    placement: historyFields.placement,
+    percentile: historyFields.percentile,
+    oldVolatility,
+    newVolatility: updatedState.volatility,
+    eventDate,
+    updatedBy: RERATE_ACTOR
+  })
 
   if (existingHistory) {
     await tx.memberStatsHistory.update({
       where: {
         id: existingHistory.id
       },
-      data: {
-        oldRating,
-        newRating,
-        eventDate,
-        updatedBy: RERATE_ACTOR
-      }
+      data: historyData
     })
     return
   }
@@ -999,9 +1161,7 @@ async function upsertHistoryRow (tx, userId, challengeId, oldRating, newRating, 
       typeId: dimensionIds.typeId,
       challengeId,
       mostRecent: false,
-      oldRating,
-      newRating,
-      eventDate,
+      ...historyData,
       createdBy: RERATE_ACTOR,
       updatedBy: RERATE_ACTOR
     }
@@ -1110,7 +1270,8 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
       typeId: dimensionIds.typeId
     },
     select: {
-      rating: true
+      rating: true,
+      volatility: true
     }
   })
 
@@ -1123,18 +1284,23 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
     orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
     skip: 1,
     select: {
-      newRating: true
+      newRating: true,
+      newVolatility: true
     }
   })
 
   const latestUpdate = {
     mostRecent: true,
     oldRating: previousHistory ? previousHistory.newRating : null,
+    oldVolatility: previousHistory ? previousHistory.newVolatility : null,
     updatedBy: RERATE_ACTOR
   }
 
   if (currentStats && currentStats.rating !== null) {
     latestUpdate.newRating = currentStats.rating
+  }
+  if (currentStats && currentStats.volatility !== null) {
+    latestUpdate.newVolatility = currentStats.volatility
   }
 
   await tx.memberStatsHistory.update({
@@ -1189,7 +1355,8 @@ function buildRatingPathChallengeWhere (ratingPath) {
  * The Challenge API stores tags on the challenge row and skill links in
  * ChallengeSkill rows, while rated state is kept in metadata for some historical
  * imports. Supported sources are Development / Challenge and DATA_SCIENCE /
- * MARATHON_MATCH.
+ * MARATHON_MATCH. Entries include canonical and legacy challenge id aliases for
+ * review-api lookups.
  * @param {Object} challengeClient prisma challenge client
  * @param {Object} ratingPath normalized rating path config
  * @returns {Promise<Array<Object>>} ordered challenge entries for the rating path
@@ -1199,6 +1366,7 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
     where: buildRatingPathChallengeWhere(ratingPath),
     select: {
       id: true,
+      legacyId: true,
       endDate: true,
       track: {
         select: {
@@ -1216,15 +1384,10 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
           skillId: true
         }
       },
-      metadata: {
-        where: {
-          name: {
-            in: ['rated', 'isRated', 'unrated']
-          }
-        },
+      metadata: RATING_METADATA_SELECT,
+      legacyRecord: {
         select: {
-          name: true,
-          value: true
+          legacySystemId: true
         }
       }
     }
@@ -1256,6 +1419,7 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
 
     history.push({
       challengeId: String(challenge.id),
+      reviewChallengeIds: buildReviewChallengeIds(challenge),
       eventDate,
       source
     })
@@ -1276,12 +1440,16 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
 
 /**
  * Fetch participants for one tagged rating path event from its source table.
+ * The second argument is retained for older callers that passed an MM client;
+ * it is ignored because historical MM replay no longer reads marathon-match-api.
  * @param {Object} reviewDbClient raw pg review database client
- * @param {Object} mmDbClient prisma Marathon Match client
- * @param {Object} historyEntry rating path challenge entry
+ * @param {Object|null} maybeMmDbClientOrHistoryEntry ignored MM client or rating path challenge entry
+ * @param {Object} [maybeHistoryEntry] rating path challenge entry
  * @returns {Promise<Object>} participant rows and optional MM scoring config
  */
-async function fetchRatingPathParticipantsForChallenge (reviewDbClient, mmDbClient, historyEntry) {
+async function fetchRatingPathParticipantsForChallenge (reviewDbClient, maybeMmDbClientOrHistoryEntry, maybeHistoryEntry) {
+  const historyEntry = maybeHistoryEntry || maybeMmDbClientOrHistoryEntry
+
   if (historyEntry.source === RATING_PATH_SOURCE_DEVELOPMENT) {
     return {
       participantRows: await fetchDevelopmentParticipantsForChallenge(reviewDbClient, historyEntry.challengeId),
@@ -1290,11 +1458,7 @@ async function fetchRatingPathParticipantsForChallenge (reviewDbClient, mmDbClie
   }
 
   if (historyEntry.source === RATING_PATH_SOURCE_MARATHON_MATCH) {
-    if (!mmDbClient) {
-      throw new Error('MM_DB_URL must be configured to rerate Marathon Match events in rating paths')
-    }
-
-    return fetchMmParticipantsForChallenge(reviewDbClient, mmDbClient, historyEntry.challengeId)
+    return fetchMmParticipantsForChallenge(reviewDbClient, historyEntry)
   }
 
   return {
@@ -1337,7 +1501,7 @@ function normalizeRatingPathScore (row, source, scoringConfig) {
  * skill id to be present on the challenge.
  * @param {Object} membersClient prisma members client
  * @param {Object} challengeClient prisma challenge client
- * @param {Object} mmDbClient prisma Marathon Match client
+ * @param {Object|null} mmDbClient ignored legacy Marathon Match client parameter
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string|number|BigInt} userId target member identifier
  * @param {string|number} fromChallengeId starting challenge identifier
@@ -1359,7 +1523,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
 
   let startIndex = 0
   if (fromChallengeId) {
-    startIndex = pathHistory.findIndex((entry) => entry.challengeId === String(fromChallengeId))
+    startIndex = pathHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
     if (startIndex < 0) {
       throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${ratingPath.name} event`)
     }
@@ -1392,9 +1556,11 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
     ratingPathChallengesProcessed += 1
 
     const targetStateBeforeRun = cloneState(stateByUserId.get(targetUserKey))
+    const participantRowsByUserId = new Map()
     const participants = participantRows.map((row) => {
       const participantUserId = resolveRatingPathParticipantId(row, historyEntry.source)
       const participantState = stateByUserId.get(buildUserStateKey(participantUserId)) || createDefaultState()
+      participantRowsByUserId.set(buildUserStateKey(participantUserId), row)
 
       return {
         coderId: String(participantUserId),
@@ -1422,6 +1588,11 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
     targetChallengeCount += 1
     targetMostRecentEventDate = historyEntry.eventDate
     recomputedMaxRating = Math.max(recomputedMaxRating, updatedTarget.rating)
+    const targetHistoryFields = buildHistoryResultFields(
+      participants,
+      targetUserKey,
+      participantRowsByUserId.get(targetUserKey)
+    )
 
     if (index < startIndex) {
       continue
@@ -1446,10 +1617,11 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
         tx,
         normalizedUserId,
         historyEntry.challengeId,
-        targetStateBeforeRun.numRatings > 0 ? targetStateBeforeRun.rating : null,
-        updatedTarget.rating,
+        targetStateBeforeRun,
+        updatedTarget,
         historyEntry.eventDate,
-        dimensionIds
+        dimensionIds,
+        targetHistoryFields
       )
     })
   }
@@ -1473,14 +1645,14 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
  * Each challenge is replayed forward with the latest final MM system score per participant.
  * @param {Object} membersClient prisma members client
  * @param {Object} challengeClient prisma challenge client
- * @param {Object} mmDbClient prisma Marathon Match client
+ * @param {Object|null} mmDbClient ignored legacy Marathon Match client parameter
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string|number|BigInt} userId target member identifier
  * @param {string|number} fromChallengeId starting challenge identifier
  * @param {Object} options optional rerate controls
  * @param {Object} options.ratingPath normalized rating path config
  * @returns {Promise<Object>} rerate summary counts
- * @throws {Error} when required review or MM database connections are missing
+ * @throws {Error} when the required review database connection is missing
  * @throws {errors.BadRequestError} when the start challenge is not a rated MM event for the member
  */
 async function rerateMmTrack (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId, options = {}) {
@@ -1489,10 +1661,6 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
   }
 
   const ratingPath = options.ratingPath || null
-  if (!mmDbClient && !ratingPath) {
-    throw new Error('MM_DB_URL must be configured to rerate marathon match stats')
-  }
-
   if (ratingPath) {
     return rerateMmRatingPath(
       membersClient,
@@ -1506,6 +1674,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
   }
 
   const normalizedUserId = toBigIntUserId(userId)
+  const targetUserKey = buildUserStateKey(normalizedUserId)
   const mmResultRows = await fetchMmResultsForUser(reviewDbClient, normalizedUserId)
   if (mmResultRows.length === 0) {
     return {
@@ -1531,7 +1700,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
 
   let startIndex = 0
   if (fromChallengeId) {
-    startIndex = targetHistory.findIndex((entry) => entry.challengeId === String(fromChallengeId))
+    startIndex = targetHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
     if (startIndex < 0) {
       throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${TYPE_NAME} event for this member`)
     }
@@ -1544,8 +1713,8 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
   if (startIndex > 0) {
     await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
 
-    const targetHistoryRows = participantHistoryByUserId.get(buildUserStateKey(normalizedUserId)) || []
-    let startSeedIndex = findHistoryIndexForChallenge(targetHistoryRows, targetHistory[startIndex - 1].challengeId)
+    const targetHistoryRows = participantHistoryByUserId.get(targetUserKey) || []
+    let startSeedIndex = findHistoryIndexForChallenge(targetHistoryRows, targetHistory[startIndex - 1])
 
     if (startSeedIndex < 0) {
       startSeedIndex = findHistorySeedIndexForChallenge(targetHistoryRows, targetHistory[startIndex])
@@ -1562,8 +1731,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     const historyEntry = targetHistory[index]
     const { participantRows, scoringConfig } = await fetchMmParticipantsForChallenge(
       reviewDbClient,
-      mmDbClient,
-      historyEntry.challengeId
+      historyEntry
     )
     if (participantRows.length === 0) {
       continue
@@ -1581,9 +1749,11 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     )
 
     const targetStateBeforeRun = cloneState(targetState)
+    const participantRowsByUserId = new Map()
     const participants = participantRows.map((row) => {
       const participantUserId = toBigIntUserId(row.memberId)
       const participantState = stateByUserId.get(buildUserStateKey(participantUserId)) || createDefaultState()
+      participantRowsByUserId.set(buildUserStateKey(participantUserId), row)
 
       return {
         coderId: String(participantUserId),
@@ -1605,6 +1775,11 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     challengesProcessed += 1
     ratingsUpdated += 1
     recomputedMaxRating = Math.max(recomputedMaxRating, updatedTarget.rating)
+    const targetHistoryFields = buildHistoryResultFields(
+      participants,
+      targetUserKey,
+      participantRowsByUserId.get(targetUserKey)
+    )
 
     await membersClient.$transaction(async (tx) => {
       await upsertRatingStatsRow(tx, normalizedUserId, updatedTarget, dimensionIds)
@@ -1613,10 +1788,11 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
         tx,
         normalizedUserId,
         historyEntry.challengeId,
-        targetStateBeforeRun.numRatings > 0 ? targetStateBeforeRun.rating : null,
-        updatedTarget.rating,
+        targetStateBeforeRun,
+        updatedTarget,
         historyEntry.eventDate,
-        dimensionIds
+        dimensionIds,
+        targetHistoryFields
       )
     })
   }

@@ -9,11 +9,12 @@ const path = require('path')
 
 const rerateRatingPath = require('../../src/scripts/rerateRatingPath')
 
-chai.should()
+const should = chai.should()
 
 describe('rerateRatingPath unit tests', () => {
   it('should parse rating path rerate options', () => {
     const options = rerateRatingPath.parseArgs([
+      '--',
       '--rating-name',
       'AI',
       '--concurrency',
@@ -47,8 +48,8 @@ describe('rerateRatingPath unit tests', () => {
       'challenge-2': [{ memberId: '1003' }, { memberId: '1001' }]
     }
 
-    const result = await rerateRatingPath.discoverRatingPathMembers({}, null, pathHistory, {
-      fetchParticipants: async (reviewDbClient, mmDbClient, historyEntry) => ({
+    const result = await rerateRatingPath.discoverRatingPathMembers({}, pathHistory, {
+      fetchParticipants: async (reviewDbClient, historyEntry) => ({
         participantRows: participantsByChallengeId[historyEntry.challengeId]
       }),
       resolveParticipantId: (row) => global.BigInt(row.userId || row.memberId)
@@ -79,7 +80,6 @@ describe('rerateRatingPath unit tests', () => {
       membersClient: {},
       challengeClient: {},
       reviewDbClient: {},
-      mmDbClient: null,
       disconnect: false,
       fetchRatingPathHistory: async () => [
         { challengeId: 'challenge-1', source: 'development', eventDate: new Date('2024-01-01T00:00:00Z') }
@@ -122,7 +122,6 @@ describe('rerateRatingPath unit tests', () => {
         membersClient: {},
         challengeClient: {},
         reviewDbClient: {},
-        mmDbClient: null,
         disconnect: false,
         fetchRatingPathHistory: async () => [
           { challengeId: 'challenge-1', source: 'development', eventDate: new Date('2024-01-01T00:00:00Z') }
@@ -132,6 +131,7 @@ describe('rerateRatingPath unit tests', () => {
         }),
         resolveParticipantId: row => global.BigInt(row.userId),
         rerateMmTrack: async (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId, options) => {
+          should.equal(mmDbClient, null)
           rerated.push({
             userId: String(userId),
             fromChallengeId,

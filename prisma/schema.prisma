@@ -168,6 +168,10 @@ model memberStatsHistory {
   mostRecent      Boolean  @default(false)
   oldRating       Int?
   newRating       Int?
+  placement       Int?
+  percentile      Float?
+  oldVolatility   Int?
+  newVolatility   Int?
   oldGlobalRank   Int?
   newGlobalRank   Int?
   oldCountryRank  Int?

@@ -402,6 +402,7 @@ describe('statistics service unit tests', () => {
     const { service, restore } = loadStatisticsService({
       rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
         capturedOptions = options
+        should.equal(mmClient, null)
         should.equal(String(userId), '88770025')
         should.equal(challengeId, 'ai-target-challenge')
         return {
@@ -446,6 +447,7 @@ describe('statistics service unit tests', () => {
       }],
       rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
         capturedOptions = options
+        should.equal(mmClient, null)
         should.equal(String(userId), '88770025')
         should.equal(challengeId, 'java-mysql-target-challenge')
         return {
@@ -513,6 +515,7 @@ describe('statistics service unit tests', () => {
         }
       },
       rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId, options) => {
+        should.equal(mmClient, null)
         namedRerateCalls.push({
           userId: String(userId),
           challengeId,
@@ -1175,6 +1178,68 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should offset persisted passed-review placements by paid winners', async () => {
+    const ratingDate = new Date('2025-08-27T17:05:00.000Z')
+    const challenge = {
+      id: 'mm-challenge-uuid',
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: ratingDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null,
+      winners: [{
+        placement: 1
+      }]
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-challenge-uuid',
+            eventDate: ratingDate,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [challenge],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'mm-challenge-uuid',
+        type: 'PASSED_REVIEW',
+        placement: 3,
+        createdAt: new Date('2025-08-27T17:05:00.000Z'),
+        challenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(4)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should surface passed-review Marathon Match winners under Data Science', async () => {
     const olderDate = new Date('2024-06-18T00:00:00.000Z')
     const newerDate = new Date('2025-08-27T17:05:00.000Z')
@@ -1198,7 +1263,10 @@ describe('statistics service unit tests', () => {
       status: 'COMPLETED',
       trackId: 'track-dev-id',
       typeId: 'type-mm-id',
-      endDate: newerDate
+      endDate: newerDate,
+      winners: [{
+        placement: 1
+      }]
     }
     const { service, restore } = loadStatisticsService({
       prismaStub: {
@@ -1239,13 +1307,14 @@ describe('statistics service unit tests', () => {
       const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
 
       winnerFindManyArgs.where.type.in.should.include('PASSED_REVIEW')
+      should.exist(winnerFindManyArgs.select.challenge.select.winners)
       result.should.have.length(1)
       should.exist(result[0].DATA_SCIENCE)
       should.not.exist(result[0].DEVELOP)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(2)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeId.should.equal('new-mm-challenge')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
-      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(3)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(4)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].challengeId.should.equal('old-mm-challenge')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].mostRecent.should.equal(false)

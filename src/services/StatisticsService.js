@@ -17,6 +17,10 @@ const reviewDb = require('../common/reviewDb')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const {
+  RATING_METADATA_SELECT,
+  isChallengeRated
+} = require('../ratings/challengeRatingStatus')
+const {
   fetchRatingPathParticipantsForChallenge,
   resolveRatingPathParticipantId,
   rerateMmTrack
@@ -61,7 +65,9 @@ if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
 const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
-const CHALLENGE_WINNER_HISTORY_TYPES = ['PLACEMENT', 'PASSED_REVIEW']
+const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
+const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
+const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -317,24 +323,6 @@ function resolveConfiguredRatingPath (ratingName) {
 }
 
 /**
- * Load the MM config client when available for configured rating paths.
- * Development-only rating paths do not need MM_DB_URL, but any path containing
- * Marathon Match events will fail later with an explicit MM configuration error.
- * @returns {Object|null} MM config client or null when MM_DB_URL is absent
- */
-function getOptionalMmClientForRatingPath () {
-  try {
-    return prismaManager.getMmClient()
-  } catch (error) {
-    if (error && String(error.message || '').includes('MM_DB_URL')) {
-      return null
-    }
-
-    throw error
-  }
-}
-
-/**
  * Convert a member identifier into the BigInt shape used by Prisma relations.
  * @param {*} value raw member user id
  * @returns {BigInt} normalized user id
@@ -361,29 +349,6 @@ function stringifyUserId (value) {
 }
 
 /**
- * Parse a boolean-like rating metadata value.
- * @param {*} value raw metadata value
- * @returns {boolean|undefined} parsed boolean or undefined when not boolean-like
- */
-function parseBooleanLike (value) {
-  if (typeof value === 'boolean') {
-    return value
-  }
-
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase()
-    if (normalized === 'true') {
-      return true
-    }
-    if (normalized === 'false') {
-      return false
-    }
-  }
-
-  return undefined
-}
-
-/**
  * Resolve whether challenge metadata allows rating updates.
  * Missing rating metadata defaults to rated, matching the rating engines'
  * historical replay behavior for older challenges.
@@ -391,39 +356,7 @@ function parseBooleanLike (value) {
  * @returns {boolean} true when the challenge should be considered rated
  */
 function isChallengeRatingEnabled (challenge) {
-  const directRated = parseBooleanLike(_.get(challenge, 'isRated'))
-  if (directRated !== undefined) {
-    return directRated
-  }
-
-  const legacyRated = parseBooleanLike(_.get(challenge, 'rated'))
-  if (legacyRated !== undefined) {
-    return legacyRated
-  }
-
-  const metadata = _.get(challenge, 'metadata')
-  if (!Array.isArray(metadata)) {
-    return true
-  }
-
-  for (const entry of metadata) {
-    const name = String(_.get(entry, 'name') || '').trim().toUpperCase().replace(/[\s-]+/g, '_')
-    const value = parseBooleanLike(_.get(entry, 'value'))
-
-    if (value === undefined) {
-      continue
-    }
-
-    if (name === 'UNRATED') {
-      return !value
-    }
-
-    if (name === 'RATED' || name === 'ISRATED' || name === 'IS_RATED') {
-      return value
-    }
-  }
-
-  return true
+  return isChallengeRated(challenge)
 }
 
 /**
@@ -481,17 +414,7 @@ async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
           skillId: true
         }
       },
-      metadata: {
-        where: {
-          name: {
-            in: ['rated', 'isRated', 'unrated']
-          }
-        },
-        select: {
-          name: true,
-          value: true
-        }
-      }
+      metadata: RATING_METADATA_SELECT
     }
   })
 }
@@ -612,18 +535,12 @@ async function fetchChallengeResultParticipantIds (reviewDbClient, challengeId) 
  * Fetch Marathon Match participants from review summations when challengeResult
  * rows are not available yet.
  * @param {Object} reviewDbClient raw pg review database client
- * @param {Object|null} mmDbClient prisma Marathon Match client
  * @param {string|number} challengeId challenge identifier
  * @returns {Promise<Array<BigInt>>} participant user ids
  */
-async function fetchMarathonMatchParticipantIds (reviewDbClient, mmDbClient, challengeId) {
-  if (!mmDbClient) {
-    return []
-  }
-
+async function fetchMarathonMatchParticipantIds (reviewDbClient, challengeId) {
   const { participantRows } = await fetchRatingPathParticipantsForChallenge(
     reviewDbClient,
-    mmDbClient,
     {
       challengeId: String(challengeId),
       source: RATING_SOURCE_MARATHON_MATCH
@@ -647,7 +564,7 @@ async function fetchRatingParticipantIds (reviewDbClient, challengeId, source) {
   }
 
   return _.uniqBy(
-    await fetchMarathonMatchParticipantIds(reviewDbClient, getOptionalMmClientForRatingPath(), challengeId),
+    await fetchMarathonMatchParticipantIds(reviewDbClient, challengeId),
     stringifyUserId
   )
 }
@@ -700,7 +617,7 @@ async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClien
     return rerateMmTrack(
       prisma,
       challengeClient,
-      getOptionalMmClientForRatingPath(),
+      null,
       reviewDbClient,
       userId,
       challengeId,
@@ -723,7 +640,7 @@ async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClien
   return rerateMmTrack(
     prisma,
     challengeClient,
-    prismaManager.getMmClient(),
+    null,
     reviewDbClient,
     userId,
     challengeId
@@ -932,7 +849,18 @@ async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
             status: true,
             trackId: true,
             typeId: true,
-            endDate: true
+            endDate: true,
+            winners: {
+              where: {
+                type: CHALLENGE_WINNER_PLACEMENT_TYPE
+              },
+              select: {
+                placement: true
+              },
+              orderBy: {
+                placement: 'asc'
+              }
+            }
           }
         }
       }
@@ -1012,17 +940,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
           name: true
         }
       },
-      metadata: {
-        where: {
-          name: {
-            in: ['rated', 'isRated', 'unrated']
-          }
-        },
-        select: {
-          name: true,
-          value: true
-        }
-      },
+      metadata: RATING_METADATA_SELECT,
       legacyRecord: {
         select: {
           legacySystemId: true
@@ -1118,6 +1036,48 @@ function toVisiblePlacement (value) {
 }
 
 /**
+ * Determine the absolute placement offset for a passed-review winner row.
+ * ChallengeWinner stores PASSED_REVIEW placements relative to the passed-review
+ * bucket, so visible rank must be shifted by the highest paid placement rank.
+ * @param {Object} row challenge winner row with nested challenge placement winners
+ * @returns {number} placement offset to add to PASSED_REVIEW placements
+ */
+function getPassedReviewPlacementOffset (row) {
+  const placementWinners = _.get(row, 'challenge.winners')
+  if (!_.isArray(placementWinners) || placementWinners.length === 0) {
+    return 0
+  }
+
+  const placements = _.chain(placementWinners)
+    .map(winner => toVisiblePlacement(winner.placement))
+    .filter(placement => Number.isInteger(placement))
+    .value()
+
+  return placements.length > 0 ? _.max(placements) : 0
+}
+
+/**
+ * Normalize a ChallengeWinner placement into the overall visible challenge rank.
+ * PLACEMENT rows are already absolute; PASSED_REVIEW rows are offset by the
+ * highest paid placement rank when that context is available.
+ * @param {Object} row challenge winner row
+ * @returns {number|undefined} visible placement when available
+ */
+function toVisibleChallengeWinnerPlacement (row) {
+  const placement = toVisiblePlacement(row && row.placement)
+  if (!placement) {
+    return undefined
+  }
+
+  const winnerType = String(row.type || '').trim().toUpperCase()
+  if (winnerType !== CHALLENGE_WINNER_PASSED_REVIEW_TYPE) {
+    return placement
+  }
+
+  return placement + getPassedReviewPlacementOffset(row)
+}
+
+/**
  * Determine whether any history rows are missing a usable placement value.
  * @param {Array<Object>} rows history rows already shaped for response building
  * @returns {boolean} true when a row still needs placement enrichment
@@ -1136,7 +1096,7 @@ function buildChallengeWinnerPlacementLookup (winnerRows) {
   const placementByChallengeId = new Map()
 
   _.forEach(winnerRows || [], (row) => {
-    const placement = toVisiblePlacement(row.placement)
+    const placement = toVisibleChallengeWinnerPlacement(row)
     const challengeId = _.get(row, 'challenge.id') || row.challengeId
     const challengeKey = _.isNil(challengeId) ? null : String(challengeId).trim()
 
@@ -1417,7 +1377,7 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
     }
 
     const createdAt = toOptionalDate(row.createdAt) || eventDate
-    const placement = toVisiblePlacement(row.placement)
+    const placement = toVisibleChallengeWinnerPlacement(row)
     const challengeId = String(challenge.id || row.challengeId)
     const challengeKey = `${pairKey}::${challengeId}`
     const existing = fallbackRowsByChallengeKey.get(challengeKey)
@@ -2052,6 +2012,10 @@ function buildUnifiedHistoryRecordsFromPayload (payload, dimensionLookup) {
       challengeId: String(item.challengeId),
       oldRating: toOptionalInt(item.oldRating),
       newRating: toOptionalInt(item.newRating),
+      placement: toOptionalInt(item.placement),
+      percentile: toOptionalFloat(item.percentile),
+      oldVolatility: toOptionalInt(item.oldVolatility),
+      newVolatility: toOptionalInt(item.newVolatility),
       oldGlobalRank: toOptionalInt(item.oldGlobalRank),
       newGlobalRank: toOptionalInt(item.newGlobalRank),
       oldCountryRank: toOptionalInt(item.oldCountryRank),
@@ -2139,8 +2103,9 @@ function getUniqueTrackTypePairs (records) {
 /**
  * Recompute the mostRecent marker for each affected (trackId, typeId) pair.
  * Exactly one row per pair is marked as mostRecent=true when rows exist.
- * The latest row's newRating is aligned with the current memberStats rating when available.
- * The latest row's oldRating is aligned with the prior history event for the same pair.
+ * The latest row's new rating and volatility are aligned with current memberStats
+ * values when available. Old rating and volatility are aligned with the prior
+ * history event for the same pair.
  *
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId user id
@@ -2181,7 +2146,8 @@ async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
           typeId: pair.typeId
         },
         select: {
-          rating: true
+          rating: true,
+          volatility: true
         }
       })
       const previous = await tx.memberStatsHistory.findFirst({
@@ -2193,17 +2159,20 @@ async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
         orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
         skip: 1,
         select: {
-          newRating: true
+          newRating: true,
+          newVolatility: true
         }
       })
 
       const latestUpdateData = {
         mostRecent: true,
         oldRating: previous ? previous.newRating : null,
+        oldVolatility: previous ? previous.newVolatility : null,
         updatedBy: operatorId
       }
       if (currentStats) {
         latestUpdateData.newRating = currentStats.rating
+        latestUpdateData.newVolatility = currentStats.volatility
       }
 
       await tx.memberStatsHistory.update({
@@ -2215,8 +2184,8 @@ async function refreshMostRecentHistoryFlags (tx, userId, records, operatorId) {
 }
 
 /**
- * Synchronize newRating on the most recent history row per (trackId, typeId) pair
- * with the current value in memberStats.rating.
+ * Synchronize new rating and volatility on the most recent history row per
+ * (trackId, typeId) pair with the current values in memberStats.
  *
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId user id
@@ -2233,7 +2202,8 @@ async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
         typeId: pair.typeId
       },
       select: {
-        rating: true
+        rating: true,
+        volatility: true
       }
     })
     if (!currentStats) {
@@ -2249,6 +2219,7 @@ async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
       },
       data: {
         newRating: currentStats.rating,
+        newVolatility: currentStats.volatility,
         updatedBy: operatorId
       }
     })
@@ -2621,6 +2592,10 @@ createHistoryStats.schema = {
     mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
+    placement: Joi.number(),
+    percentile: Joi.number(),
+    oldVolatility: Joi.number(),
+    newVolatility: Joi.number(),
     oldGlobalRank: Joi.number(),
     newGlobalRank: Joi.number(),
     oldCountryRank: Joi.number(),
@@ -2637,6 +2612,10 @@ createHistoryStats.schema = {
       mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
+      placement: Joi.number(),
+      percentile: Joi.number(),
+      oldVolatility: Joi.number(),
+      newVolatility: Joi.number(),
       oldGlobalRank: Joi.number(),
       newGlobalRank: Joi.number(),
       oldCountryRank: Joi.number(),
@@ -2751,6 +2730,10 @@ partiallyUpdateHistoryStats.schema = {
     mostRecent: Joi.boolean(),
     oldRating: Joi.number(),
     newRating: Joi.number(),
+    placement: Joi.number(),
+    percentile: Joi.number(),
+    oldVolatility: Joi.number(),
+    newVolatility: Joi.number(),
     oldGlobalRank: Joi.number(),
     newGlobalRank: Joi.number(),
     oldCountryRank: Joi.number(),
@@ -2767,6 +2750,10 @@ partiallyUpdateHistoryStats.schema = {
       mostRecent: Joi.boolean(),
       oldRating: Joi.number(),
       newRating: Joi.number(),
+      placement: Joi.number(),
+      percentile: Joi.number(),
+      oldVolatility: Joi.number(),
+      newVolatility: Joi.number(),
       oldGlobalRank: Joi.number(),
       newGlobalRank: Joi.number(),
       oldCountryRank: Joi.number(),
@@ -3494,7 +3481,7 @@ async function rerateMemberStats (currentUser, handle, data) {
     result = await rerateMmTrack(
       prisma,
       challengeClient,
-      getOptionalMmClientForRatingPath(),
+      null,
       reviewDbClient,
       member.userId,
       payload.challengeId,
@@ -3514,7 +3501,7 @@ async function rerateMemberStats (currentUser, handle, data) {
     result = await rerateMmTrack(
       prisma,
       challengeClient,
-      prismaManager.getMmClient(),
+      null,
       reviewDbClient,
       member.userId,
       payload.challengeId

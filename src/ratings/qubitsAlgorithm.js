@@ -5,9 +5,10 @@
  *   { coderId, rating, volatility, numRatings, score }
  *
  * The function mutates and returns the same participant array with updated
- * integer `rating`, `volatility`, and `numRatings` values. New players are
- * initialized from the default Qubits baseline and the rating delta is capped
- * by `150 + 1500 / (timesPlayed + 2)` before the new volatility is derived.
+ * integer `rating`, `volatility`, and `numRatings` values. Each pass calculates
+ * from immutable pre-event participant states. New players are initialized from
+ * the default Qubits baseline and the rating delta is capped by
+ * `150 + 1500 / (timesPlayed + 2)` before the new volatility is derived.
  */
 
 'use strict'
@@ -174,7 +175,7 @@ function getNormalizedVolatility (participant) {
 function getWeight (rating, timesPlayed) {
   let weight = 1 / (1 - ((INITIAL_WEIGHT - FINAL_WEIGHT) / (timesPlayed + 1) + FINAL_WEIGHT)) - 1
 
-  if (rating > 2500) {
+  if (rating >= 2500) {
     weight *= 0.8
   } else if (rating >= 2000) {
     weight *= 0.9
@@ -183,31 +184,31 @@ function getWeight (rating, timesPlayed) {
   return weight
 }
 
-function getChallengeFactor (preparedParticipants) {
-  if (preparedParticipants.length === 0) {
+function getChallengeFactor (comparisonParticipants) {
+  if (comparisonParticipants.length === 0) {
     return 0
   }
 
   let totalRating = 0
   let totalVolatility = 0
 
-  preparedParticipants.forEach((participant) => {
+  comparisonParticipants.forEach((participant) => {
     totalRating += participant.oldRating
     totalVolatility += sqr(participant.oldVolatility / ONE_STD_DEV_EQUALS)
   })
 
-  const averageRating = totalRating / preparedParticipants.length
+  const averageRating = totalRating / comparisonParticipants.length
 
   let ratingVariance = 0
-  preparedParticipants.forEach((participant) => {
+  comparisonParticipants.forEach((participant) => {
     ratingVariance += sqr((participant.oldRating - averageRating) / ONE_STD_DEV_EQUALS)
   })
 
-  const denominator = preparedParticipants.length > 1
-    ? preparedParticipants.length - 1
+  const denominator = comparisonParticipants.length > 1
+    ? comparisonParticipants.length - 1
     : 1
 
-  return Math.sqrt((totalVolatility / preparedParticipants.length) + (ratingVariance / denominator)) * ONE_STD_DEV_EQUALS
+  return Math.sqrt((totalVolatility / comparisonParticipants.length) + (ratingVariance / denominator)) * ONE_STD_DEV_EQUALS
 }
 
 function buildActualRankMap (participants) {
@@ -260,16 +261,15 @@ function applyRatingUpdate (preparedParticipants, comparisonParticipants) {
   }
 
   const actualRankMap = buildActualRankMap(comparisonParticipants)
-  const challengeFactor = getChallengeFactor(comparisonParticipants.map(createPreparedParticipant))
+  const challengeFactor = getChallengeFactor(comparisonParticipants)
 
   preparedParticipants.forEach((preparedParticipant) => {
     let expectedRank = 0.5
 
     comparisonParticipants.forEach((comparisonParticipant) => {
-      const comparison = createPreparedParticipant(comparisonParticipant)
       expectedRank += winprobability(
-        comparison.oldRating,
-        comparison.oldVolatility,
+        comparisonParticipant.oldRating,
+        comparisonParticipant.oldVolatility,
         preparedParticipant.oldRating,
         preparedParticipant.oldVolatility
       )
@@ -286,6 +286,9 @@ function applyRatingUpdate (preparedParticipants, comparisonParticipants) {
     const ratingDelta = newRating - preparedParticipant.oldRating
     if (Math.abs(ratingDelta) > cap) {
       newRating = preparedParticipant.oldRating + Math.sign(ratingDelta) * cap
+    }
+    if (newRating < 1) {
+      newRating = 1
     }
 
     let newVolatility = Math.sqrt(
@@ -308,24 +311,16 @@ function runQubitsRating (participants) {
     return []
   }
 
-  const ratedParticipants = []
-  const newParticipants = []
-
-  participants.forEach((participant) => {
-    const preparedParticipant = createPreparedParticipant(participant)
-    if (preparedParticipant.oldNumRatings > 0) {
-      ratedParticipants.push(preparedParticipant)
-    } else {
-      newParticipants.push(preparedParticipant)
-    }
-  })
+  const preparedParticipants = participants.map(createPreparedParticipant)
+  const ratedParticipants = preparedParticipants.filter((participant) => participant.oldNumRatings > 0)
+  const newParticipants = preparedParticipants.filter((participant) => participant.oldNumRatings === 0)
 
   if (ratedParticipants.length > 0) {
-    applyRatingUpdate(ratedParticipants, ratedParticipants.map((item) => item.participant))
+    applyRatingUpdate(ratedParticipants, ratedParticipants)
   }
 
   if (newParticipants.length > 0) {
-    applyRatingUpdate(newParticipants, participants)
+    applyRatingUpdate(newParticipants, preparedParticipants)
   }
 
   return participants

@@ -184,7 +184,7 @@ const getMmPoolConstructor = () => {
       MmPool = Pool
     } catch (error) {
       throw new Error(
-        `MM database client dependencies are unavailable. Install the member-api MM database dependencies before using MM rerates. Original error: ${error.message}`
+        `MM database client dependencies are unavailable. Install the member-api MM database dependencies before using MM config lookups. Original error: ${error.message}`
       )
     }
   }
@@ -210,7 +210,8 @@ const createMmConfigClient = (dbUrl) => {
     marathonMatchConfig: {
       /**
        * Find one Marathon Match config row by challenge identifier.
-       * Supports the subset of Prisma's findUnique contract needed by rerateMmTrack.
+       * Supports the subset of Prisma's findUnique contract needed by legacy
+       * config lookups.
        * @param {Object} args lookup arguments
        * @param {Object} args.where unique challenge lookup
        * @param {Object} args.select selected fields

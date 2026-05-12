@@ -45,6 +45,8 @@
  * - memberStatsHistory is seeded from legacy history tables and supplemented with
  *   completed review-api challengeResult and ChallengeWinner rows when newer
  *   challenges never existed in the legacy history source tables.
+ * - memberStatsHistory placement and percentile values are preserved from legacy
+ *   history and review-api placement sources when those fields are available.
  * - memberStatsHistory.mostRecent is recalculated from latest eventDate per (userId, trackId, typeId).
  * - memberStatsHistory.newRating on the mostRecent row is synchronized from memberStats.rating.
  * - memberMaxRating is synchronized from the highest current memberStats.rating
@@ -94,8 +96,8 @@ const USER_BATCH_SIZE = 100
 const DEFAULT_CONCURRENCY = 4
 const MAX_RAW_QUERY_PARAMS = 10000
 const MEMBER_STATS_BULK_UPSERT_PARAM_COUNT = 22
-const HISTORY_BULK_UPDATE_PARAM_COUNT = 4
-const HISTORY_BULK_INSERT_PARAM_COUNT = 9
+const HISTORY_BULK_UPDATE_PARAM_COUNT = 6
+const HISTORY_BULK_INSERT_PARAM_COUNT = 11
 const CHALLENGE_WINNER_HISTORY_TYPES = ['PLACEMENT', 'PASSED_REVIEW']
 const CHALLENGE_WINNER_HISTORY_TYPE_SQL = CHALLENGE_WINNER_HISTORY_TYPES.map(type => `'${type}'`).join(', ')
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'recalculateMemberStats.processedUserIds.json'
@@ -322,6 +324,16 @@ function toOptionalFloat (value) {
 
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
+}
+
+/**
+ * Normalize a challenge placement so only positive integer ranks are written.
+ * @param {*} value raw placement value
+ * @returns {number|null} positive placement or null when unavailable
+ */
+function toOptionalPlacement (value) {
+  const placement = toOptionalInt(value)
+  return Number.isInteger(placement) && placement > 0 ? placement : null
 }
 
 /**
@@ -1771,7 +1783,9 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
       id: true,
       trackId: true,
       typeId: true,
-      challengeId: true
+      challengeId: true,
+      placement: true,
+      percentile: true
     }
   })
 
@@ -1791,7 +1805,13 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
       historyRowsToUpdate.push({
         id: existingRow.id,
         eventDate: row.eventDate,
-        newRating: row.newRating
+        newRating: row.newRating,
+        placement: row.placement === undefined
+          ? (existingRow.placement === undefined ? null : existingRow.placement)
+          : row.placement,
+        percentile: row.percentile === undefined
+          ? (existingRow.percentile === undefined ? null : existingRow.percentile)
+          : row.percentile
       })
       return
     }
@@ -1802,7 +1822,9 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
       typeId: row.typeId,
       challengeId: row.challengeId,
       eventDate: row.eventDate,
-      newRating: row.newRating
+      newRating: row.newRating,
+      placement: row.placement === undefined ? null : row.placement,
+      percentile: row.percentile === undefined ? null : row.percentile
     })
   })
 
@@ -1885,6 +1907,8 @@ async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
         "challengeId",
         "date",
         "rating",
+        "placement",
+        "percentile",
         "subTrack",
         "subTrackId"
       FROM "members"."memberDataScienceHistoryStats"
@@ -1936,7 +1960,9 @@ async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
       typeId,
       challengeId: String(row.challengeId),
       eventDate,
-      newRating: toOptionalInt(row.rating)
+      newRating: toOptionalInt(row.rating),
+      placement: toOptionalPlacement(row.placement),
+      percentile: toOptionalFloat(row.percentile)
     })
   })
 
@@ -1960,6 +1986,8 @@ async function fetchChallengeWinnerRowsForUser (challengesClient, userId, option
     SELECT
       cw."challengeId" AS "challengeId",
       cw."createdAt" AS "createdAt",
+      cw."placement" AS "placement",
+      cw."type" AS "winnerType",
       c.id AS "canonicalChallengeId",
       c."trackId" AS "trackId",
       c."typeId" AS "typeId",
@@ -1978,6 +2006,7 @@ async function fetchChallengeWinnerRowsForUser (challengesClient, userId, option
   return rows.map((row) => ({
     challengeId: String(row.challengeId),
     createdAt: row.createdAt ? new Date(row.createdAt) : null,
+    placement: row.winnerType === 'PLACEMENT' ? toOptionalPlacement(row.placement) : null,
     challenge: {
       id: String(row.canonicalChallengeId || row.challengeId),
       trackId: row.trackId ? String(row.trackId) : null,
@@ -2032,7 +2061,8 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
       typeId,
       challengeId: String(challenge.id),
       eventDate,
-      newRating: null
+      newRating: null,
+      placement: toOptionalPlacement(row.placement)
     })
   })
 
@@ -2060,7 +2090,8 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
       typeId,
       challengeId: String(challenge.id),
       eventDate,
-      newRating: null
+      newRating: null,
+      placement: toOptionalPlacement(row.placement)
     })
   })
 
@@ -2544,6 +2575,8 @@ function buildMemberStatsHistoryBulkUpdateQuery (historyRows) {
     row.id,
     row.eventDate,
     row.newRating,
+    row.placement,
+    row.percentile,
     UPDATED_BY
   ])))
 
@@ -2553,11 +2586,13 @@ function buildMemberStatsHistoryBulkUpdateQuery (historyRows) {
       SET
         "eventDate" = CAST(data."eventDate" AS TIMESTAMP),
         "newRating" = CAST(data."newRating" AS INTEGER),
+        "placement" = CAST(data."placement" AS INTEGER),
+        "percentile" = CAST(data."percentile" AS DOUBLE PRECISION),
         "updatedBy" = data."updatedBy",
         "updatedAt" = CURRENT_TIMESTAMP
       FROM (
         VALUES ${valuesSql}
-      ) AS data ("id", "eventDate", "newRating", "updatedBy")
+      ) AS data ("id", "eventDate", "newRating", "placement", "percentile", "updatedBy")
       WHERE msh."id" = CAST(data."id" AS BIGINT)
     `,
     params
@@ -2578,6 +2613,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
     false,
     row.eventDate,
     row.newRating,
+    row.placement,
+    row.percentile,
     CREATED_BY,
     UPDATED_BY
   ])))
@@ -2592,6 +2629,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
         "mostRecent",
         "eventDate",
         "newRating",
+        "placement",
+        "percentile",
         "createdBy",
         "updatedBy"
       )
@@ -2603,6 +2642,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
         data."mostRecent",
         CAST(data."eventDate" AS TIMESTAMP),
         CAST(data."newRating" AS INTEGER),
+        CAST(data."placement" AS INTEGER),
+        CAST(data."percentile" AS DOUBLE PRECISION),
         data."createdBy",
         data."updatedBy"
       FROM (
@@ -2615,6 +2656,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
         "mostRecent",
         "eventDate",
         "newRating",
+        "placement",
+        "percentile",
         "createdBy",
         "updatedBy"
       )
