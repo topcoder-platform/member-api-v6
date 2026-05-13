@@ -398,6 +398,45 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getDistribution should exclude unrated zero rows from rating buckets', async () => {
+    let rawQueryArgs
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async (...args) => {
+          rawQueryArgs = args
+          return []
+        },
+        memberStats: {
+          findFirst: async () => ({ id: global.BigInt(1) }),
+          findMany: async () => []
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      }
+    })
+
+    try {
+      await service.getDistribution({
+        track: 'DATA_SCIENCE',
+        subTrack: 'MARATHON_MATCH'
+      })
+
+      should.exist(rawQueryArgs)
+      const whereConditions = rawQueryArgs[1].values
+      whereConditions.some((condition) => {
+        const chunks = condition.args && condition.args[0]
+        return Array.isArray(chunks) && chunks.join('').includes('"rating" >') && condition.args[1] === 0
+      }).should.equal(true)
+      whereConditions.some((condition) => {
+        const chunks = condition.args && condition.args[0]
+        return Array.isArray(chunks) && chunks.join('').includes('"rating" >=')
+      }).should.equal(false)
+    } finally {
+      restore()
+    }
+  })
+
   it('getMemberStats should merge duplicate Marathon Match rows normalized under Data Science', async () => {
     const { service, restore } = loadStatisticsService({
       prismaStub: {
@@ -1376,6 +1415,71 @@ describe('statistics service unit tests', () => {
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeId.should.equal('mm-challenge-uuid')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(1)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should drop unresolved legacy numeric Marathon Match rows', async () => {
+    const ratingDate = new Date('2025-08-27T17:05:00.000Z')
+    const legacyDate = new Date('2014-04-18T00:00:00.000Z')
+    const challenge = {
+      id: 'mm-challenge-uuid',
+      legacyId: null,
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: ratingDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '15948',
+            eventDate: legacyDate,
+            newRating: 2946,
+            mostRecent: true
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-challenge-uuid',
+            challengeName: 'Marathon Match 163',
+            eventDate: ratingDate,
+            newRating: 2739,
+            placement: 2,
+            mostRecent: false
+          }]
+        }
+      },
+      challengeRows: [challenge],
+      reviewRows: [],
+      challengeWinnerRows: []
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeId.should.equal('mm-challenge-uuid')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
     } finally {
       restore()
     }
