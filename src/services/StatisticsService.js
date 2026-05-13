@@ -761,6 +761,89 @@ function buildStatsTrackTypeKey (trackId, typeId) {
 }
 
 /**
+ * Determine whether a unified stats row needs a computed global rank fallback.
+ * Only positive ratings are rankable; missing, zero, and negative persisted ranks
+ * are treated as unavailable because public legacy marathon data often stores
+ * unrated rank placeholders as zero.
+ * @param {Object} row unified memberStats row
+ * @returns {Boolean} true when the row can be ranked from its rating
+ */
+function shouldComputeGlobalRank (row) {
+  if (!row || !row.trackId || !row.typeId || _.isNil(row.rating)) {
+    return false
+  }
+
+  const rating = Number(row.rating)
+  const globalRank = _.isNil(row.globalRank) ? null : Number(row.globalRank)
+
+  return Number.isFinite(rating) && rating > 0 &&
+    (_.isNil(globalRank) || !Number.isFinite(globalRank) || globalRank <= 0)
+}
+
+/**
+ * Build the cache key for a stats row's rank scope.
+ * Rows sharing track, type, privacy, and rating share the same computed rank.
+ * @param {Object} row unified memberStats row
+ * @returns {String} cache key for computed rank lookups
+ */
+function buildGlobalRankScopeKey (row) {
+  return [
+    row.trackId,
+    row.typeId,
+    row.isPrivate ? 'private' : 'public',
+    Number(row.rating)
+  ].join('::')
+}
+
+/**
+ * Fill invalid or missing globalRank values using current unified ratings.
+ * The computed value matches SQL RANK semantics: one plus the number of rows in
+ * the same track/type/privacy scope with a strictly higher positive rating.
+ * @param {Array<Object>} statsRows unified memberStats rows returned for one member
+ * @returns {Promise<Array<Object>>} rows with computed globalRank fallbacks applied
+ * @throws {Error} propagates Prisma count failures
+ */
+async function hydrateComputedGlobalRanks (statsRows) {
+  const rankTargets = _.filter(statsRows, shouldComputeGlobalRank)
+  if (rankTargets.length === 0) {
+    return statsRows
+  }
+
+  const uniqueRankTargets = _.uniqBy(rankTargets, buildGlobalRankScopeKey)
+  const rankByScope = new Map()
+
+  await Promise.all(_.map(uniqueRankTargets, async (row) => {
+    const higherRatedCount = await prisma.memberStats.count({
+      where: {
+        trackId: row.trackId,
+        typeId: row.typeId,
+        isPrivate: row.isPrivate === true,
+        rating: {
+          gt: Number(row.rating)
+        }
+      }
+    })
+
+    rankByScope.set(buildGlobalRankScopeKey(row), higherRatedCount + 1)
+  }))
+
+  return _.map(statsRows, (row) => {
+    const computedRank = shouldComputeGlobalRank(row)
+      ? rankByScope.get(buildGlobalRankScopeKey(row))
+      : undefined
+
+    if (_.isNil(computedRank)) {
+      return row
+    }
+
+    return {
+      ...row,
+      globalRank: computedRank
+    }
+  })
+}
+
+/**
  * Check whether a resolved challenge type is Marathon Match.
  * @param {string|undefined} typeName canonical or raw type name
  * @returns {boolean} true when the type should be exposed as Marathon Match
@@ -2940,7 +3023,8 @@ async function getUnifiedMemberStats (member, groupIds, query, fields) {
     })
 
     if (unifiedStats && unifiedStats.length > 0) {
-      const scopedStats = _.map(annotateUnifiedDimensionRows(unifiedStats, dimensionLookup), stat => ({
+      const rankedStats = await hydrateComputedGlobalRanks(unifiedStats)
+      const scopedStats = _.map(annotateUnifiedDimensionRows(rankedStats, dimensionLookup), stat => ({
         ...stat,
         groupId: _.toNumber(groupId)
       }))
@@ -3016,7 +3100,8 @@ async function getMemberStats (currentUser, handle, query, throwError) {
       })
 
       if (unifiedStats && unifiedStats.length > 0) {
-        const scopedStats = _.map(annotateUnifiedDimensionRows(unifiedStats, dimensionLookup), stat => ({
+        const rankedStats = await hydrateComputedGlobalRanks(unifiedStats)
+        const scopedStats = _.map(annotateUnifiedDimensionRows(rankedStats, dimensionLookup), stat => ({
           ...stat,
           groupId: _.toNumber(groupId)
         }))

@@ -227,6 +227,7 @@ function loadStatisticsService (options = {}) {
     },
     memberStats: {
       findFirst: async () => null,
+      count: async () => 0,
       findMany: async () => []
     },
     memberStatsHistory: {
@@ -508,6 +509,60 @@ describe('statistics service unit tests', () => {
       marathon.rank.minimumRating.should.equal(1641)
       marathon.rank.topFiveFinishes.should.equal(135)
       marathon.rank.topTenFinishes.should.equal(182)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getMemberStats should compute Marathon Match rank when the stored global rank is zero', async () => {
+    let countArgs
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          count: async (args) => {
+            countArgs = args
+            return 6
+          },
+          findMany: async () => [
+            {
+              trackId: 'track-ds-id',
+              typeId: 'type-mm-id',
+              challenges: 137,
+              wins: 40,
+              rating: 2720,
+              globalRank: 0,
+              countryRank: 0,
+              schoolRank: 0,
+              volatility: 513,
+              maxRating: 3071,
+              minRating: 1527,
+              topFiveFinishes: 86,
+              topTenFinishes: 102,
+              mostRecentEventDate: new Date('2023-05-02T00:00:00.000Z'),
+              isPrivate: false
+            }
+          ]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      }
+    })
+
+    try {
+      const result = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.rank.rank.should.equal(7)
+      countArgs.where.should.deep.equal({
+        trackId: 'track-ds-id',
+        typeId: 'type-mm-id',
+        isPrivate: false,
+        rating: {
+          gt: 2720
+        }
+      })
     } finally {
       restore()
     }
