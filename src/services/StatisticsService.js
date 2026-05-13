@@ -1710,6 +1710,25 @@ function dedupeUnifiedHistoryRows (rows) {
 }
 
 /**
+ * Remove stale imported Marathon Match rows that still reference unmapped numeric
+ * legacy challenge ids. Resolved legacy ids are canonicalized before this point;
+ * rows left without a challenge name are not useful challenge cards in history.
+ * @param {Array<Object>} rows persisted and/or transient history rows
+ * @returns {Array<Object>} history rows without unresolved legacy MM entries
+ */
+function filterUnresolvedLegacyMarathonHistoryRows (rows) {
+  return _.filter(rows || [], (row) => {
+    const challengeId = normalizeChallengeLookupKey(row && row.challengeId)
+    const isLegacyNumericChallenge = challengeId && /^\d+$/.test(challengeId)
+    const isMarathonHistory = row &&
+      row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+      row.typeName === TYPE_NAMES.MARATHON_MATCH
+
+    return !(isMarathonHistory && isLegacyNumericChallenge && !row.challengeName)
+  })
+}
+
+/**
  * Recompute mostRecent flags after fallback and dimension normalization.
  * Persisted rows may still be split across legacy dimensions, so the response
  * needs one latest card per normalized track/type group.
@@ -2337,8 +2356,9 @@ async function syncMostRecentHistoryRatings (tx, userId, records, operatorId) {
 /**
  * Get current member rating distribution statistics.
  * Resolves track/subTrack aliases to unified stats dimensions, aggregates rated
- * memberStats rows into the documented 100-point buckets, and returns an empty
- * histogram when matching stats exist but none have a rated value.
+ * memberStats rows with positive ratings into the documented 100-point buckets,
+ * and returns an empty histogram when matching stats exist but none have a rated
+ * value.
  * @param {Object} query the query parameters
  * @param {String} [query.track] optional track filter
  * @param {String} [query.subTrack] optional subTrack/type filter
@@ -2369,7 +2389,7 @@ async function getDistribution (query) {
 
   const whereConditions = [
     Prisma.sql`"rating" IS NOT NULL`,
-    Prisma.sql`"rating" >= ${DISTRIBUTION_MIN_RATING}`,
+    Prisma.sql`"rating" > ${DISTRIBUTION_MIN_RATING}`,
     Prisma.sql`"rating" < ${DISTRIBUTION_MAX_RATING_EXCLUSIVE}`
   ]
   if (trackId) {
@@ -2579,6 +2599,8 @@ async function getHistoryStats (currentUser, handle, query) {
         annotatedRows = mergeMissingHistoryRows(annotatedRows, legacyCodeFallbackRows)
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, legacyCodeFallbackRows)
       }
+
+      annotatedRows = filterUnresolvedLegacyMarathonHistoryRows(annotatedRows)
 
       const orderedRows = orderUnifiedHistoryRows(recomputeUnifiedHistoryMostRecentFlags(annotatedRows))
       if (orderedRows.length > 0) {
