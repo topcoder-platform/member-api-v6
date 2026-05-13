@@ -84,6 +84,47 @@ function mergeTrackCounters (trackItem, stat) {
 }
 
 /**
+ * Merge duplicate unified stats items that normalize to the same API bucket.
+ * Counters are additive, latest activity dates win, and the latest non-empty
+ * rank snapshot is retained so stale aggregate rows cannot erase ratings.
+ * @param {Object|undefined} existingItem previously accumulated response item
+ * @param {Object} nextItem next response item for the same track/type bucket
+ * @returns {Object} merged response item for use in member stats responses
+ */
+function mergeUnifiedStatsItem (existingItem, nextItem) {
+  if (!existingItem) {
+    return nextItem
+  }
+
+  const existingEventDate = toNumber(existingItem.mostRecentEventDate)
+  const nextEventDate = toNumber(nextItem.mostRecentEventDate)
+  const existingRank = existingItem.rank || {}
+  const nextRank = nextItem.rank || {}
+  const useNextRank = !_.isEmpty(nextRank) &&
+    (_.isEmpty(existingRank) || nextEventDate >= existingEventDate)
+  const rank = useNextRank ? nextRank : existingRank
+  const mostRecentEventDate = Math.max(existingEventDate, nextEventDate) || null
+  const mostRecentSubmission = Math.max(
+    toNumber(existingItem.mostRecentSubmission),
+    toNumber(nextItem.mostRecentSubmission)
+  ) || null
+  const mostRecentEventName = nextEventDate >= existingEventDate
+    ? (nextItem.mostRecentEventName || existingItem.mostRecentEventName)
+    : (existingItem.mostRecentEventName || nextItem.mostRecentEventName)
+
+  return _.omitBy({
+    ...existingItem,
+    ...nextItem,
+    challenges: toNumber(existingItem.challenges) + toNumber(nextItem.challenges),
+    wins: toNumber(existingItem.wins) + toNumber(nextItem.wins),
+    mostRecentSubmission,
+    mostRecentEventDate,
+    mostRecentEventName,
+    rank
+  }, _.isNil)
+}
+
+/**
  * Build the maxRating response object while recomputing the rating color from
  * the canonical color-band helper instead of trusting persisted color data.
  * @param {Object} maxRating memberMaxRating row
@@ -574,7 +615,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
             minimumRating: row.minRating
           }, _.isNil)
         }
-        item.DATA_SCIENCE.SRM = srmItem
+        item.DATA_SCIENCE.SRM = mergeUnifiedStatsItem(item.DATA_SCIENCE.SRM, srmItem)
       } else if (typeName === 'MARATHON_MATCH') {
         const marathonItem = {
           challenges: toNumber(row.challenges),
@@ -596,9 +637,9 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
             topTenFinishes: row.topTenFinishes
           }, _.isNil)
         }
-        item.DATA_SCIENCE.MARATHON_MATCH = marathonItem
+        item.DATA_SCIENCE.MARATHON_MATCH = mergeUnifiedStatsItem(item.DATA_SCIENCE.MARATHON_MATCH, marathonItem)
       } else if (typeName) {
-        item.DATA_SCIENCE[typeName] = {
+        const dataScienceItem = {
           challenges: toNumber(row.challenges),
           wins: toNumber(row.wins),
           mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
@@ -618,6 +659,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
             topTenFinishes: row.topTenFinishes
           }, _.isNil)
         }
+        item.DATA_SCIENCE[typeName] = mergeUnifiedStatsItem(item.DATA_SCIENCE[typeName], dataScienceItem)
       }
     } else if (trackName === 'COPILOT') {
       item.COPILOT = _.omitBy({

@@ -12,6 +12,7 @@
 const errors = require('../common/errors')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
 const {
+  TYPE_NAMES,
   loadChallengeDimensionLookup,
   resolveTrackIdFromLookup,
   resolveTypeIdFromLookup
@@ -25,7 +26,7 @@ const {
 const TRACK_NAME = 'DEVELOP'
 const TYPE_NAME = 'Challenge'
 const CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
-const CHALLENGE_TYPE_NAME = 'Challenge'
+const CHALLENGE_TYPE_NAMES = [TYPE_NAMES.CHALLENGE, TYPE_NAMES.CODE]
 const RERATE_ACTOR = 'rerate-member-stats'
 
 function isBigIntValue (value) {
@@ -62,6 +63,106 @@ function normalizeChallengeDimension (value) {
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, '_')
+}
+
+/**
+ * Add one non-empty challenge id candidate to the supplied set.
+ * @param {Set<string>} candidates mutable challenge id candidate set
+ * @param {*} value raw challenge id candidate
+ * @returns {void}
+ */
+function addChallengeIdCandidate (candidates, value) {
+  if (value === null || value === undefined) {
+    return
+  }
+
+  const normalized = String(value).trim()
+  if (normalized) {
+    candidates.add(normalized)
+  }
+}
+
+/**
+ * Build every review-api challenge id that can identify a challenge.
+ * Challenge-api stores canonical UUID ids, while historical review rows may
+ * still use legacy numeric ids.
+ * @param {*} challengeRef challenge id, challenge metadata row, or history entry
+ * @returns {Array<string>} unique challenge id candidates
+ */
+function buildChallengeIdCandidates (challengeRef) {
+  const candidates = new Set()
+
+  if (Array.isArray(challengeRef)) {
+    challengeRef.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    return Array.from(candidates)
+  }
+
+  if (challengeRef && typeof challengeRef === 'object' && !(challengeRef instanceof Date)) {
+    addChallengeIdCandidate(candidates, challengeRef.challengeId)
+    addChallengeIdCandidate(candidates, challengeRef.id)
+    addChallengeIdCandidate(candidates, challengeRef.legacyId)
+
+    if (Array.isArray(challengeRef.reviewChallengeIds)) {
+      challengeRef.reviewChallengeIds.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (Array.isArray(challengeRef.challengeIds)) {
+      challengeRef.challengeIds.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (Array.isArray(challengeRef.challengeIdCandidates)) {
+      challengeRef.challengeIdCandidates.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (challengeRef.legacyRecord) {
+      addChallengeIdCandidate(candidates, challengeRef.legacyRecord.legacySystemId)
+    }
+
+    return Array.from(candidates)
+  }
+
+  addChallengeIdCandidate(candidates, challengeRef)
+  return Array.from(candidates)
+}
+
+/**
+ * Merge challenge metadata aliases with the source id observed in review-api.
+ * @param {Object} challenge challenge-api metadata row
+ * @param {*} [sourceChallengeId] challenge id from the review-api row
+ * @returns {Array<string>} unique review challenge id candidates
+ */
+function buildReviewChallengeIds (challenge, sourceChallengeId) {
+  const candidates = new Set()
+  addChallengeIdCandidate(candidates, sourceChallengeId)
+  buildChallengeIdCandidates(challenge).forEach((candidate) => candidates.add(candidate))
+  return Array.from(candidates)
+}
+
+/**
+ * Test whether a history entry can be addressed by the supplied challenge id.
+ * @param {Object} historyEntry rerate history entry
+ * @param {*} challengeId requested challenge id
+ * @returns {boolean} true when the entry has the challenge id as an alias
+ */
+function historyEntryMatchesChallengeId (historyEntry, challengeId) {
+  const normalizedChallengeId = String(challengeId).trim()
+  return buildChallengeIdCandidates(historyEntry).includes(normalizedChallengeId)
+}
+
+/**
+ * Resolve whether challenge metadata belongs to the Development Challenge rating stream.
+ * Development CODE challenge rows are rated into the same DEVELOP / Challenge
+ * stream as standard Development Challenge rows.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge should be replayed by this engine
+ */
+function isDevelopmentRatingChallenge (challenge) {
+  if (!challenge || !challenge.track || !challenge.type) {
+    return false
+  }
+
+  const normalizedTrackName = normalizeChallengeDimension(challenge.track.name)
+  const normalizedTypeName = normalizeChallengeDimension(challenge.type.name)
+  const supportedTypeNames = CHALLENGE_TYPE_NAMES.map(normalizeChallengeDimension)
+
+  return normalizedTrackName === CHALLENGE_TRACK_NAME && supportedTypeNames.includes(normalizedTypeName)
 }
 
 function createDefaultState () {
@@ -265,16 +366,22 @@ async function fetchReviewResultsForUser (reviewDbClient, userId) {
   return result.rows
 }
 
-async function fetchParticipantsForChallenge (reviewDbClient, challengeId) {
+async function fetchParticipantsForChallenge (reviewDbClient, challengeRef) {
+  const challengeIds = buildChallengeIdCandidates(challengeRef)
+  if (challengeIds.length === 0) {
+    return []
+  }
+
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
+  const placeholders = challengeIds.map((_, index) => `$${index + 1}`).join(', ')
   const result = await reviewDbClient.query(
     `
       SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
       FROM ${challengeResultRelation}
-      WHERE "challengeId" = $1
+      WHERE "challengeId" IN (${placeholders})
       ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC
     `,
-    [String(challengeId)]
+    challengeIds
   )
 
   return result.rows
@@ -289,18 +396,44 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeId) {
  * @returns {Promise<Map<string, Object>>} challenge metadata keyed by challenge id
  */
 async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
-  if (!challengeIds || challengeIds.length === 0) {
+  const normalizedChallengeIds = buildChallengeIdCandidates(challengeIds)
+  if (normalizedChallengeIds.length === 0) {
     return new Map()
   }
 
-  const challenges = await challengeClient.challenge.findMany({
-    where: {
-      id: {
-        in: challengeIds
+  const numericChallengeIds = normalizedChallengeIds
+    .filter((challengeId) => /^\d+$/.test(challengeId))
+    .map((challengeId) => Number(challengeId))
+    .filter(Number.isSafeInteger)
+
+  const whereClauses = [{
+    id: {
+      in: normalizedChallengeIds
+    }
+  }]
+
+  if (numericChallengeIds.length > 0) {
+    whereClauses.push({
+      legacyId: {
+        in: numericChallengeIds
       }
-    },
+    })
+    whereClauses.push({
+      legacyRecord: {
+        is: {
+          legacySystemId: {
+            in: numericChallengeIds
+          }
+        }
+      }
+    })
+  }
+
+  const challenges = await challengeClient.challenge.findMany({
+    where: whereClauses.length === 1 ? whereClauses[0] : { OR: whereClauses },
     select: {
       id: true,
+      legacyId: true,
       endDate: true,
       track: {
         select: {
@@ -312,15 +445,27 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
           name: true
         }
       },
-      metadata: RATING_METADATA_SELECT
+      metadata: RATING_METADATA_SELECT,
+      legacyRecord: {
+        select: {
+          legacySystemId: true
+        }
+      }
     }
   })
 
-  return new Map(challenges.map((challenge) => [challenge.id, challenge]))
+  const metadataByChallengeId = new Map()
+  challenges.forEach((challenge) => {
+    buildReviewChallengeIds(challenge).forEach((candidate) => {
+      metadataByChallengeId.set(candidate, challenge)
+    })
+  })
+
+  return metadataByChallengeId
 }
 
 function buildTargetHistory (reviewRows, challengeMetadataById) {
-  const history = []
+  const historyByChallengeId = new Map()
 
   reviewRows.forEach((row) => {
     if (!isParticipantEligibleForRating(row)) {
@@ -340,8 +485,7 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
       return
     }
 
-    if (normalizeChallengeDimension(challenge.track.name) !== CHALLENGE_TRACK_NAME ||
-      normalizeChallengeDimension(challenge.type.name) !== normalizeChallengeDimension(CHALLENGE_TYPE_NAME)) {
+    if (!isDevelopmentRatingChallenge(challenge)) {
       return
     }
 
@@ -350,13 +494,17 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
       return
     }
 
-    history.push({
-      challengeId: String(row.challengeId),
+    const canonicalChallengeId = String(challenge.id)
+    historyByChallengeId.set(canonicalChallengeId, {
+      challengeId: canonicalChallengeId,
+      reviewChallengeIds: buildReviewChallengeIds(challenge, row.challengeId),
       createdAt: normalizeDate(row.createdAt, challenge.endDate),
       endDate: normalizeDate(challenge.endDate, row.createdAt),
       eventDate
     })
   })
+
+  const history = Array.from(historyByChallengeId.values())
 
   history.sort((left, right) => {
     const leftEventDate = left.eventDate ? left.eventDate.getTime() : 0
@@ -687,7 +835,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   let startIndex = 0
   if (fromChallengeId) {
-    startIndex = targetHistory.findIndex((entry) => entry.challengeId === String(fromChallengeId))
+    startIndex = targetHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
     if (startIndex < 0) {
       throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${TYPE_NAME} event for this member`)
     }
@@ -716,7 +864,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   for (let index = startIndex; index < targetHistory.length; index += 1) {
     const historyEntry = targetHistory[index]
-    const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry.challengeId))
+    const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry))
       .filter((row) => isParticipantEligibleForRating(row))
     if (participantRows.length === 0) {
       continue
@@ -810,5 +958,9 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 }
 
 module.exports = {
+  buildChallengeIdCandidates,
+  buildReviewChallengeIds,
+  fetchParticipantsForChallenge,
+  isDevelopmentRatingChallenge,
   rerateDevTrack
 }

@@ -6,7 +6,7 @@
  *
  * Required environment variables:
  * - DATABASE_URL (member database)
- * - CHALLENGES_DB_URL (challenge database)
+ * - CHALLENGES_DB_URL or CHALLENGE_DB_URL (challenge database)
  * - REVIEW_DB_URL (review database, required for challengeResult aggregates and rerates)
  *
  * Optional environment variables:
@@ -3516,8 +3516,8 @@ async function main () {
     throw new Error('DATABASE_URL is required')
   }
 
-  if (!process.env.CHALLENGES_DB_URL) {
-    throw new Error('CHALLENGES_DB_URL is required')
+  if (!process.env.CHALLENGES_DB_URL && !process.env.CHALLENGE_DB_URL) {
+    throw new Error('CHALLENGES_DB_URL or CHALLENGE_DB_URL is required')
   }
 
   if (!reviewDb) {

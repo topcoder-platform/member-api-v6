@@ -2,38 +2,32 @@
 'use strict'
 
 /**
- * Bulk re-rate native Marathon Match history for every discovered competitor.
+ * Bulk re-rate Development Challenge history for every discovered competitor.
  *
  * Required environment variables:
  * - DATABASE_URL (member database)
  * - CHALLENGES_DB_URL or CHALLENGE_DB_URL (challenge database)
- * - REVIEW_DB_URL (review database with reviewSummation/submission data)
+ * - REVIEW_DB_URL (review database with challengeResult data)
  *
  * Usage examples:
  * - Dry-run discovery:
- *   node src/scripts/rerateMarathonMatches.js --dry-run
- * - Re-rate every discovered member from the start of their MM history:
- *   node src/scripts/rerateMarathonMatches.js --concurrency 5
+ *   node src/scripts/rerateDevelopmentChallenge.js --dry-run
+ * - Re-rate every discovered member from the start of their Development history:
+ *   node src/scripts/rerateDevelopmentChallenge.js --concurrency 5
  * - Re-rate a bounded sample:
- *   node src/scripts/rerateMarathonMatches.js --limit 100
+ *   node src/scripts/rerateDevelopmentChallenge.js --limit 100
  * - Re-rate specific users by userId:
- *   node src/scripts/rerateMarathonMatches.js --user-id 12345 --user-ids 67890,24680
+ *   node src/scripts/rerateDevelopmentChallenge.js --user-id 12345 --user-ids 67890,24680
  *
  * Notes:
- * - Challenge discovery is based only on the Marathon Match ChallengeType id.
- *   This intentionally includes MM challenges imported under either Data Science
- *   or Development tracks.
- * - Existing DATA_SCIENCE / MARATHON_MATCH memberStatsHistory challenge IDs are
- *   also included because migrated legacy MM history can predate ChallengeType
- *   classification in challenge-api.
- * - Handles are not required. Participants are discovered from the latest final
- *   reviewSummation row per member and challenge.
- * - Both canonical challenge UUIDs and legacy numeric challenge ids are used
- *   when looking up review submissions.
- * - The script does not read the marathon-match-api schema; historical scores
- *   come from reviewSummation.aggregateScore.
- * - Each member is replayed from the beginning by calling rerateMmTrack with no
- *   starting challenge id, so complete native MM history is persisted.
+ * - Challenge discovery uses the Development ChallengeTrack id and includes both
+ *   ChallengeType Challenge and CODE rows.
+ * - Existing CODE rows are rated into the same DEVELOP / Challenge stream used
+ *   by the Development rating engine.
+ * - Handles are not required. Participants are discovered from review-api
+ *   challengeResult rows.
+ * - Each member is replayed from the beginning by calling rerateDevTrack with no
+ *   starting challenge id, so complete Development history is persisted.
  */
 
 require('dotenv').config()
@@ -43,7 +37,6 @@ const path = require('path')
 
 const reviewDb = require('../common/reviewDb')
 const {
-  Prisma,
   getMembersClient,
   getChallengesClient
 } = require('../common/prisma')
@@ -59,113 +52,15 @@ const {
   isChallengeRated
 } = require('../ratings/challengeRatingStatus')
 const {
-  fetchRatingPathParticipantsForChallenge,
-  resolveRatingPathParticipantId,
-  rerateMmTrack
-} = require('../ratings/mmRatingEngine')
+  buildReviewChallengeIds,
+  fetchParticipantsForChallenge,
+  rerateDevTrack
+} = require('../ratings/developRatingEngine')
 
 const DEFAULT_CONCURRENCY = 4
-const DEFAULT_PROCESSED_USER_IDS_PATH = 'rerateMarathonMatches.processedUserIds.json'
+const DEFAULT_PROCESSED_USER_IDS_PATH = 'rerateDevelopmentChallenge.processedUserIds.json'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
-const MARATHON_MATCH_SOURCE = 'MARATHON_MATCH'
 const MEMBER_LOOKUP_BATCH_SIZE = 5000
-
-/**
- * Add a normalized challenge id candidate to a target set.
- * @param {Set<string>} candidates candidate ids
- * @param {*} value challenge id candidate
- * @returns {void}
- */
-function addChallengeIdCandidate (candidates, value) {
-  if (value === null || value === undefined) {
-    return
-  }
-
-  const normalized = String(value).trim()
-  if (normalized) {
-    candidates.add(normalized)
-  }
-}
-
-/**
- * Build the review-api challenge ids that may identify a challenge.
- * Challenge-api returns canonical UUIDs, but imported review submissions can
- * still store the legacy numeric challenge id.
- * @param {Object} challenge challenge-api row
- * @returns {Array<string>} unique challenge id candidates
- */
-function buildReviewChallengeIds (challenge) {
-  const candidates = new Set()
-  addChallengeIdCandidate(candidates, challenge && challenge.id)
-  addChallengeIdCandidate(candidates, challenge && challenge.legacyId)
-  addChallengeIdCandidate(candidates, challenge && challenge.legacyRecord && challenge.legacyRecord.legacySystemId)
-  return Array.from(candidates)
-}
-
-/**
- * Merge ordered Marathon Match history sources while preserving every known
- * challenge id alias for review-api lookups.
- * @param {...Array<Object>} historySources ordered history arrays
- * @returns {Array<Object>} merged and sorted challenge history
- */
-function mergeMarathonHistories (...historySources) {
-  const historyByKey = new Map()
-  const aliasToKey = new Map()
-
-  historySources.flat().forEach((historyEntry) => {
-    if (!historyEntry || !historyEntry.challengeId || !historyEntry.eventDate) {
-      return
-    }
-
-    const aliases = new Set()
-    addChallengeIdCandidate(aliases, historyEntry.challengeId)
-    ;(historyEntry.reviewChallengeIds || []).forEach((alias) => addChallengeIdCandidate(aliases, alias))
-
-    let key
-    for (const alias of aliases) {
-      if (aliasToKey.has(alias)) {
-        key = aliasToKey.get(alias)
-        break
-      }
-    }
-    if (!key) {
-      key = String(historyEntry.challengeId)
-    }
-
-    const existing = historyByKey.get(key)
-    if (existing) {
-      const reviewChallengeIds = new Set(existing.reviewChallengeIds || [existing.challengeId])
-      aliases.forEach((alias) => reviewChallengeIds.add(alias))
-      existing.reviewChallengeIds = Array.from(reviewChallengeIds)
-      if (historyEntry.eventDate.getTime() < existing.eventDate.getTime()) {
-        existing.eventDate = historyEntry.eventDate
-      }
-      existing.typeId = existing.typeId || historyEntry.typeId || null
-      existing.trackId = existing.trackId || historyEntry.trackId || null
-    } else {
-      historyByKey.set(key, {
-        ...historyEntry,
-        challengeId: String(historyEntry.challengeId),
-        reviewChallengeIds: Array.from(aliases)
-      })
-    }
-
-    aliases.forEach((alias) => aliasToKey.set(alias, key))
-  })
-
-  const history = Array.from(historyByKey.values())
-  history.sort((left, right) => {
-    const leftEventDate = left.eventDate.getTime()
-    const rightEventDate = right.eventDate.getTime()
-    if (leftEventDate !== rightEventDate) {
-      return leftEventDate - rightEventDate
-    }
-
-    return left.challengeId.localeCompare(right.challengeId)
-  })
-
-  return history
-}
 
 /**
  * Write an informational message with a timestamp for long-running operator logs.
@@ -233,6 +128,20 @@ function formatDuration (durationMs) {
 }
 
 /**
+ * Normalize a date-like value with invalid values represented as null.
+ * @param {*} value raw date value
+ * @returns {Date|null} parsed Date or null
+ */
+function toDateOrNull (value) {
+  if (!value) {
+    return null
+  }
+
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+/**
  * Parse a comma-separated or single user ID option value.
  * @param {*} value raw command-line option value
  * @returns {Array<string>} normalized user ID strings
@@ -265,7 +174,7 @@ function parsePositiveIntegerOption (optionName, value) {
 }
 
 /**
- * Parse rerateMarathonMatches command-line arguments.
+ * Parse rerateDevelopmentChallenge command-line arguments.
  * @param {Array<string>} argv process argv slice after the script path
  * @returns {Object} normalized script options
  * @throws {Error} when an option is unknown or invalid
@@ -350,22 +259,22 @@ function parseArgs (argv) {
 }
 
 /**
- * Print command-line usage for the native Marathon Match rerate helper.
+ * Print command-line usage for the Development Challenge rerate helper.
  * @returns {void}
  */
 function printUsage () {
   console.log(`
 Usage:
-  node src/scripts/rerateMarathonMatches.js [options]
+  node src/scripts/rerateDevelopmentChallenge.js [options]
 
 Options:
-  --user-id <id>            Re-rate a single user ID discovered in MM history (repeatable).
-  --user-ids <id,id>        Comma-separated user IDs discovered in MM history.
+  --user-id <id>            Re-rate a single user ID discovered in Development history (repeatable).
+  --user-ids <id,id>        Comma-separated user IDs discovered in Development history.
   --limit <n>               Limit the number of discovered users processed.
   --concurrency <n>         Process up to n users in parallel (default: ${DEFAULT_CONCURRENCY}).
   --processed-user-ids-path <path>
                             Write successfully processed user IDs to JSON (default: ${DEFAULT_PROCESSED_USER_IDS_PATH}).
-  --dry-run                 Discover MM challenges and users without writing ratings.
+  --dry-run                 Discover Development challenges and users without writing ratings.
   --help, -h                Show this help.
 `)
 }
@@ -457,39 +366,43 @@ async function disconnectClient (client) {
 }
 
 /**
- * Normalize a date-like value with invalid values represented as null.
- * @param {*} value raw date value
- * @returns {Date|null} parsed Date or null
+ * Resolve the ChallengeType ids that are included in Development Challenge rating.
+ * @param {Object} dimensionLookup cached challenge dimension lookup
+ * @returns {Array<string>} unique ChallengeType ids for Challenge and CODE
  */
-function toDateOrNull (value) {
-  if (!value) {
-    return null
-  }
-
-  const date = value instanceof Date ? value : new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
+function resolveDevelopmentTypeIds (dimensionLookup) {
+  return Array.from(new Set([
+    resolveTypeIdFromLookup(dimensionLookup, TYPE_NAMES.CHALLENGE),
+    resolveTypeIdFromLookup(dimensionLookup, TYPE_NAMES.CODE)
+  ].filter(Boolean)))
 }
 
 /**
- * Load completed, rated Marathon Match challenges using only ChallengeType id.
- * Track is intentionally ignored so MM rows imported under Development and Data
- * Science are replayed as one native MM stream. Each history entry includes
- * canonical and legacy challenge id aliases for review-api submission lookups.
+ * Load completed, rated Development challenges with Challenge or CODE type.
+ * Challenge and CODE entries are both replayed by the Development rating engine
+ * into the existing DEVELOP / Challenge rating stream.
  * @param {Object} challengeClient Prisma challenge client
- * @returns {Promise<Object>} resolved type id and ordered challenge history
- * @throws {Error} when the Marathon Match ChallengeType id cannot be resolved
+ * @returns {Promise<Object>} resolved ids and ordered challenge history
+ * @throws {Error} when required Development dimensions cannot be resolved
  */
-async function fetchMarathonMatchHistory (challengeClient) {
+async function fetchDevelopmentChallengeHistory (challengeClient) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
-  const marathonMatchTypeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAMES.MARATHON_MATCH)
+  const developmentTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DEVELOP)
+  const developmentTypeIds = resolveDevelopmentTypeIds(dimensionLookup)
 
-  if (!marathonMatchTypeId) {
-    throw new Error('Unable to resolve Marathon Match ChallengeType id')
+  if (!developmentTrackId) {
+    throw new Error('Unable to resolve Development ChallengeTrack id')
+  }
+  if (developmentTypeIds.length === 0) {
+    throw new Error('Unable to resolve Challenge or CODE ChallengeType ids')
   }
 
   const challenges = await challengeClient.challenge.findMany({
     where: {
-      typeId: marathonMatchTypeId,
+      trackId: developmentTrackId,
+      typeId: {
+        in: developmentTypeIds
+      },
       status: COMPLETED_CHALLENGE_STATUS
     },
     select: {
@@ -538,7 +451,7 @@ async function fetchMarathonMatchHistory (challengeClient) {
       reviewChallengeIds: buildReviewChallengeIds(challenge),
       eventDate,
       typeId: String(challenge.typeId),
-      trackId: challenge.trackId ? String(challenge.trackId) : null
+      trackId: String(challenge.trackId)
     })
   })
 
@@ -553,75 +466,25 @@ async function fetchMarathonMatchHistory (challengeClient) {
   })
 
   return {
-    typeId: marathonMatchTypeId,
+    trackId: developmentTrackId,
+    typeIds: developmentTypeIds,
     history
   }
 }
 
 /**
- * Load distinct Marathon Match challenge IDs already present in unified member
- * history. This catches migrated legacy MM rows that are visible in member stats
- * history but are not classified as ChallengeType MARATHON_MATCH in challenge-api.
- * @param {Object} membersClient Prisma members client
- * @param {Object} challengeClient Prisma challenge client for dimension lookup
- * @returns {Promise<Object>} resolved dimension ids and ordered persisted history
+ * Resolve a Development Challenge participant's member id.
+ * @param {Object} row challengeResult participant row
+ * @returns {BigInt} participant member id
  */
-async function fetchPersistedMarathonMatchHistory (membersClient, challengeClient) {
-  const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
-  const dataScienceTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DATA_SCIENCE)
-  const marathonMatchTypeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAMES.MARATHON_MATCH)
-
-  if (!dataScienceTrackId || !marathonMatchTypeId) {
-    return {
-      trackId: dataScienceTrackId || null,
-      typeId: marathonMatchTypeId || null,
-      history: []
-    }
-  }
-
-  const trackIds = Array.from(new Set([dataScienceTrackId, TRACK_NAMES.DATA_SCIENCE].filter(Boolean)))
-  const typeIds = Array.from(new Set([marathonMatchTypeId, TYPE_NAMES.MARATHON_MATCH].filter(Boolean)))
-  const rows = await membersClient.$queryRaw`
-    SELECT "challengeId", MIN("eventDate") AS "eventDate"
-    FROM "members"."memberStatsHistory"
-    WHERE "trackId" IN (${Prisma.join(trackIds)})
-      AND "typeId" IN (${Prisma.join(typeIds)})
-      AND "challengeId" IS NOT NULL
-      AND "eventDate" IS NOT NULL
-    GROUP BY "challengeId"
-  `
-
-  const history = rows
-    .map((row) => ({
-      challengeId: String(row.challengeId),
-      reviewChallengeIds: [String(row.challengeId)],
-      eventDate: toDateOrNull(row.eventDate),
-      typeId: marathonMatchTypeId,
-      trackId: dataScienceTrackId
-    }))
-    .filter((row) => row.eventDate)
-
-  history.sort((left, right) => {
-    const leftEventDate = left.eventDate.getTime()
-    const rightEventDate = right.eventDate.getTime()
-    if (leftEventDate !== rightEventDate) {
-      return leftEventDate - rightEventDate
-    }
-
-    return left.challengeId.localeCompare(right.challengeId)
-  })
-
-  return {
-    trackId: dataScienceTrackId,
-    typeId: marathonMatchTypeId,
-    history
-  }
+function resolveDevelopmentParticipantId (row) {
+  return global.BigInt(String(row.userId))
 }
 
 /**
- * Discover distinct members who participated in native Marathon Match events.
+ * Discover distinct members who participated in Development Challenge events.
  * @param {Object} reviewDbClient raw pg review database client
- * @param {Array<Object>} marathonHistory ordered MM challenge history
+ * @param {Array<Object>} developmentHistory ordered Development challenge history
  * @param {Object} options discovery controls and optional test doubles
  * @param {Array<string>} options.userIds optional user ID allow-list
  * @param {number|null} options.limit optional maximum discovered users
@@ -629,25 +492,22 @@ async function fetchPersistedMarathonMatchHistory (membersClient, challengeClien
  * @param {Function} options.resolveParticipantId optional participant id resolver
  * @returns {Promise<Object>} discovery summary containing members and scan counts
  */
-async function discoverMarathonMatchMembers (reviewDbClient, marathonHistory, options = {}) {
-  const fetchParticipants = options.fetchParticipants || fetchRatingPathParticipantsForChallenge
-  const resolveParticipantId = options.resolveParticipantId || resolveRatingPathParticipantId
+async function discoverDevelopmentChallengeMembers (reviewDbClient, developmentHistory, options = {}) {
+  const fetchParticipants = options.fetchParticipants || fetchParticipantsForChallenge
+  const resolveParticipantId = options.resolveParticipantId || resolveDevelopmentParticipantId
   const userFilter = new Set((options.userIds || []).map(userId => String(userId)))
   const membersByUserId = new Map()
   let challengesScanned = 0
   let participantRowsScanned = 0
 
-  for (const historyEntry of marathonHistory) {
-    const participantResult = await fetchParticipants(reviewDbClient, {
-      ...historyEntry,
-      source: MARATHON_MATCH_SOURCE
-    })
-    const participantRows = participantResult.participantRows || []
+  for (const historyEntry of developmentHistory) {
+    const participantResult = await fetchParticipants(reviewDbClient, historyEntry)
+    const participantRows = participantResult.participantRows || participantResult || []
     challengesScanned += 1
     participantRowsScanned += participantRows.length
 
     for (const row of participantRows) {
-      const userId = resolveParticipantId(row, MARATHON_MATCH_SOURCE)
+      const userId = resolveParticipantId(row)
       const userKey = String(userId)
 
       if (userFilter.size > 0 && !userFilter.has(userKey)) {
@@ -716,7 +576,7 @@ async function filterExistingMembers (membersClient, members) {
 }
 
 /**
- * Run the native Marathon Match bulk rerate workflow.
+ * Run the Development Challenge bulk rerate workflow.
  * @param {Object} options parsed script options
  * @param {Object} dependencies optional clients and functions for tests
  * @returns {Promise<Object>} bulk rerate summary
@@ -731,31 +591,24 @@ async function run (options, dependencies = {}) {
   const startedAt = startTimer()
 
   if (!reviewDbClient) {
-    throw new Error('REVIEW_DB_URL must be configured to rerate Marathon Match stats')
+    throw new Error('REVIEW_DB_URL must be configured to rerate Development Challenge stats')
   }
 
   try {
     await connectClient(membersClient)
     await connectClient(challengeClient)
 
-    logInfo('Loading completed Marathon Match challenges by ChallengeType id')
-    const marathonHistoryResult = await (dependencies.fetchMarathonMatchHistory || fetchMarathonMatchHistory)(challengeClient)
-    const challengeApiHistory = marathonHistoryResult.history || marathonHistoryResult
-    const shouldLoadPersistedHistory = !dependencies.fetchMarathonMatchHistory || dependencies.fetchPersistedMarathonMatchHistory
-    const persistedHistoryResult = shouldLoadPersistedHistory
-      ? await (dependencies.fetchPersistedMarathonMatchHistory || fetchPersistedMarathonMatchHistory)(membersClient, challengeClient)
-      : { history: [] }
-    const persistedHistory = persistedHistoryResult.history || persistedHistoryResult
-    const marathonHistory = mergeMarathonHistories(challengeApiHistory, persistedHistory)
-    logInfo(`Loaded ${marathonHistory.length} Marathon Match challenge(s): ${challengeApiHistory.length} from Challenge API, ${persistedHistory.length} from memberStatsHistory`)
+    logInfo('Loading completed Development Challenge and CODE challenges')
+    const developmentHistoryResult = await (dependencies.fetchDevelopmentChallengeHistory || fetchDevelopmentChallengeHistory)(challengeClient)
+    const developmentHistory = developmentHistoryResult.history || developmentHistoryResult
+    logInfo(`Loaded ${developmentHistory.length} Development challenge(s)`)
 
-    if (marathonHistory.length === 0) {
+    if (developmentHistory.length === 0) {
       return {
         dryRun: options.dryRun,
-        typeId: marathonHistoryResult.typeId,
+        trackId: developmentHistoryResult.trackId,
+        typeIds: developmentHistoryResult.typeIds,
         pathChallenges: 0,
-        challengeApiChallenges: challengeApiHistory.length,
-        persistedHistoryChallenges: persistedHistory.length,
         usersDiscovered: 0,
         usersProcessed: 0,
         usersFailed: 0,
@@ -765,7 +618,7 @@ async function run (options, dependencies = {}) {
       }
     }
 
-    const discovery = await discoverMarathonMatchMembers(reviewDbClient, marathonHistory, {
+    const discovery = await discoverDevelopmentChallengeMembers(reviewDbClient, developmentHistory, {
       userIds: options.userIds,
       limit: options.limit,
       fetchParticipants: dependencies.fetchParticipants,
@@ -791,10 +644,9 @@ async function run (options, dependencies = {}) {
 
       return {
         dryRun: true,
-        typeId: marathonHistoryResult.typeId,
-        pathChallenges: marathonHistory.length,
-        challengeApiChallenges: challengeApiHistory.length,
-        persistedHistoryChallenges: persistedHistory.length,
+        trackId: developmentHistoryResult.trackId,
+        typeIds: developmentHistoryResult.typeIds,
+        pathChallenges: developmentHistory.length,
         challengesScanned: discovery.challengesScanned,
         participantRowsScanned: discovery.participantRowsScanned,
         usersDiscovered: discovery.members.length,
@@ -814,10 +666,9 @@ async function run (options, dependencies = {}) {
     const rerateResults = await mapWithConcurrency(members, options.concurrency, async (member, index) => {
       const userStartedAt = startTimer()
       try {
-        const result = await (dependencies.rerateMmTrack || rerateMmTrack)(
+        const result = await (dependencies.rerateDevTrack || rerateDevTrack)(
           membersClient,
           challengeClient,
-          null,
           reviewDbClient,
           member.userId,
           null
@@ -848,14 +699,13 @@ async function run (options, dependencies = {}) {
     const challengesProcessed = rerateResults.reduce((sum, result) => sum + (result.ok ? result.challengesProcessed || 0 : 0), 0)
     const durationMs = getElapsedMilliseconds(startedAt)
 
-    logInfo(`Completed native Marathon Match rerate: usersProcessed=${usersProcessed}, usersFailed=${usersFailed}, usersSkippedMissing=${skippedMembers.length}, ratingsUpdated=${ratingsUpdated}, duration=${formatDuration(durationMs)}`)
+    logInfo(`Completed Development Challenge rerate: usersProcessed=${usersProcessed}, usersFailed=${usersFailed}, usersSkippedMissing=${skippedMembers.length}, ratingsUpdated=${ratingsUpdated}, duration=${formatDuration(durationMs)}`)
 
     return {
       dryRun: false,
-      typeId: marathonHistoryResult.typeId,
-      pathChallenges: marathonHistory.length,
-      challengeApiChallenges: challengeApiHistory.length,
-      persistedHistoryChallenges: persistedHistory.length,
+      trackId: developmentHistoryResult.trackId,
+      typeIds: developmentHistoryResult.typeIds,
+      pathChallenges: developmentHistory.length,
       challengesScanned: discovery.challengesScanned,
       participantRowsScanned: discovery.participantRowsScanned,
       usersDiscovered: discovery.members.length,
@@ -887,12 +737,12 @@ if (require.main === module) {
           console.log(JSON.stringify(summary, null, 2))
         })
         .catch((error) => {
-          logError('Marathon Match rerate failed', error)
+          logError('Development Challenge rerate failed', error)
           process.exitCode = 1
         })
     }
   } catch (error) {
-    logError('Marathon Match rerate failed', error)
+    logError('Development Challenge rerate failed', error)
     process.exitCode = 1
   }
 }
@@ -900,10 +750,8 @@ if (require.main === module) {
 module.exports = {
   parseArgs,
   printUsage,
-  fetchMarathonMatchHistory,
-  fetchPersistedMarathonMatchHistory,
-  mergeMarathonHistories,
-  discoverMarathonMatchMembers,
+  fetchDevelopmentChallengeHistory,
+  discoverDevelopmentChallengeMembers,
   filterExistingMembers,
   run
 }

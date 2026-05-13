@@ -37,7 +37,7 @@ Recommended rollout:
 
 ### 1. Pre-flight checklist
 
-- Confirm all three database env vars are set: `DATABASE_URL`, `CHALLENGES_DB_URL`, `REVIEW_DB_URL`
+- Confirm all three database env vars are set: `DATABASE_URL`, `CHALLENGES_DB_URL` or `CHALLENGE_DB_URL`, `REVIEW_DB_URL`
 - Confirm `REVIEW_DB_URL` points to the review-api database that contains `challengeResult`; this is separate from the member Prisma schema deployment
 - Confirm the `challenge-api-v6` migration that adds hidden legacy challenge types has been deployed so legacy subtracks such as `ARCHITECTURE`, `ASSEMBLY_COMPETITION`, and `SRM` can be resolved during stats backfill
 - Confirm `STATS_READ_SOURCE=legacy` is set so reads stay on legacy tables during backfill

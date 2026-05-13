@@ -246,7 +246,8 @@ function loadStatisticsService (options = {}) {
     getAllowedGroupIds: async () => options.groupIds || ['10'],
     canManageMember: () => true,
     hasAdminRole: () => true,
-    bigIntToNumber: (value) => (value ? Number(value) : null)
+    bigIntToNumber: (value) => (value ? Number(value) : null),
+    getRatingColor: () => '#EF3A3A'
   })
   setStubModule(loggerPath, {
     debug: () => {},
@@ -392,6 +393,82 @@ describe('statistics service unit tests', () => {
       result.distribution.ratingRange100To199.should.equal(5)
       result.distribution.ratingRange3900To3999.should.equal(2)
       should.not.exist(result.distribution.ratingRange4000To4099)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getMemberStats should merge duplicate Marathon Match rows normalized under Data Science', async () => {
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findMany: async () => [
+            {
+              trackId: 'track-ds-id',
+              typeId: 'type-mm-id',
+              challenges: 458,
+              wins: 88,
+              rating: 2543,
+              globalRank: 3,
+              countryRank: 1,
+              schoolRank: 0,
+              volatility: 352,
+              maxRating: 2925,
+              minRating: 1641,
+              topFiveFinishes: 135,
+              topTenFinishes: 182,
+              bestRank: 1,
+              avgRank: 7,
+              mostRecentSubmission: new Date('2024-06-25T14:46:39.719Z'),
+              mostRecentEventDate: new Date('2024-09-17T00:00:00.000Z')
+            },
+            {
+              trackId: 'track-dev-id',
+              typeId: 'type-mm-id',
+              challenges: 68,
+              wins: null,
+              mostRecentEventDate: new Date('2023-01-06T06:36:14.000Z')
+            },
+            {
+              trackId: 'track-ds-id',
+              typeId: 'type-srm-id',
+              challenges: 880,
+              wins: 2,
+              rating: 1592,
+              globalRank: 185,
+              countryRank: 3,
+              schoolRank: 0,
+              volatility: 400,
+              maxRating: 2435,
+              minRating: 1301,
+              mostRecentEventDate: new Date('2023-01-04T00:00:00.000Z')
+            }
+          ]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      }
+    })
+
+    try {
+      const result = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE.challenges.should.equal(1406)
+      result[0].DATA_SCIENCE.wins.should.equal(90)
+      const marathon = result[0].DATA_SCIENCE.MARATHON_MATCH
+      marathon.challenges.should.equal(526)
+      marathon.wins.should.equal(88)
+      marathon.mostRecentEventDate.should.equal(new Date('2024-09-17T00:00:00.000Z').getTime())
+      marathon.rank.rating.should.equal(2543)
+      marathon.rank.rank.should.equal(3)
+      marathon.rank.countryRank.should.equal(1)
+      marathon.rank.maximumRating.should.equal(2925)
+      marathon.rank.minimumRating.should.equal(1641)
+      marathon.rank.topFiveFinishes.should.equal(135)
+      marathon.rank.topTenFinishes.should.equal(182)
     } finally {
       restore()
     }
@@ -1235,6 +1312,70 @@ describe('statistics service unit tests', () => {
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(4)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should hydrate persisted Marathon Match names from challenge winners', async () => {
+    const ratingDate = new Date('2025-08-27T17:05:00.000Z')
+    const challenge = {
+      id: 'mm-challenge-uuid',
+      legacyId: null,
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: ratingDate,
+      legacyRecord: null,
+      winners: []
+    }
+    let winnerFindManyArgs
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-challenge-uuid',
+            eventDate: ratingDate,
+            newRating: 2543,
+            placement: 1,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'mm-challenge-uuid',
+        type: 'PLACEMENT',
+        placement: 1,
+        createdAt: ratingDate,
+        challenge
+      }],
+      onChallengeWinnerFindMany: (args) => {
+        winnerFindManyArgs = args
+      }
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      should.exist(winnerFindManyArgs)
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeId.should.equal('mm-challenge-uuid')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(1)
     } finally {
       restore()
     }

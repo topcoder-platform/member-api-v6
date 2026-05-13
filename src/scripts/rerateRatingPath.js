@@ -6,7 +6,7 @@
  *
  * Required environment variables:
  * - DATABASE_URL (member database)
- * - CHALLENGES_DB_URL (challenge database)
+ * - CHALLENGES_DB_URL or CHALLENGE_DB_URL (challenge database)
  * - REVIEW_DB_URL (review database)
  *
  * Usage examples:
