@@ -82,6 +82,7 @@ model member {
   @@index([status, handleLower])
   @@index([lastLoginDate])
   @@index([availableForGigs])
+  @@index([status, availableForGigs])
   @@schema("members")
 }
 
@@ -104,6 +105,7 @@ model memberAddress {
 
   @@index([userId])
   @@index([userId, type])
+  @@index([userId, type, id(sort: Desc)], map: "idx_member_address_user_type")
   @@schema("members")
 }
 

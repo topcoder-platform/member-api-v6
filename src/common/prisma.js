@@ -37,7 +37,7 @@ const extractSchemaFromUrl = (dbUrl) => {
 }
 
 const skillsDbUrl = process.env.SKILLS_DB_URL
-const challengesDbUrl = process.env.CHALLENGES_DB_URL
+const challengesDbUrl = process.env.CHALLENGES_DB_URL || process.env.CHALLENGE_DB_URL
 const academyDbUrl = process.env.ACADEMY_DB_URL
 const resourcesDbUrl = process.env.RESOURCES_DB_URL
 const engagementsDbUrl = process.env.ENGAGEMENTS_DB_URL
@@ -94,7 +94,7 @@ const getChallengesClient = () => {
   if (!challengesClient) {
     if (!challengesDbUrl) {
       throw new Error(
-        'CHALLENGES_DB_URL must be set for challenges Prisma client'
+        'CHALLENGES_DB_URL or CHALLENGE_DB_URL must be set for challenges Prisma client'
       )
     }
     challengesClient = new ChallengesPrismaClient({

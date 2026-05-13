@@ -18,6 +18,7 @@ const should = chai.should()
 const DEVELOP_TRACK_ID = 'track-develop-id'
 const DATA_SCIENCE_TRACK_ID = 'track-data-science-id'
 const CHALLENGE_TYPE_ID = 'type-challenge-id'
+const CODE_TYPE_ID = 'type-code-id'
 const MARATHON_MATCH_TYPE_ID = 'type-marathon-match-id'
 
 function isBigIntValue (value) {
@@ -257,6 +258,27 @@ function createReviewDbClient (rows) {
         }
       }
 
+      if (sql.includes('WHERE "challengeId" IN')) {
+        const challengeIds = new Set(params.map((challengeId) => String(challengeId)))
+        return {
+          rows: resultRows
+            .filter((row) => challengeIds.has(String(row.challengeId)))
+            .sort((left, right) => {
+              const placementComparison = compareValues(left.placement, right.placement)
+              if (placementComparison !== 0) {
+                return placementComparison
+              }
+
+              const scoreComparison = compareValues(right.finalScore, left.finalScore)
+              if (scoreComparison !== 0) {
+                return scoreComparison
+              }
+
+              return compareValues(left.createdAt, right.createdAt)
+            })
+        }
+      }
+
       if (sql.includes('WHERE "challengeId" = $1')) {
         return {
           rows: resultRows
@@ -297,6 +319,7 @@ function createChallengeClient (metadataById) {
       if (sql.includes('FROM "ChallengeType"')) {
         return [
           { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+          { id: CODE_TYPE_ID, name: 'Code', abbreviation: 'CODE', legacyId: null, isTask: false },
           { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
         ]
       }
@@ -305,8 +328,29 @@ function createChallengeClient (metadataById) {
     },
     challenge: {
       async findMany (args) {
-        return args.where.id.in
-          .map((challengeId) => metadataById[String(challengeId)])
+        const idCandidates = new Set()
+        const legacyIdCandidates = new Set()
+        const whereClauses = args.where && args.where.OR ? args.where.OR : [args.where]
+
+        whereClauses.forEach((where) => {
+          if (where && where.id && Array.isArray(where.id.in)) {
+            where.id.in.forEach((challengeId) => idCandidates.add(String(challengeId)))
+          }
+          if (where && where.legacyId && Array.isArray(where.legacyId.in)) {
+            where.legacyId.in.forEach((challengeId) => legacyIdCandidates.add(String(challengeId)))
+          }
+          if (where && where.legacyRecord && where.legacyRecord.is && where.legacyRecord.is.legacySystemId && Array.isArray(where.legacyRecord.is.legacySystemId.in)) {
+            where.legacyRecord.is.legacySystemId.in.forEach((challengeId) => legacyIdCandidates.add(String(challengeId)))
+          }
+        })
+
+        return Object.keys(metadataById)
+          .map((challengeId) => metadataById[challengeId])
+          .filter((challenge) => (
+            idCandidates.has(String(challenge.id)) ||
+            legacyIdCandidates.has(String(challenge.legacyId)) ||
+            (challenge.legacyRecord && legacyIdCandidates.has(String(challenge.legacyRecord.legacySystemId)))
+          ))
           .filter(Boolean)
           .map(cloneRow)
       }
@@ -894,6 +938,83 @@ describe('develop rating engine unit tests', () => {
     should.equal(statsRow.volatility, expectedTarget.volatility)
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTarget.rating)
+  })
+
+  it('rerateDevTrack should include Development CODE challenges in the Challenge rating stream', async () => {
+    const targetUserId = toBigInt(7101)
+    const opponentUserId = toBigInt(7102)
+    const canonicalChallengeId = 'code-canonical-dev'
+    const legacyChallengeId = 710123
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId: String(legacyChallengeId),
+        userId: targetUserId,
+        finalScore: 95,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-06-15T09:00:00.000Z')
+      },
+      {
+        challengeId: String(legacyChallengeId),
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-06-15T09:05:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [canonicalChallengeId]: {
+        id: canonicalChallengeId,
+        legacyId: legacyChallengeId,
+        legacyRecord: { legacySystemId: legacyChallengeId },
+        endDate: new Date('2024-06-15T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'CODE' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 95),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      legacyChallengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === CHALLENGE_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, canonicalChallengeId)
+    const legacyHistoryRow = findHistoryRow(state.historyRows, targetUserId, legacyChallengeId)
+
+    should.equal(statsRow.rating, expectedTarget.rating)
+    should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+    should.equal(legacyHistoryRow, undefined)
   })
 
   it('rerateDevTrack should use passed review rows even when challengeResult.rated is false', async () => {

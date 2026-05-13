@@ -845,11 +845,17 @@ async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
         challenge: {
           select: {
             id: true,
+            legacyId: true,
             name: true,
             status: true,
             trackId: true,
             typeId: true,
             endDate: true,
+            legacyRecord: {
+              select: {
+                legacySystemId: true
+              }
+            },
             winners: {
               where: {
                 type: CHALLENGE_WINNER_PLACEMENT_TYPE
@@ -1087,6 +1093,47 @@ function historyRowsNeedPlacementEnrichment (rows) {
 }
 
 /**
+ * Determine whether any history rows are missing a challenge display name.
+ * @param {Array<Object>} rows history rows already shaped for response building
+ * @returns {boolean} true when a row still needs challenge name enrichment
+ */
+function historyRowsNeedChallengeNameEnrichment (rows) {
+  return _.some(rows || [], row => !_.isNil(row.challengeId) && !row.challengeName)
+}
+
+/**
+ * Normalize one challenge lookup key for metadata maps.
+ * @param {*} value challenge identifier candidate
+ * @returns {string|null} trimmed challenge identifier, or null when unavailable
+ */
+function normalizeChallengeLookupKey (value) {
+  if (_.isNil(value)) {
+    return null
+  }
+
+  const normalized = String(value).trim()
+  return normalized || null
+}
+
+/**
+ * Build all challenge id aliases exposed by one challenge winner row.
+ * @param {Object} row challenge winner row with embedded challenge metadata
+ * @returns {Array<string>} unique challenge identifier candidates
+ */
+function buildChallengeWinnerChallengeIdCandidates (row) {
+  return _.chain([
+    row && row.challengeId,
+    _.get(row, 'challenge.id'),
+    _.get(row, 'challenge.legacyId'),
+    _.get(row, 'challenge.legacyRecord.legacySystemId')
+  ])
+    .map(normalizeChallengeLookupKey)
+    .filter(Boolean)
+    .uniq()
+    .value()
+}
+
+/**
  * Build a canonical challengeId -> placement lookup from challenge winner rows.
  * When duplicate winner rows exist, keep the best available placement.
  * @param {Array<Object>} winnerRows placement winner rows from challenge-api
@@ -1097,17 +1144,18 @@ function buildChallengeWinnerPlacementLookup (winnerRows) {
 
   _.forEach(winnerRows || [], (row) => {
     const placement = toVisibleChallengeWinnerPlacement(row)
-    const challengeId = _.get(row, 'challenge.id') || row.challengeId
-    const challengeKey = _.isNil(challengeId) ? null : String(challengeId).trim()
+    const challengeKeys = buildChallengeWinnerChallengeIdCandidates(row)
 
-    if (!placement || !challengeKey) {
+    if (!placement || challengeKeys.length === 0) {
       return
     }
 
-    const existingPlacement = placementByChallengeId.get(challengeKey)
-    if (_.isNil(existingPlacement) || placement < existingPlacement) {
-      placementByChallengeId.set(challengeKey, placement)
-    }
+    _.forEach(challengeKeys, (challengeKey) => {
+      const existingPlacement = placementByChallengeId.get(challengeKey)
+      if (_.isNil(existingPlacement) || placement < existingPlacement) {
+        placementByChallengeId.set(challengeKey, placement)
+      }
+    })
   })
 
   return placementByChallengeId
@@ -1129,7 +1177,7 @@ function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
   }
 
   return _.map(rows || [], (row) => {
-    const challengeKey = _.isNil(row.challengeId) ? null : String(row.challengeId).trim()
+    const challengeKey = normalizeChallengeLookupKey(row.challengeId)
     const placement = challengeKey ? placementByChallengeId.get(challengeKey) : undefined
 
     if (toVisiblePlacement(row.placement) || !placement) {
@@ -1139,6 +1187,66 @@ function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
     return {
       ...row,
       placement
+    }
+  })
+}
+
+/**
+ * Build challenge metadata keyed by all aliases exposed in challenge winner rows.
+ * @param {Array<Object>} winnerRows placement winner rows from challenge-api
+ * @returns {Map<string, Object>} challenge metadata keyed by canonical and legacy ids
+ */
+function buildChallengeWinnerMetadataLookup (winnerRows) {
+  const metadataByChallengeId = new Map()
+
+  _.forEach(winnerRows || [], (row) => {
+    const challenge = row && row.challenge
+    const challengeName = _.get(row, 'challenge.name')
+    const canonicalChallengeId = normalizeChallengeLookupKey(_.get(row, 'challenge.id') || row.challengeId)
+    const challengeKeys = buildChallengeWinnerChallengeIdCandidates(row)
+
+    if (!challenge || !isCompletedChallenge(challenge) || !challengeName ||
+      !canonicalChallengeId || challengeKeys.length === 0) {
+      return
+    }
+
+    const metadata = {
+      challengeId: canonicalChallengeId,
+      challengeName
+    }
+    _.forEach(challengeKeys, (challengeKey) => {
+      metadataByChallengeId.set(challengeKey, metadata)
+    })
+  })
+
+  return metadataByChallengeId
+}
+
+/**
+ * Fill missing challenge names from challenge-api winner rows.
+ * @param {Array<Object>} rows persisted and/or synthesized history rows
+ * @param {Array<Object>} winnerRows placement winner rows from challenge-api
+ * @returns {Array<Object>} history rows with names and canonical ids when available
+ */
+function mergeHistoryChallengeMetadataFromChallengeWinners (rows, winnerRows) {
+  const metadataByChallengeId = buildChallengeWinnerMetadataLookup(winnerRows)
+
+  if (metadataByChallengeId.size === 0) {
+    return rows || []
+  }
+
+  return _.map(rows || [], (row) => {
+    const challengeKey = normalizeChallengeLookupKey(row.challengeId)
+    const metadata = challengeKey ? metadataByChallengeId.get(challengeKey) : null
+
+    if (!metadata) {
+      return row
+    }
+
+    return {
+      ...row,
+      challengeId: metadata.challengeId,
+      challengeName: row.challengeName || metadata.challengeName
     }
   })
 }
@@ -2436,9 +2544,14 @@ async function getHistoryStats (currentUser, handle, query) {
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, reviewFallbackRows)
       }
 
-      if (missingPairKeys.size > 0 || historyRowsNeedPlacementEnrichment(annotatedRows)) {
+      if (
+        missingPairKeys.size > 0 ||
+        historyRowsNeedPlacementEnrichment(annotatedRows) ||
+        historyRowsNeedChallengeNameEnrichment(annotatedRows)
+      ) {
         const winnerRows = await fetchChallengeWinnerResultsForMember(challengeClient, member.userId)
 
+        annotatedRows = dedupeUnifiedHistoryRows(mergeHistoryChallengeMetadataFromChallengeWinners(annotatedRows, winnerRows))
         annotatedRows = mergeHistoryPlacementsFromChallengeWinners(annotatedRows, winnerRows)
         const winnerFallbackPairKeys = new Set(
           Array.from(visiblePairKeys).concat(
