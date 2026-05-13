@@ -552,6 +552,9 @@ async function fetchMarathonMatchParticipantIds (reviewDbClient, challengeId) {
 
 /**
  * Resolve submitter ids for the challenge and rating source.
+ * Marathon Match submitters are loaded from both challengeResult and final
+ * review summations so partially synced result rows cannot omit lower-placed
+ * participants from rerating.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string|number} challengeId challenge identifier
  * @param {string} source rating source identifier
@@ -559,12 +562,12 @@ async function fetchMarathonMatchParticipantIds (reviewDbClient, challengeId) {
  */
 async function fetchRatingParticipantIds (reviewDbClient, challengeId, source) {
   const challengeResultUserIds = await fetchChallengeResultParticipantIds(reviewDbClient, challengeId)
-  if (challengeResultUserIds.length > 0 || source !== RATING_SOURCE_MARATHON_MATCH) {
+  if (source !== RATING_SOURCE_MARATHON_MATCH) {
     return _.uniqBy(challengeResultUserIds, stringifyUserId)
   }
 
   return _.uniqBy(
-    await fetchMarathonMatchParticipantIds(reviewDbClient, challengeId),
+    challengeResultUserIds.concat(await fetchMarathonMatchParticipantIds(reviewDbClient, challengeId)),
     stringifyUserId
   )
 }

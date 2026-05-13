@@ -126,7 +126,8 @@ function createMembersClient (seed) {
   const state = {
     historyRows: seed.historyRows.map(cloneRow),
     statsRows: seed.statsRows.map(cloneRow),
-    maxRatingRows: seed.maxRatingRows.map(cloneRow)
+    maxRatingRows: seed.maxRatingRows.map(cloneRow),
+    rankRecalculationCalls: []
   }
 
   let nextHistoryId = state.historyRows.reduce((maxId, row) => {
@@ -223,15 +224,40 @@ function createMembersClient (seed) {
     }
   }
 
+  async function executeRawUnsafe (sql, trackId, typeId, isPrivate) {
+    state.rankRecalculationCalls.push({ sql, trackId, typeId, isPrivate })
+    const scopedRows = state.statsRows
+      .filter((row) =>
+        row.trackId === trackId &&
+        row.typeId === typeId &&
+        (row.isPrivate === true) === isPrivate
+      )
+      .sort((left, right) => Number(right.rating) - Number(left.rating))
+
+    let previousRating
+    let previousRank = 0
+    scopedRows.forEach((row, index) => {
+      const rating = Number(row.rating)
+      const rank = rating === previousRating ? previousRank : index + 1
+      row.globalRank = Number.isFinite(rating) ? rank : null
+      row.countryRank = null
+      previousRating = rating
+      previousRank = rank
+    })
+    return scopedRows.length
+  }
+
   const client = {
     memberStatsHistory,
     memberStats,
     memberMaxRating,
+    $executeRawUnsafe: executeRawUnsafe,
     async $transaction (transactionWork) {
       return transactionWork({
         memberStatsHistory,
         memberStats,
-        memberMaxRating
+        memberMaxRating,
+        $executeRawUnsafe: executeRawUnsafe
       })
     }
   }
@@ -646,6 +672,10 @@ describe('develop rating engine unit tests', () => {
 
     should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(statsRow.globalRank, 1)
+    state.rankRecalculationCalls.should.have.length(1)
+    state.rankRecalculationCalls[0].trackId.should.equal(DEVELOP_TRACK_ID)
+    state.rankRecalculationCalls[0].typeId.should.equal(CHALLENGE_TYPE_ID)
     should.equal(historyRow.oldRating, targetSeedRating)
     should.equal(historyRow.oldVolatility, targetSeedVolatility)
     should.equal(historyRow.newRating, expectedTarget.rating)

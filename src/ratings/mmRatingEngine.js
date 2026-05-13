@@ -22,6 +22,7 @@ const {
   resolveTrackIdFromLookup,
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
 const {
   RATING_METADATA_SELECT,
@@ -1089,6 +1090,7 @@ async function upsertRatingStatsRow (tx, userId, updatedTarget, dimensionIds, st
       typeId: dimensionIds.typeId,
       rating: updatedTarget.rating,
       volatility: updatedTarget.volatility,
+      isPrivate: false,
       ...statsFields,
       createdBy: RERATE_ACTOR,
       updatedBy: RERATE_ACTOR
@@ -1096,6 +1098,7 @@ async function upsertRatingStatsRow (tx, userId, updatedTarget, dimensionIds, st
     update: omitUndefinedFields({
       rating: updatedTarget.rating,
       volatility: updatedTarget.volatility,
+      isPrivate: false,
       ...statsFields,
       updatedBy: RERATE_ACTOR
     })
@@ -1625,6 +1628,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
     await membersClient.$transaction(async (tx) => {
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
       await updateMaxRating(tx, normalizedUserId, recomputedMaxRating, dimensionIds)
+      await recalculateRatingRanks(tx, dimensionIds, { updatedBy: RERATE_ACTOR })
     })
   }
 
@@ -1796,6 +1800,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     await membersClient.$transaction(async (tx) => {
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
       await updateMaxRating(tx, normalizedUserId, recomputedMaxRating, dimensionIds)
+      await recalculateRatingRanks(tx, dimensionIds, { updatedBy: RERATE_ACTOR })
     })
   }
 

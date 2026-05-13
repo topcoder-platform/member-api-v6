@@ -17,6 +17,7 @@ const {
   resolveTrackIdFromLookup,
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
 const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
 const {
   RATING_METADATA_SELECT,
@@ -922,12 +923,14 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
           typeId: dimensionIds.typeId,
           rating: updatedTarget.rating,
           volatility: updatedTarget.volatility,
+          isPrivate: false,
           createdBy: RERATE_ACTOR,
           updatedBy: RERATE_ACTOR
         },
         update: {
           rating: updatedTarget.rating,
           volatility: updatedTarget.volatility,
+          isPrivate: false,
           updatedBy: RERATE_ACTOR
         }
       })
@@ -948,6 +951,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     await membersClient.$transaction(async (tx) => {
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
       await updateMaxRating(tx, normalizedUserId, recomputedMaxRating)
+      await recalculateRatingRanks(tx, dimensionIds, { updatedBy: RERATE_ACTOR })
     })
   }
 
