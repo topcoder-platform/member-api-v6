@@ -188,6 +188,11 @@ function createMembersClient (seed) {
   }
 
   const memberStats = {
+    async findMany (args = {}) {
+      return state.statsRows
+        .filter((item) => matchesWhere(item, args.where))
+        .map((row) => selectRow(row, args.select))
+    },
     async findFirst (args = {}) {
       const row = state.statsRows.find((item) => matchesWhere(item, args.where))
       return row ? selectRow(row, args.select) : null
@@ -666,9 +671,14 @@ describe('marathon match rating engine unit tests', () => {
       row.typeId === MARATHON_MATCH_TYPE_ID
     )
     const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+    const maxRatingRow = state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
 
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
+    should.equal(maxRatingRow.rating, expectedTargetState.rating)
+    should.equal(maxRatingRow.track, 'DATA_SCIENCE')
+    should.equal(maxRatingRow.subTrack, 'MARATHON_MATCH')
+    should.equal(maxRatingRow.ratingColor, getRatingColor(expectedTargetState.rating))
     should.equal(statsRow.globalRank, 1)
     state.rankRecalculationCalls.should.have.length(1)
     state.rankRecalculationCalls[0].trackId.should.equal(DATA_SCIENCE_TRACK_ID)

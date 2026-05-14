@@ -186,6 +186,11 @@ function createMembersClient (seed) {
   }
 
   const memberStats = {
+    async findMany (args = {}) {
+      return state.statsRows
+        .filter((item) => matchesWhere(item, args.where))
+        .map((row) => selectRow(row, args.select))
+    },
     async findFirst (args = {}) {
       const row = state.statsRows.find((item) => matchesWhere(item, args.where))
       return row ? selectRow(row, args.select) : null
@@ -669,9 +674,14 @@ describe('develop rating engine unit tests', () => {
       row.typeId === CHALLENGE_TYPE_ID
     )
     const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeTwoId)
+    const maxRatingRow = state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
 
     should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(maxRatingRow.rating, expectedTarget.rating)
+    should.equal(maxRatingRow.track, 'DEVELOP')
+    should.equal(maxRatingRow.subTrack, 'Challenge')
+    should.equal(maxRatingRow.ratingColor, getRatingColor(expectedTarget.rating))
     should.equal(statsRow.globalRank, 1)
     state.rankRecalculationCalls.should.have.length(1)
     state.rankRecalculationCalls[0].trackId.should.equal(DEVELOP_TRACK_ID)
@@ -924,6 +934,13 @@ describe('develop rating engine unit tests', () => {
           typeId: CHALLENGE_TYPE_ID,
           rating: 2100,
           volatility: 210
+        },
+        {
+          userId: targetUserId,
+          trackId: DATA_SCIENCE_TRACK_ID,
+          typeId: MARATHON_MATCH_TYPE_ID,
+          rating: 2200,
+          volatility: 180
         }
       ],
       maxRatingRows: [

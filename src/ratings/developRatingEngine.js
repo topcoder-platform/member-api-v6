@@ -18,7 +18,8 @@ const {
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
 const { recalculateRatingRanks } = require('../common/ratingRankHelper')
-const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
+const { runQubitsRating, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
+const { syncCurrentMemberMaxRating } = require('./memberMaxRatingSync')
 const {
   RATING_METADATA_SELECT,
   isChallengeRated
@@ -231,7 +232,7 @@ function buildUserStateKey (userId) {
 /**
  * Resolve the unified track/type UUIDs used for DEVELOPMENT / Challenge rows.
  * @param {Object} challengeClient prisma challenge client
- * @returns {Promise<{trackId: string, typeId: string}>} resolved unified ids
+ * @returns {Promise<{trackId: string, typeId: string, trackName: string, typeName: string, dimensionLookup: Object}>} resolved unified ids
  */
 async function resolveUnifiedDimensionIds (challengeClient) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
@@ -244,7 +245,10 @@ async function resolveUnifiedDimensionIds (challengeClient) {
 
   return {
     trackId,
-    typeId
+    typeId,
+    trackName: TRACK_NAME,
+    typeName: TYPE_NAME,
+    dimensionLookup
   }
 }
 
@@ -328,29 +332,6 @@ function findHistorySeedIndexForChallenge (historyRows, challengeEntry) {
   }
 
   return seedIndex
-}
-
-/**
- * Compute the highest historical rating reached through the supplied history index.
- * @param {Array<Object>} historyRows participant history rows sorted by event date and id
- * @param {number} endIndex inclusive history index bound
- * @returns {number} maximum rating through that bound
- */
-function computeMaxRatingFromHistory (historyRows, endIndex) {
-  if (!Array.isArray(historyRows) || endIndex < 0) {
-    return 0
-  }
-
-  let maxRating = 0
-
-  for (let index = 0; index <= endIndex; index += 1) {
-    const rating = Number(historyRows[index].newRating)
-    if (Number.isFinite(rating) && rating > maxRating) {
-      maxRating = rating
-    }
-  }
-
-  return maxRating
 }
 
 function normalizeScore (row) {
@@ -711,61 +692,17 @@ async function upsertHistoryRow (tx, userId, challengeId, previousState, updated
 }
 
 /**
- * Decide whether a rerated peak should replace the stored global max rating row.
- * @param {Object|null} existingMaxRating current memberMaxRating row
- * @param {number} rating rerated peak rating for this track
- * @returns {boolean} true when the rerated peak should replace the stored row
- */
-function shouldReplaceGlobalMaxRating (existingMaxRating, rating) {
-  if (!existingMaxRating) {
-    return true
-  }
-
-  const storedRating = Number(existingMaxRating.rating)
-  return !Number.isFinite(storedRating) || rating > storedRating
-}
-
-/**
- * Persist the member's global max rating row when the rerated Develop peak exceeds it.
+ * Persist the member's global max rating row after a Develop rating update.
  * @param {Object} tx prisma transaction client
  * @param {BigInt} userId member identifier
- * @param {number} rating recomputed peak rating
+ * @param {Object} dimensionIds unified Develop rating dimensions
  * @returns {Promise<void>} resolves when max rating is stored
  */
-async function updateMaxRating (tx, userId, rating) {
-  const existingMaxRating = await tx.memberMaxRating.findFirst({
-    where: {
-      userId
-    },
-    select: {
-      rating: true
-    }
-  })
-
-  if (!shouldReplaceGlobalMaxRating(existingMaxRating, rating)) {
-    return
-  }
-
-  await tx.memberMaxRating.upsert({
-    where: {
-      userId
-    },
-    create: {
-      userId,
-      rating,
-      track: TRACK_NAME,
-      subTrack: TYPE_NAME,
-      ratingColor: getRatingColor(rating),
-      createdBy: RERATE_ACTOR,
-      updatedBy: RERATE_ACTOR
-    },
-    update: {
-      rating,
-      track: TRACK_NAME,
-      subTrack: TYPE_NAME,
-      ratingColor: getRatingColor(rating),
-      updatedBy: RERATE_ACTOR
-    }
+async function updateMaxRating (tx, userId, dimensionIds) {
+  await syncCurrentMemberMaxRating(tx, userId, {
+    actor: RERATE_ACTOR,
+    currentDimension: dimensionIds,
+    dimensionLookup: dimensionIds.dimensionLookup
   })
 }
 
@@ -890,7 +827,6 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   const participantHistoryByUserId = new Map()
   let targetState = createDefaultState()
-  let recomputedMaxRating = 0
 
   if (startIndex > 0) {
     await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
@@ -903,7 +839,6 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     }
 
     targetState = createHistorySeedState(targetHistoryRows, startSeedIndex)
-    recomputedMaxRating = computeMaxRatingFromHistory(targetHistoryRows, startSeedIndex)
   }
 
   let challengesProcessed = 0
@@ -952,7 +887,6 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     targetState = cloneState(updatedTarget)
     challengesProcessed += 1
     ratingsUpdated += 1
-    recomputedMaxRating = Math.max(recomputedMaxRating, updatedTarget.rating)
 
     await membersClient.$transaction(async (tx) => {
       await tx.memberStats.upsert({
@@ -996,7 +930,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
   if (ratingsUpdated > 0) {
     await membersClient.$transaction(async (tx) => {
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
-      await updateMaxRating(tx, normalizedUserId, recomputedMaxRating)
+      await updateMaxRating(tx, normalizedUserId, dimensionIds)
       await recalculateRatingRanks(tx, dimensionIds, { updatedBy: RERATE_ACTOR })
     })
   }
