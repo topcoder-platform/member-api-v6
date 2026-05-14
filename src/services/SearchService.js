@@ -13,6 +13,7 @@ const errors = require('../common/errors')
 const copilotEmailAccess = require('../common/copilotEmailAccess')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
+const { loadChallengeDimensionLookup } = require('../common/statsDimensionHelper')
 const { Prisma } = prismaManager
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
@@ -636,6 +637,21 @@ function buildMemberQueryOptions (fields, shouldLoadStats) {
   return { select }
 }
 
+/**
+ * Resolve compact memberStats track/type UUIDs before deriving current
+ * maxRating labels for search and autocomplete responses.
+ * @param {Array<Object>|Object} members member payloads that may include compact memberStats rows
+ * @returns {Promise<void>} resolves after in-place annotation when needed
+ */
+async function annotateCurrentMaxRatingStatsForMembers (members) {
+  if (!prismaHelper.shouldResolveCurrentMaxRatingDimensions(members)) {
+    return
+  }
+
+  const dimensionLookup = await loadChallengeDimensionLookup(prismaManager.getChallengesClient())
+  _.forEach(_.castArray(members), member => prismaHelper.annotateMemberStatsWithDimensionNames(member, dimensionLookup))
+}
+
 async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
   let total = 0
 
@@ -717,6 +733,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
       where: { userId: { in: pageUserIds } },
       ...memberQueryOptions
     })
+    await annotateCurrentMaxRatingStatsForMembers(pageMembers)
 
     const byId = _.keyBy(pageMembers, 'userId')
     results = _.compact(pageScores.map(score => {
@@ -748,6 +765,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
     })
 
     // convert to response format
+    await annotateCurrentMaxRatingStatsForMembers(results)
     _.forEach(results, r => prismaHelper.convertMember(r))
   }
 
@@ -1161,6 +1179,7 @@ async function autocompleteByHandlePrefix (currentUser, term) {
       handleLower: 'asc'
     }
   })
+  await annotateCurrentMaxRatingStatsForMembers(members)
 
   return _.map(members, member => ({
     userId: helper.bigIntToNumber(member.userId),
