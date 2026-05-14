@@ -202,6 +202,7 @@ function getCountryNameFromCode (isoCode3) {
  * @returns {Object} the member profile data
  */
 async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
+  helper.validateHandle(handle)
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
 
@@ -369,6 +370,7 @@ function buildSendgridEmailActivityQuery (email, startTime, endTime) {
  * @returns {Array} up to the most recent SendGrid message activity records
  */
 async function getMemberSendgridEmails (currentUser, handle) {
+  helper.validateHandle(handle)
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     throw new errors.ForbiddenError('You are not allowed to view SendGrid email activity.')
   }
@@ -622,6 +624,7 @@ getMemberUserIdSignature.schema = {
  * @returns {Object} the updated member data
  */
 async function updateMember (currentUser, handle, query, data) {
+  helper.validateHandle(handle)
   const operatorId = currentUser.userId || currentUser.sub
   const member = await helper.getMemberByHandle(handle)
   // check authorization
@@ -820,6 +823,7 @@ updateMember.schema = {
  * @returns {Object} the updated member data
  */
 async function updateHandle (currentUser, handle, query, data) {
+  helper.validateHandle(handle)
   const operatorId = currentUser.userId || currentUser.sub
   const member = await helper.getMemberByHandle(handle)
 
@@ -1070,6 +1074,7 @@ async function uploadPhoto (currentUser, handle, files) {
  * @returns {Object} the deletion result
  */
 async function deleteMember (currentUser, handle, data) {
+  helper.validateHandle(handle)
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     throw new errors.ForbiddenError('You are not allowed to delete the member.')
   }
@@ -1939,6 +1944,7 @@ async function aggregatePDFData (currentUser, handle) {
  * @returns {Stream} PDF stream
  */
 async function downloadProfile (currentUser, handle) {
+  helper.validateHandle(handle)
   // Validate handle exists
   const member = await helper.getMemberByHandle(handle)
 
