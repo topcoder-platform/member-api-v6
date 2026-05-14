@@ -682,6 +682,152 @@ describe('develop rating engine unit tests', () => {
     should.equal(historyRow.newVolatility, expectedTarget.volatility)
   })
 
+  it('rerateDevTrack should skip null rating history rows when seeding partial rerates', async () => {
+    const targetUserId = toBigInt(2031)
+    const opponentUserId = toBigInt(2032)
+    const seedChallengeId = 'rated-seed-before-null'
+    const nullHistoryChallengeId = 'null-history-before-rerate'
+    const rerateChallengeId = 'rerate-after-null-history'
+    const opponentSeedChallengeId = 'opponent-rated-seed'
+    const targetSeedRating = 1500
+    const targetSeedVolatility = 240
+    const opponentSeedRating = 1400
+    const opponentSeedVolatility = 260
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [
+        {
+          id: toBigInt(201),
+          userId: targetUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: seedChallengeId,
+          mostRecent: false,
+          oldRating: null,
+          newRating: targetSeedRating,
+          oldVolatility: null,
+          newVolatility: targetSeedVolatility,
+          eventDate: new Date('2024-01-01T00:00:00.000Z')
+        },
+        {
+          id: toBigInt(202),
+          userId: targetUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: nullHistoryChallengeId,
+          mostRecent: false,
+          oldRating: null,
+          newRating: null,
+          oldVolatility: null,
+          newVolatility: null,
+          eventDate: new Date('2024-02-01T00:00:00.000Z')
+        },
+        {
+          id: toBigInt(203),
+          userId: opponentUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: opponentSeedChallengeId,
+          mostRecent: true,
+          oldRating: null,
+          newRating: opponentSeedRating,
+          oldVolatility: null,
+          newVolatility: opponentSeedVolatility,
+          eventDate: new Date('2024-02-01T00:00:00.000Z')
+        }
+      ],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId: seedChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-01-01T09:00:00.000Z')
+      },
+      {
+        challengeId: nullHistoryChallengeId,
+        userId: targetUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-02-01T09:00:00.000Z')
+      },
+      {
+        challengeId: rerateChallengeId,
+        userId: targetUserId,
+        finalScore: 90,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-03-01T10:00:00.000Z')
+      },
+      {
+        challengeId: rerateChallengeId,
+        userId: opponentUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        createdAt: new Date('2024-03-01T09:00:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [seedChallengeId]: {
+        id: seedChallengeId,
+        endDate: new Date('2024-01-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [nullHistoryChallengeId]: {
+        id: nullHistoryChallengeId,
+        endDate: new Date('2024-02-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [rerateChallengeId]: {
+        id: rerateChallengeId,
+        endDate: new Date('2024-03-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, targetSeedRating, targetSeedVolatility, 1, 90),
+      createParticipant(opponentUserId, opponentSeedRating, opponentSeedVolatility, 1, 100)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      rerateChallengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, rerateChallengeId)
+    should.equal(historyRow.oldRating, targetSeedRating)
+    should.equal(historyRow.oldVolatility, targetSeedVolatility)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+    should.equal(historyRow.newVolatility, expectedTarget.volatility)
+  })
+
   it('rerateDevTrack should preserve a higher Marathon Match memberMaxRating', async () => {
     const targetUserId = toBigInt(3003)
     const opponentUserId = toBigInt(4004)
@@ -1187,6 +1333,92 @@ describe('develop rating engine unit tests', () => {
 
     should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+  })
+
+  it('rerateDevTrack should skip invalid zero-score review rows', async () => {
+    const targetUserId = toBigInt(9021)
+    const opponentUserId = toBigInt(9022)
+    const invalidChallengeId = 'invalid-zero-score-dev'
+    const ratedChallengeId = 'valid-score-dev'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId: invalidChallengeId,
+        userId: targetUserId,
+        finalScore: 0,
+        placement: 0,
+        rated: false,
+        passedReview: false,
+        validSubmission: false,
+        createdAt: new Date('2024-08-15T09:00:00.000Z')
+      },
+      {
+        challengeId: ratedChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-09-01T09:00:00.000Z')
+      },
+      {
+        challengeId: ratedChallengeId,
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-09-01T09:05:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [invalidChallengeId]: {
+        id: invalidChallengeId,
+        endDate: new Date('2024-08-15T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [ratedChallengeId]: {
+        id: ratedChallengeId,
+        endDate: new Date('2024-09-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      null
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, invalidChallengeId), undefined)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, ratedChallengeId)
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTarget.rating)
   })

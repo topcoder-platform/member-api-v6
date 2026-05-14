@@ -174,6 +174,39 @@ function createDefaultState () {
   }
 }
 
+function hasRatingCheckpoint (historyRow) {
+  return historyRow && Number.isFinite(Number(historyRow.newRating)) && Number(historyRow.newRating) > 0
+}
+
+function findRatingCheckpointIndex (historyRows, seedIndex) {
+  if (!Array.isArray(historyRows) || seedIndex < 0) {
+    return -1
+  }
+
+  for (let index = Math.min(seedIndex, historyRows.length - 1); index >= 0; index -= 1) {
+    if (hasRatingCheckpoint(historyRows[index])) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function countRatingCheckpointsThroughIndex (historyRows, endIndex) {
+  if (!Array.isArray(historyRows) || endIndex < 0) {
+    return 0
+  }
+
+  let count = 0
+  for (let index = 0; index <= endIndex && index < historyRows.length; index += 1) {
+    if (hasRatingCheckpoint(historyRows[index])) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
 /**
  * Clone a rating state into the normalized shape expected by the Qubits engine.
  * @param {Object} state source state
@@ -216,26 +249,27 @@ async function resolveUnifiedDimensionIds (challengeClient) {
 }
 
 /**
- * Build a rerate seed state from the latest authoritative history row before a challenge.
- * Historical volatility is used when available. Older history rows that predate
- * volatility checkpoints fall back to the default Qubits volatility.
+ * Build a rerate seed state from the latest authoritative rating checkpoint at or
+ * before a history index. Aggregate-only history rows can have null ratings and
+ * must not count as prior rated events. Historical volatility is used when available.
+ * Older history rows that predate volatility checkpoints fall back to the default
+ * Qubits volatility.
  * @param {Array<Object>} historyRows participant history rows sorted by event date and id
  * @param {number} seedIndex index of the last history row before the target challenge
  * @returns {Object} seeded rating state
  */
 function createHistorySeedState (historyRows, seedIndex) {
-  if (!Array.isArray(historyRows) || seedIndex < 0 || !historyRows[seedIndex]) {
+  const checkpointIndex = findRatingCheckpointIndex(historyRows, seedIndex)
+  if (checkpointIndex < 0 || !historyRows[checkpointIndex]) {
     return createDefaultState()
   }
 
   return {
-    rating: Number.isFinite(Number(historyRows[seedIndex].newRating))
-      ? Number(historyRows[seedIndex].newRating)
-      : 0,
-    volatility: Number.isFinite(Number(historyRows[seedIndex].newVolatility))
-      ? Number(historyRows[seedIndex].newVolatility)
+    rating: Number(historyRows[checkpointIndex].newRating),
+    volatility: Number.isFinite(Number(historyRows[checkpointIndex].newVolatility))
+      ? Number(historyRows[checkpointIndex].newVolatility)
       : DEFAULT_VOLATILITY,
-    numRatings: seedIndex + 1
+    numRatings: countRatingCheckpointsThroughIndex(historyRows, checkpointIndex)
   }
 }
 
@@ -336,20 +370,28 @@ function normalizeScore (row) {
 /**
  * Resolve whether one participant row should count toward Development rerating.
  * review-api challengeResult.rated can be false for backfilled rows when the
- * producer lacked explicit challenge metadata, so rerates rely on the final
- * score/placement emitted for the participant while challenge-level rated
- * intent is enforced separately.
+ * producer lacked explicit challenge metadata, so rerates rely on a usable
+ * positive score or placement while challenge-level rated intent is enforced
+ * separately.
  * @param {Object} row challengeResult row
  * @returns {boolean} true when the participant should be included in rerating
  */
 function isParticipantEligibleForRating (row) {
-  const finalScore = Number(row && row.finalScore)
-  if (Number.isFinite(finalScore)) {
-    return true
+  if (!row || row.validSubmission === false) {
+    return false
   }
 
   const placement = Number(row && row.placement)
-  return Number.isInteger(placement) && placement > 0
+  if (Number.isInteger(placement) && placement > 0) {
+    return true
+  }
+
+  const finalScore = Number(row && row.finalScore)
+  if (Number.isFinite(finalScore) && finalScore > 0) {
+    return true
+  }
+
+  return false
 }
 
 async function fetchReviewResultsForUser (reviewDbClient, userId) {
@@ -769,19 +811,23 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
     }
   })
 
-  const previousHistory = await tx.memberStatsHistory.findFirst({
+  const orderedHistoryRows = await tx.memberStatsHistory.findMany({
     where: {
       userId,
       trackId: dimensionIds.trackId,
       typeId: dimensionIds.typeId
     },
     orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
-    skip: 1,
     select: {
+      id: true,
       newRating: true,
       newVolatility: true
     }
   })
+  const latestHistoryIndex = orderedHistoryRows.findIndex((row) => String(row.id) === String(latestHistory.id))
+  const previousHistory = orderedHistoryRows
+    .slice(latestHistoryIndex >= 0 ? latestHistoryIndex + 1 : 1)
+    .find(hasRatingCheckpoint)
 
   const latestUpdate = {
     mostRecent: true,
