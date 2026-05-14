@@ -1448,6 +1448,7 @@ describe('statistics service unit tests', () => {
             typeId: 'type-mm-id',
             challengeId: 'mm-challenge-uuid',
             eventDate: ratingDate,
+            placement: 1,
             mostRecent: true
           }]
         }

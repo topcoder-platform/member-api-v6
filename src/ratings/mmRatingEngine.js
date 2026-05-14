@@ -46,6 +46,15 @@ const DEFAULT_MM_SCORING_CONFIG = Object.freeze({
   relativeScoringEnabled: true,
   scoreDirection: 'MAXIMIZE'
 })
+const READY_MM_REVIEW_SUMMATION_FILTER = `
+          AND (
+            rs."metadata"->'testProgressDetails' IS NULL
+            OR (
+              rs."reviewedDate" IS NOT NULL
+              AND rs."metadata"->'testProgressDetails'->>'status' = 'SUCCESS'
+            )
+          )
+        `
 
 /**
  * Build the default Marathon Match scoring configuration used for historical
@@ -513,13 +522,19 @@ function resolveRatingPathSource (challenge) {
 
 /**
  * Normalize one Marathon Match score for Qubits ordering.
- * Relative-scoring aggregates are already emitted as higher-is-better, while
+ * Source placements are authoritative final standings when present. Otherwise,
+ * relative-scoring aggregates are treated as higher-is-better, while
  * non-relative MINIMIZE challenges need inversion to match standings order.
  * @param {Object} row participant result row
  * @param {Object} scoringConfig relative scoring configuration for the challenge
  * @returns {number} normalized Qubits score
  */
 function normalizeScore (row, scoringConfig) {
+  const placement = toOptionalPlacement(row && row.placement)
+  if (placement) {
+    return -placement
+  }
+
   const aggregateScore = Number(row.aggregateScore)
   if (!Number.isFinite(aggregateScore)) {
     return 0
@@ -640,7 +655,9 @@ function buildHistoryResultFields (participants, targetUserKey, sourceRow) {
  * The reviewSummation table is submission-scoped, so the latest final summation
  * per submission is selected before replay history is built. Some imported MM
  * summations have a null isFinal flag; those are treated as final unless the
- * row is explicitly marked false.
+ * row is explicitly marked false. Modern MM system-test summations expose
+ * testProgressDetails while scoring is still in flight, so those rows are not
+ * replayed until the system test completed successfully.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {BigInt} userId target member identifier
  * @returns {Promise<Array<Object>>} ordered result rows for the member
@@ -680,6 +697,7 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
         WHERE s."memberId" = $1
           AND (s."challengeId" IS NOT NULL OR s."legacyChallengeId" IS NOT NULL)
           AND rs."isFinal" IS NOT FALSE
+          ${READY_MM_REVIEW_SUMMATION_FILTER}
       )
       SELECT
         "submissionId",
@@ -703,9 +721,10 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
 
 /**
  * Fetch all challenge participants using the latest scored submission per member.
- * Historical Marathon Match data is read from review-api only; reviewSummation
- * aggregateScore is treated as already normalized for higher-is-better ordering.
- * Both submission.challengeId and submission.legacyChallengeId are considered.
+ * Historical Marathon Match data is read from review-api only; ready
+ * reviewSummation aggregateScore is treated as already normalized for
+ * higher-is-better ordering. Both submission.challengeId and
+ * submission.legacyChallengeId are considered.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string|Object} challengeId challenge identifier or history entry with legacy aliases
  * @returns {Promise<Object>} participant rows and scoring config for the challenge
@@ -721,6 +740,7 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
 
   const reviewSummationRelation = await resolveReviewDbRelation(reviewDbClient, 'reviewSummation')
   const submissionRelation = await resolveReviewDbRelation(reviewDbClient, 'submission')
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
       WITH "latestSubmissionSummation" AS (
@@ -750,6 +770,18 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
           )
           AND s."memberId" IS NOT NULL
           AND rs."isFinal" IS NOT FALSE
+          ${READY_MM_REVIEW_SUMMATION_FILTER}
+      ),
+      "challengeResultPlacement" AS (
+        SELECT DISTINCT ON ("userId")
+          "userId",
+          "placement"
+        FROM ${challengeResultRelation}
+        WHERE "challengeId" = ANY($1::text[])
+          AND "userId" IS NOT NULL
+          AND "placement" IS NOT NULL
+          AND "placement" > 0
+        ORDER BY "userId", "createdAt" DESC
       ),
       "latestMemberSubmission" AS (
         SELECT
@@ -770,18 +802,20 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
         WHERE "summationRank" = 1
       )
       SELECT
-        "submissionId",
-        "memberId",
-        "challengeId",
-        "legacyChallengeId",
-        "placement",
-        "aggregateScore",
-        "reviewedDate",
-        "createdAt",
-        "submissionCreatedAt"
-      FROM "latestMemberSubmission"
-      WHERE "memberRank" = 1
-      ORDER BY "submissionCreatedAt" ASC, "submissionId" ASC
+        lms."submissionId",
+        lms."memberId",
+        lms."challengeId",
+        lms."legacyChallengeId",
+        COALESCE(crp."placement", lms."placement") AS "placement",
+        lms."aggregateScore",
+        lms."reviewedDate",
+        lms."createdAt",
+        lms."submissionCreatedAt"
+      FROM "latestMemberSubmission" lms
+      LEFT JOIN "challengeResultPlacement" crp
+        ON crp."userId"::text = lms."memberId"::text
+      WHERE lms."memberRank" = 1
+      ORDER BY lms."submissionCreatedAt" ASC, lms."submissionId" ASC
     `,
     [challengeIds]
   )

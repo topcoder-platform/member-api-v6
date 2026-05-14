@@ -1179,6 +1179,21 @@ function historyRowsNeedPlacementEnrichment (rows) {
 }
 
 /**
+ * Determine whether Marathon Match placements should be verified against ChallengeWinner.
+ * MM completion can publish placement winner rows after memberStatsHistory was
+ * written, so even a positive persisted placement may need correction.
+ * @param {Array<Object>} rows history rows already shaped for response building
+ * @returns {boolean} true when MM placement verification should be attempted
+ */
+function marathonHistoryRowsNeedPlacementVerification (rows) {
+  return _.some(rows || [], row =>
+    !_.isNil(row.challengeId) &&
+    row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+    row.typeName === TYPE_NAMES.MARATHON_MATCH
+  )
+}
+
+/**
  * Determine whether any history rows are missing a challenge display name.
  * @param {Array<Object>} rows history rows already shaped for response building
  * @returns {boolean} true when a row still needs challenge name enrichment
@@ -1248,9 +1263,9 @@ function buildChallengeWinnerPlacementLookup (winnerRows) {
 }
 
 /**
- * Fill missing or zeroed persisted placements from challenge-api winner rows.
- * This keeps the profile challenge cards accurate while older history rows are
- * backfilled with authoritative placement data.
+ * Fill or correct persisted placements from challenge-api winner rows.
+ * This keeps the profile challenge cards accurate while older or prematurely
+ * written history rows are aligned with authoritative placement data.
  * @param {Array<Object>} rows persisted and/or synthesized history rows
  * @param {Array<Object>} winnerRows placement winner rows from challenge-api
  * @returns {Array<Object>} history rows with corrected placements when available
@@ -1266,7 +1281,7 @@ function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
     const challengeKey = normalizeChallengeLookupKey(row.challengeId)
     const placement = challengeKey ? placementByChallengeId.get(challengeKey) : undefined
 
-    if (toVisiblePlacement(row.placement) || !placement) {
+    if (!placement || toVisiblePlacement(row.placement) === placement) {
       return row
     }
 
@@ -2653,6 +2668,7 @@ async function getHistoryStats (currentUser, handle, query) {
       if (
         missingPairKeys.size > 0 ||
         historyRowsNeedPlacementEnrichment(annotatedRows) ||
+        marathonHistoryRowsNeedPlacementVerification(annotatedRows) ||
         historyRowsNeedChallengeNameEnrichment(annotatedRows)
       ) {
         const winnerRows = await fetchChallengeWinnerResultsForMember(challengeClient, member.userId)
