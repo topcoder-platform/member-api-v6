@@ -30,6 +30,7 @@ const TYPE_NAME = 'Challenge'
 const CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
 const CHALLENGE_TYPE_NAMES = [TYPE_NAMES.CHALLENGE, TYPE_NAMES.CODE]
 const RERATE_ACTOR = 'rerate-member-stats'
+const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
@@ -165,6 +166,11 @@ function isDevelopmentRatingChallenge (challenge) {
   const supportedTypeNames = CHALLENGE_TYPE_NAMES.map(normalizeChallengeDimension)
 
   return normalizedTrackName === CHALLENGE_TRACK_NAME && supportedTypeNames.includes(normalizedTypeName)
+}
+
+function isCompletedChallenge (challenge) {
+  const status = String(challenge && challenge.status ? challenge.status : '').trim().toUpperCase()
+  return !status || status === COMPLETED_CHALLENGE_STATUS
 }
 
 function createDefaultState () {
@@ -379,7 +385,7 @@ async function fetchReviewResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = $1
       ORDER BY "createdAt" ASC
@@ -400,7 +406,7 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeRef) {
   const placeholders = challengeIds.map((_, index) => `$${index + 1}`).join(', ')
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "challengeId" IN (${placeholders})
       ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC
@@ -459,6 +465,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
       id: true,
       legacyId: true,
       endDate: true,
+      status: true,
       track: {
         select: {
           name: true
@@ -498,6 +505,10 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
 
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !challenge.endDate) {
+      return
+    }
+
+    if (!isCompletedChallenge(challenge)) {
       return
     }
 
@@ -691,6 +702,24 @@ async function upsertHistoryRow (tx, userId, challengeId, previousState, updated
   })
 }
 
+async function deleteStaleHistoryRows (tx, userId, targetHistory, dimensionIds) {
+  const retainedChallengeIds = targetHistory.map((entry) => entry.challengeId)
+  if (retainedChallengeIds.length === 0) {
+    return
+  }
+
+  await tx.memberStatsHistory.deleteMany({
+    where: {
+      userId,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
+      challengeId: {
+        notIn: retainedChallengeIds
+      }
+    }
+  })
+}
+
 /**
  * Persist the member's global max rating row after a Develop rating update.
  * @param {Object} tx prisma transaction client
@@ -827,6 +856,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   const participantHistoryByUserId = new Map()
   let targetState = createDefaultState()
+  const shouldPruneStaleHistory = startIndex === 0 && !fromChallengeId
 
   if (startIndex > 0) {
     await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
@@ -929,6 +959,9 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   if (ratingsUpdated > 0) {
     await membersClient.$transaction(async (tx) => {
+      if (shouldPruneStaleHistory) {
+        await deleteStaleHistoryRows(tx, normalizedUserId, targetHistory, dimensionIds)
+      }
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
       await updateMaxRating(tx, normalizedUserId, dimensionIds)
       await recalculateRatingRanks(tx, dimensionIds, { updatedBy: RERATE_ACTOR })

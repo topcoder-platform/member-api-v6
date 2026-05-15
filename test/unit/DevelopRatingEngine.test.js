@@ -88,6 +88,10 @@ function matchesFilter (value, filter) {
       return filter.in.some((candidate) => matchesFilter(value, candidate))
     }
 
+    if (Array.isArray(filter.notIn)) {
+      return !filter.notIn.some((candidate) => matchesFilter(value, candidate))
+    }
+
     return false
   }
 
@@ -182,6 +186,20 @@ function createMembersClient (seed) {
       nextHistoryId += 1
       state.historyRows.push(newRow)
       return cloneRow(newRow)
+    },
+    async deleteMany (args = {}) {
+      let count = 0
+
+      for (let index = state.historyRows.length - 1; index >= 0; index -= 1) {
+        if (!matchesWhere(state.historyRows[index], args.where)) {
+          continue
+        }
+
+        state.historyRows.splice(index, 1)
+        count += 1
+      }
+
+      return { count }
     }
   }
 
@@ -1436,6 +1454,141 @@ describe('develop rating engine unit tests', () => {
     should.equal(findHistoryRow(state.historyRows, targetUserId, invalidChallengeId), undefined)
 
     const historyRow = findHistoryRow(state.historyRows, targetUserId, ratedChallengeId)
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+  })
+
+  it('rerateDevTrack should skip non-completed Development Challenge rows', async () => {
+    const targetUserId = toBigInt(9031)
+    const opponentUserId = toBigInt(9032)
+    const cancelledChallengeId = 'cancelled-dev'
+    const draftChallengeId = 'draft-dev'
+    const completedChallengeId = 'completed-dev'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [
+        {
+          id: toBigInt(301),
+          userId: targetUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: cancelledChallengeId,
+          mostRecent: false,
+          oldRating: 900,
+          newRating: 850,
+          oldVolatility: 300,
+          newVolatility: 280,
+          eventDate: new Date('2024-08-01T00:00:00.000Z')
+        },
+        {
+          id: toBigInt(302),
+          userId: targetUserId,
+          trackId: DEVELOP_TRACK_ID,
+          typeId: CHALLENGE_TYPE_ID,
+          challengeId: draftChallengeId,
+          mostRecent: true,
+          oldRating: 850,
+          newRating: 830,
+          oldVolatility: 280,
+          newVolatility: 260,
+          eventDate: new Date('2024-08-15T00:00:00.000Z')
+        }
+      ],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId: cancelledChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-08-01T09:00:00.000Z')
+      },
+      {
+        challengeId: draftChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-08-15T09:00:00.000Z')
+      },
+      {
+        challengeId: completedChallengeId,
+        userId: targetUserId,
+        finalScore: 95,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-09-01T09:00:00.000Z')
+      },
+      {
+        challengeId: completedChallengeId,
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-09-01T09:05:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [cancelledChallengeId]: {
+        id: cancelledChallengeId,
+        endDate: new Date('2024-08-01T00:00:00.000Z'),
+        status: 'CANCELLED_FAILED_REVIEW',
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [draftChallengeId]: {
+        id: draftChallengeId,
+        endDate: new Date('2024-08-15T00:00:00.000Z'),
+        status: 'DRAFT',
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [completedChallengeId]: {
+        id: completedChallengeId,
+        endDate: new Date('2024-09-01T00:00:00.000Z'),
+        status: 'COMPLETED',
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 95),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      null
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, cancelledChallengeId), undefined)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, draftChallengeId), undefined)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, completedChallengeId)
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
