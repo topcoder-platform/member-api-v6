@@ -710,6 +710,61 @@ describe('develop rating engine unit tests', () => {
     should.equal(historyRow.newVolatility, expectedTarget.volatility)
   })
 
+  it('rerateDevTrack should allow bulk rerates to skip rank recalculation', async () => {
+    const targetUserId = toBigInt(3011)
+    const opponentUserId = toBigInt(3022)
+    const challengeId = 'bulk-rank-skip'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2024-03-01T09:00:00.000Z')
+      },
+      {
+        challengeId,
+        userId: opponentUserId,
+        finalScore: 50,
+        placement: 2,
+        rated: true,
+        createdAt: new Date('2024-03-01T10:00:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [challengeId]: {
+        id: challengeId,
+        endDate: new Date('2024-03-01T00:00:00.000Z'),
+        track: { name: 'DEVELOPMENT' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      null,
+      { recalculateRanks: false }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    state.rankRecalculationCalls.should.have.length(0)
+    should.exist(findHistoryRow(state.historyRows, targetUserId, challengeId))
+    should.exist(state.statsRows.find((row) => String(row.userId) === String(targetUserId)))
+  })
+
   it('rerateDevTrack should skip null rating history rows when seeding partial rerates', async () => {
     const targetUserId = toBigInt(2031)
     const opponentUserId = toBigInt(2032)
