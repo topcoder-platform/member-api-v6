@@ -54,7 +54,9 @@
  * - --skip-history skips the legacy history backfill pass.
  * - --skip-ratings skips the legacy rating/rank enrichment pass and the Qubits rerate backfill.
  * - --skip-rerate skips the expensive Development rerate replay while still preserving
- *   legacy rating/rank fields on the rebuilt aggregate rows.
+ *   legacy rating/rank fields on the rebuilt aggregate rows. When rerates are
+ *   enabled, legacy numeric review ids are skipped because legacy subtrack
+ *   history already carries those ratings.
  * - --concurrency controls how many users are processed in parallel within each batch.
  * - Batch logs include timing breakdowns for preload queries, user aggregation,
  *   stats/history writes, rerates, and processed-user checkpoint writes.
@@ -3862,7 +3864,9 @@ async function main () {
           } = await measureAsyncStep(async () => (
             mapWithConcurrency(existingBatchUserIds, options.concurrency, async (userId) => {
               const rerateStartedAt = startTimer()
-              const rerateResult = await rerateDevTrack(membersClient, challengesClient, reviewDb, userId)
+              const rerateResult = await rerateDevTrack(membersClient, challengesClient, reviewDb, userId, null, {
+                skipLegacyReviewIds: true
+              })
               return {
                 userId,
                 challengesProcessed: rerateResult.challengesProcessed,

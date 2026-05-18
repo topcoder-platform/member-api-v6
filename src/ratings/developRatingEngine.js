@@ -495,7 +495,27 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
   return metadataByChallengeId
 }
 
-function buildTargetHistory (reviewRows, challengeMetadataById) {
+/**
+ * Resolve whether a review-api row uses the canonical challenge-api id instead
+ * of a migrated legacy numeric alias. Full migration rerates can skip alias rows
+ * because legacy subtrack history already preserves those authoritative ratings.
+ * @param {Object} row challengeResult row
+ * @param {Object} challenge challenge metadata resolved from challenge-api
+ * @returns {boolean} true when the source row is keyed by the canonical challenge id
+ */
+function isCanonicalReviewChallengeRow (row, challenge) {
+  return !!(row && challenge && String(row.challengeId) === String(challenge.id))
+}
+
+/**
+ * Build the ordered Development Challenge rerate history for a target member.
+ * @param {Array<Object>} reviewRows raw challengeResult rows for the member
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by review id aliases
+ * @param {Object} [options] history filtering options
+ * @param {boolean} [options.skipLegacyReviewIds=false] ignore legacy numeric review ids that are already represented by legacy subtrack history
+ * @returns {Array<Object>} ordered challenge history entries for rerating
+ */
+function buildTargetHistory (reviewRows, challengeMetadataById, options = {}) {
   const historyByChallengeId = new Map()
 
   reviewRows.forEach((row) => {
@@ -521,6 +541,10 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
     }
 
     if (!isDevelopmentRatingChallenge(challenge)) {
+      return
+    }
+
+    if (options.skipLegacyReviewIds && !isCanonicalReviewChallengeRow(row, challenge)) {
       return
     }
 
@@ -830,6 +854,7 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
  * @param {string|null} fromChallengeId optional challenge id to start from
  * @param {Object} [options] rerate controls
  * @param {boolean} [options.recalculateRanks=true] recompute Develop Challenge ranks after this member rerate
+ * @param {boolean} [options.skipLegacyReviewIds=false] skip legacy numeric challengeResult aliases during full migration rerates
  * @returns {Promise<{challengesProcessed: number, ratingsUpdated: number}>} rerate counters
  * @throws {Error} when required review DB or dimension data is unavailable
  */
@@ -852,7 +877,9 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     Array.from(new Set(reviewRows.map((row) => String(row.challengeId))))
   )
 
-  const targetHistory = buildTargetHistory(reviewRows, challengeMetadataById)
+  const targetHistory = buildTargetHistory(reviewRows, challengeMetadataById, {
+    skipLegacyReviewIds: options.skipLegacyReviewIds === true
+  })
   if (targetHistory.length === 0) {
     return {
       challengesProcessed: 0,

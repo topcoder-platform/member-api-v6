@@ -22,12 +22,13 @@
  * Notes:
  * - Challenge discovery uses the Development ChallengeTrack id and includes both
  *   ChallengeType Challenge and CODE rows.
- * - Existing CODE rows are rated into the same DEVELOP / Challenge stream used
- *   by the Development rating engine.
+ * - Existing CODE rows are discovered for member coverage, but legacy numeric
+ *   review aliases are skipped during full replay because legacy subtrack
+ *   history already carries those ratings.
  * - Handles are not required. Participants are discovered from review-api
  *   challengeResult rows.
  * - Each member is replayed from the beginning by calling rerateDevTrack with no
- *   starting challenge id, so complete Development history is persisted.
+ *   starting challenge id, so canonical Development Challenge history is persisted.
  * - Current Develop / Challenge ranks are recalculated once after the batch,
  *   not once per member, to avoid long repeated interactive transactions.
  */
@@ -703,7 +704,10 @@ async function run (options, dependencies = {}) {
           reviewDbClient,
           member.userId,
           null,
-          { recalculateRanks: false }
+          {
+            recalculateRanks: false,
+            skipLegacyReviewIds: true
+          }
         )
 
         await processedUserIdsWriter.appendUserId(member.userId)

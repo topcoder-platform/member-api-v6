@@ -1316,6 +1316,103 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(maxRatingRow.subTrack, 'AI')
   })
 
+  it('rerateMmTrack should skip invalid zero-score Development Challenge rows for configured rating paths', async () => {
+    const targetUserId = toBigInt(7201)
+    const opponentUserId = toBigInt(7202)
+    const invalidChallengeId = 'ai-invalid-zero-dev'
+    const validChallengeId = 'ai-valid-score-dev'
+    const ratingPath = normalizeRatingPathConfig({
+      name: 'AI',
+      track: 'DEVELOPMENT',
+      tags: ['AI']
+    })
+    const pathMetadata = {
+      [invalidChallengeId]: {
+        id: invalidChallengeId,
+        endDate: new Date('2024-05-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['AI'],
+        metadata: []
+      },
+      [validChallengeId]: {
+        id: validChallengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['AI'],
+        metadata: []
+      }
+    }
+    const reviewRows = [
+      {
+        challengeId: invalidChallengeId,
+        userId: targetUserId,
+        finalScore: 0,
+        placement: 0,
+        rated: false,
+        passedReview: false,
+        validSubmission: false,
+        createdAt: new Date('2024-05-01T09:00:00.000Z')
+      },
+      {
+        challengeId: validChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        challengeId: validChallengeId,
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:05:00.000Z')
+      }
+    ]
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createMmReviewDbClient(reviewRows)
+    const challengeClient = createChallengeClient(pathMetadata)
+
+    const result = await rerateMmTrack(
+      membersClient,
+      challengeClient,
+      null,
+      reviewDbClient,
+      targetUserId,
+      null,
+      {
+        ratingPath
+      }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingPathChallengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, invalidChallengeId), undefined)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, validChallengeId)
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+  })
+
   it('rerateMmTrack should replay only challenges with every configured rating path skill', async () => {
     const javaSkillId = 'java-skill-id'
     const mysqlSkillId = 'mysql-skill-id'

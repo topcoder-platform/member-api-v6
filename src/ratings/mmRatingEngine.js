@@ -551,17 +551,28 @@ function normalizeDevelopmentScore (row) {
 
 /**
  * Resolve whether a Development Challenge participant should count toward rerating.
+ * Invalid zero-score backfill rows represent non-submissions and must not enter
+ * the Qubits participant pool. Passed and failed review rows remain eligible
+ * when they carry a positive score or a positive placement.
  * @param {Object} row challengeResult participant row
  * @returns {boolean} true when the participant has a usable score or placement
  */
 function isDevelopmentParticipantEligibleForRating (row) {
-  const finalScore = Number(row && row.finalScore)
-  if (Number.isFinite(finalScore)) {
-    return true
+  if (!row || row.validSubmission === false) {
+    return false
   }
 
   const placement = Number(row && row.placement)
-  return Number.isInteger(placement) && placement > 0
+  if (Number.isInteger(placement) && placement > 0) {
+    return true
+  }
+
+  const finalScore = Number(row && row.finalScore)
+  if (Number.isFinite(finalScore) && finalScore > 0) {
+    return true
+  }
+
+  return false
 }
 
 /**
@@ -815,7 +826,7 @@ async function fetchDevelopmentParticipantsForChallenge (reviewDbClient, challen
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "challengeId" = $1
       ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC

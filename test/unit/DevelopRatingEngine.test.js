@@ -1513,6 +1513,108 @@ describe('develop rating engine unit tests', () => {
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
 
+  it('rerateDevTrack should skip legacy review aliases when requested by bulk stats regeneration', async () => {
+    const targetUserId = toBigInt(9031)
+    const opponentUserId = toBigInt(9032)
+    const legacyChallengeId = 903100
+    const legacyCanonicalChallengeId = 'legacy-canonical-dev'
+    const canonicalChallengeId = 'canonical-dev'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [{
+        id: 1,
+        userId: targetUserId,
+        trackId: DEVELOP_TRACK_ID,
+        typeId: CHALLENGE_TYPE_ID,
+        challengeId: legacyCanonicalChallengeId,
+        newRating: 900,
+        newVolatility: DEFAULT_VOLATILITY,
+        eventDate: new Date('2024-05-01T00:00:00.000Z'),
+        mostRecent: false
+      }],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId: String(legacyChallengeId),
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-05-01T09:00:00.000Z')
+      },
+      {
+        challengeId: canonicalChallengeId,
+        userId: targetUserId,
+        finalScore: 95,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        challengeId: canonicalChallengeId,
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:05:00.000Z')
+      }
+    ])
+
+    const challengeClient = createChallengeClient({
+      [legacyCanonicalChallengeId]: {
+        id: legacyCanonicalChallengeId,
+        legacyId: legacyChallengeId,
+        legacyRecord: { legacySystemId: legacyChallengeId },
+        endDate: new Date('2024-05-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [canonicalChallengeId]: {
+        id: canonicalChallengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      }
+    })
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 95),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      membersClient,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      null,
+      {
+        skipLegacyReviewIds: true
+      }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, legacyCanonicalChallengeId), undefined)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, canonicalChallengeId)
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+  })
+
   it('rerateDevTrack should skip non-completed Development Challenge rows', async () => {
     const targetUserId = toBigInt(9031)
     const opponentUserId = toBigInt(9032)
