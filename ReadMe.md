@@ -196,7 +196,7 @@ pnpm rerate-marathon-matches -- --dry-run
 pnpm rerate-marathon-matches -- --concurrency 5
 ```
 
-The script discovers completed Marathon Match challenges by `ChallengeType` id and also merges distinct challenge IDs already present in `DATA_SCIENCE / MARATHON_MATCH` `memberStatsHistory`, so migrated legacy MM rows that predate ChallengeType classification are scanned too. It discovers competitors from final review summations using both canonical challenge UUIDs and legacy numeric challenge IDs, filters out user IDs that do not exist in member storage, and calls the native MM rerate engine with no starting challenge so each member is replayed from their first MM event. Historical MM replay does not require `MM_DB_URL` or the marathon-match-api schema.
+The script discovers completed Marathon Match challenges by `ChallengeType` id and also merges distinct challenge IDs already present in `DATA_SCIENCE / MARATHON_MATCH` `memberStatsHistory`, so migrated legacy MM rows that predate ChallengeType classification are scanned too. It discovers competitors from final review summations using both canonical challenge UUIDs and legacy numeric challenge IDs, filters out user IDs that do not exist in member storage, and calls the native MM rerate engine with no starting challenge so each member is replayed from their first MM event. Current MM ranks are recalculated once after the batch rather than once per member. Historical MM replay does not require `MM_DB_URL` or the marathon-match-api schema.
 
 To re-run a configured rating path for every member who participated in the configured challenge set, use the bulk script instead of the member-scoped API:
 

@@ -691,6 +691,31 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(historyRow.placement, 1)
   })
 
+  it('rerateMmTrack should allow bulk rerates to skip rank recalculation', async () => {
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient(challengeMetadata),
+      null,
+      createMmReviewDbClient(baseReviewRows),
+      targetUserId,
+      null,
+      { recalculateRanks: false }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    state.rankRecalculationCalls.should.have.length(0)
+    should.exist(findHistoryRow(state.historyRows, targetUserId, challengeId))
+    should.exist(state.statsRows.find((row) => String(row.userId) === String(targetUserId)))
+    should.exist(state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId)))
+  })
+
   it('rerateMmTrack should prefer final MM standings placement over raw aggregate score order', async () => {
     const { client: membersClient, state } = createMembersClient({
       historyRows: [],

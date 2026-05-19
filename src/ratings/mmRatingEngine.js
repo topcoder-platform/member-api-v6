@@ -1484,10 +1484,12 @@ function normalizeRatingPathScore (row, source, scoringConfig) {
  * @param {string|number|BigInt} userId target member identifier
  * @param {string|number} fromChallengeId starting challenge identifier
  * @param {Object} ratingPath normalized rating path config
+ * @param {Object} [options] rerate controls
+ * @param {boolean} [options.recalculateRanks=true] recompute ranks after this member rerate
  * @returns {Promise<Object>} rerate summary counts
  * @throws {errors.BadRequestError} when the start challenge is not in the member's path
  */
-async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId, ratingPath) {
+async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId, ratingPath, options = {}) {
   const normalizedUserId = toBigIntUserId(userId)
   const targetUserKey = buildUserStateKey(normalizedUserId)
   const pathHistory = await fetchRatingPathHistory(challengeClient, ratingPath)
@@ -1514,6 +1516,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
   let challengesProcessed = 0
   let ratingPathChallengesProcessed = 0
   let ratingsUpdated = 0
+  const shouldRecalculateRanks = options.recalculateRanks !== false
 
   for (let index = 0; index < pathHistory.length; index += 1) {
     const historyEntry = pathHistory[index]
@@ -1606,8 +1609,11 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
     await membersClient.$transaction(async (tx) => {
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
       await updateMaxRating(tx, normalizedUserId, dimensionIds)
-      await recalculateRatingRanks(tx, dimensionIds, { updatedBy: RERATE_ACTOR })
     })
+
+    if (shouldRecalculateRanks) {
+      await recalculateRatingRanks(membersClient, dimensionIds, { updatedBy: RERATE_ACTOR })
+    }
   }
 
   return {
@@ -1621,6 +1627,8 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
  * Re-rate one member's Marathon Match timeline beginning at the requested challenge.
  * Each challenge is replayed forward with the latest final MM system score per participant,
  * and the current stats row is aligned with the target member's full rated MM timeline.
+ * Rank recalculation is enabled by default for direct rerates, but bulk scripts
+ * can disable it and run one final rank update after all member rows are stored.
  * @param {Object} membersClient prisma members client
  * @param {Object} challengeClient prisma challenge client
  * @param {Object|null} mmDbClient ignored legacy Marathon Match client parameter
@@ -1629,6 +1637,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
  * @param {string|number} fromChallengeId starting challenge identifier
  * @param {Object} options optional rerate controls
  * @param {Object} options.ratingPath normalized rating path config
+ * @param {boolean} [options.recalculateRanks=true] recompute ranks after this member rerate
  * @returns {Promise<Object>} rerate summary counts
  * @throws {Error} when the required review database connection is missing
  * @throws {errors.BadRequestError} when the start challenge is not a rated MM event for the member
@@ -1647,7 +1656,8 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
       reviewDbClient,
       userId,
       fromChallengeId,
-      ratingPath
+      ratingPath,
+      options
     )
   }
 
@@ -1708,6 +1718,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
 
   let challengesProcessed = 0
   let ratingsUpdated = 0
+  const shouldRecalculateRanks = options.recalculateRanks !== false
 
   for (let index = startIndex; index < targetHistory.length; index += 1) {
     const historyEntry = targetHistory[index]
@@ -1788,8 +1799,11 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     await membersClient.$transaction(async (tx) => {
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
       await updateMaxRating(tx, normalizedUserId, dimensionIds)
-      await recalculateRatingRanks(tx, dimensionIds, { updatedBy: RERATE_ACTOR })
     })
+
+    if (shouldRecalculateRanks) {
+      await recalculateRatingRanks(membersClient, dimensionIds, { updatedBy: RERATE_ACTOR })
+    }
   }
 
   return {
