@@ -675,6 +675,9 @@ describe('marathon match rating engine unit tests', () => {
 
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
+    should.equal(statsRow.challenges, 1)
+    should.equal(statsRow.mostRecentEventDate.getTime(), challengeMetadata[challengeId].endDate.getTime())
+    should.equal(statsRow.mostRecentSubmission.getTime(), baseReviewRows[0].createdAt.getTime())
     should.equal(maxRatingRow.rating, expectedTargetState.rating)
     should.equal(maxRatingRow.track, 'DATA_SCIENCE')
     should.equal(maxRatingRow.subTrack, 'MARATHON_MATCH')
@@ -1084,6 +1087,9 @@ describe('marathon match rating engine unit tests', () => {
 
     should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(statsRow.challenges, 2)
+    should.equal(statsRow.mostRecentEventDate.getTime(), new Date('2024-02-01T00:00:00.000Z').getTime())
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-02-01T10:00:00.000Z').getTime())
     should.equal(historyRow.oldRating, targetSeedRating)
     should.equal(historyRow.oldVolatility, targetSeedVolatility)
     should.equal(historyRow.newRating, expectedTarget.rating)

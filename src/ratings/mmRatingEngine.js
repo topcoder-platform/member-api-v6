@@ -1096,7 +1096,7 @@ function omitUndefinedFields (data) {
  * @param {BigInt} userId member identifier
  * @param {Object} updatedTarget Qubits participant state after the challenge
  * @param {Object} dimensionIds unified stats track/type identifiers
- * @param {Object} statsFields optional aggregate fields for custom rating paths
+ * @param {Object} statsFields optional aggregate fields for the rating dimension
  * @returns {Promise<void>} resolves when the stats row is written
  */
 async function upsertRatingStatsRow (tx, userId, updatedTarget, dimensionIds, statsFields = {}) {
@@ -1619,7 +1619,8 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
 
 /**
  * Re-rate one member's Marathon Match timeline beginning at the requested challenge.
- * Each challenge is replayed forward with the latest final MM system score per participant.
+ * Each challenge is replayed forward with the latest final MM system score per participant,
+ * and the current stats row is aligned with the target member's full rated MM timeline.
  * @param {Object} membersClient prisma members client
  * @param {Object} challengeClient prisma challenge client
  * @param {Object|null} mmDbClient ignored legacy Marathon Match client parameter
@@ -1674,6 +1675,12 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
   }
 
   const dimensionIds = await resolveUnifiedDimensionIds(challengeClient)
+  const latestTargetHistoryEntry = targetHistory[targetHistory.length - 1]
+  const targetAggregateFields = {
+    challenges: targetHistory.length,
+    mostRecentEventDate: latestTargetHistoryEntry.eventDate,
+    mostRecentSubmission: latestTargetHistoryEntry.createdAt
+  }
 
   let startIndex = 0
   if (fromChallengeId) {
@@ -1756,7 +1763,13 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     )
 
     await membersClient.$transaction(async (tx) => {
-      await upsertRatingStatsRow(tx, normalizedUserId, updatedTarget, dimensionIds)
+      await upsertRatingStatsRow(
+        tx,
+        normalizedUserId,
+        updatedTarget,
+        dimensionIds,
+        targetAggregateFields
+      )
 
       await upsertHistoryRow(
         tx,
