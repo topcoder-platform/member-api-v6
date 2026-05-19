@@ -1513,39 +1513,44 @@ describe('develop rating engine unit tests', () => {
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
 
-  it('rerateDevTrack should skip legacy review aliases when requested by bulk stats regeneration', async () => {
+  it('rerateDevTrack should preserve legacy source ratings when requested by bulk stats regeneration', async () => {
     const targetUserId = toBigInt(9031)
     const opponentUserId = toBigInt(9032)
-    const legacyChallengeId = 903100
-    const legacyCanonicalChallengeId = 'legacy-canonical-dev'
+    const legacyAliasChallengeId = 903100
+    const legacyAliasCanonicalChallengeId = 'legacy-alias-canonical-dev'
+    const legacyUuidChallengeId = 'legacy-uuid-dev'
     const canonicalChallengeId = 'canonical-dev'
 
     const { client: membersClient, state } = createMembersClient({
-      historyRows: [{
-        id: 1,
-        userId: targetUserId,
-        trackId: DEVELOP_TRACK_ID,
-        typeId: CHALLENGE_TYPE_ID,
-        challengeId: legacyCanonicalChallengeId,
-        newRating: 900,
-        newVolatility: DEFAULT_VOLATILITY,
-        eventDate: new Date('2024-05-01T00:00:00.000Z'),
-        mostRecent: false
-      }],
+      historyRows: [],
       statsRows: [],
       maxRatingRows: []
     })
 
     const reviewDbClient = createReviewDbClient([
       {
-        challengeId: String(legacyChallengeId),
+        challengeId: String(legacyAliasChallengeId),
         userId: targetUserId,
         finalScore: 100,
         placement: 1,
         rated: true,
         passedReview: true,
         validSubmission: true,
+        oldRating: 900,
+        newRating: 950,
         createdAt: new Date('2024-05-01T09:00:00.000Z')
+      },
+      {
+        challengeId: legacyUuidChallengeId,
+        userId: targetUserId,
+        finalScore: 97,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        oldRating: 950,
+        newRating: 970,
+        createdAt: new Date('2024-05-02T09:05:00.000Z')
       },
       {
         challengeId: canonicalChallengeId,
@@ -1570,11 +1575,20 @@ describe('develop rating engine unit tests', () => {
     ])
 
     const challengeClient = createChallengeClient({
-      [legacyCanonicalChallengeId]: {
-        id: legacyCanonicalChallengeId,
-        legacyId: legacyChallengeId,
-        legacyRecord: { legacySystemId: legacyChallengeId },
+      [legacyAliasCanonicalChallengeId]: {
+        id: legacyAliasCanonicalChallengeId,
+        legacyId: legacyAliasChallengeId,
+        legacyRecord: { legacySystemId: legacyAliasChallengeId },
         endDate: new Date('2024-05-01T00:00:00.000Z'),
+        metadata: [],
+        track: { name: 'Development' },
+        type: { name: 'Challenge' }
+      },
+      [legacyUuidChallengeId]: {
+        id: legacyUuidChallengeId,
+        legacyId: 903101,
+        legacyRecord: { legacySystemId: 903101 },
+        endDate: new Date('2024-05-02T00:00:00.000Z'),
         metadata: [],
         track: { name: 'Development' },
         type: { name: 'Challenge' }
@@ -1589,7 +1603,7 @@ describe('develop rating engine unit tests', () => {
     })
 
     const expectedParticipants = [
-      createParticipant(targetUserId, 0, 0, 0, 95),
+      createParticipant(targetUserId, 970, DEFAULT_VOLATILITY, 3, 95),
       createParticipant(opponentUserId, 0, 0, 0, 80)
     ]
     runQubitsRating(expectedParticipants)
@@ -1602,16 +1616,23 @@ describe('develop rating engine unit tests', () => {
       targetUserId,
       null,
       {
-        skipLegacyReviewIds: true
+        useLegacySourceRatings: true
       }
     )
 
-    should.equal(result.challengesProcessed, 1)
-    should.equal(result.ratingsUpdated, 1)
-    should.equal(findHistoryRow(state.historyRows, targetUserId, legacyCanonicalChallengeId), undefined)
+    should.equal(result.challengesProcessed, 3)
+    should.equal(result.ratingsUpdated, 3)
+
+    const legacyAliasHistoryRow = findHistoryRow(state.historyRows, targetUserId, legacyAliasCanonicalChallengeId)
+    should.equal(legacyAliasHistoryRow.oldRating, 900)
+    should.equal(legacyAliasHistoryRow.newRating, 950)
+
+    const legacyUuidHistoryRow = findHistoryRow(state.historyRows, targetUserId, legacyUuidChallengeId)
+    should.equal(legacyUuidHistoryRow.oldRating, 950)
+    should.equal(legacyUuidHistoryRow.newRating, 970)
 
     const historyRow = findHistoryRow(state.historyRows, targetUserId, canonicalChallengeId)
-    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.oldRating, 970)
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
 
