@@ -1811,32 +1811,25 @@ function dedupeUnifiedHistoryRows (rows) {
 }
 
 /**
- * Remove empty imported Marathon Match rows that still reference unmapped numeric
+ * Remove imported Marathon Match rows that still reference unmapped numeric
  * legacy challenge ids.
  *
- * Older Marathon Match histories can predate challenge-api metadata while still
- * carrying rating, placement, or percentile data from the members schema. Those
- * rows are part of the member's rating timeline and must remain visible even
- * when a challenge title cannot be resolved.
+ * Resolved legacy ids are canonicalized before this point. Any remaining
+ * numeric MM challenge id cannot be matched to challenge-api metadata, so it is
+ * ignored to avoid surfacing stale legacy rating rows or double-counting history.
  *
  * @param {Array<Object>} rows persisted and/or transient history rows
- * @returns {Array<Object>} history rows without empty unresolved legacy MM entries
+ * @returns {Array<Object>} history rows without unresolved legacy MM entries
  */
-function filterEmptyUnresolvedLegacyMarathonHistoryRows (rows) {
+function filterUnresolvedLegacyMarathonHistoryRows (rows) {
   return _.filter(rows || [], (row) => {
     const challengeId = normalizeChallengeLookupKey(row && row.challengeId)
     const isLegacyNumericChallenge = challengeId && /^\d+$/.test(challengeId)
     const isMarathonHistory = row &&
       row.trackName === TRACK_NAMES.DATA_SCIENCE &&
       row.typeName === TYPE_NAMES.MARATHON_MATCH
-    const hasHistoryData = !_.isNil(row.newRating) ||
-      !_.isNil(row.oldRating) ||
-      !_.isNil(row.placement) ||
-      !_.isNil(row.percentile) ||
-      !_.isNil(row.newVolatility) ||
-      !_.isNil(row.oldVolatility)
 
-    return !(isMarathonHistory && isLegacyNumericChallenge && !row.challengeName && !hasHistoryData)
+    return !(isMarathonHistory && isLegacyNumericChallenge && !row.challengeName)
   })
 }
 
@@ -2713,7 +2706,7 @@ async function getHistoryStats (currentUser, handle, query) {
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, legacyCodeFallbackRows)
       }
 
-      annotatedRows = filterEmptyUnresolvedLegacyMarathonHistoryRows(annotatedRows)
+      annotatedRows = filterUnresolvedLegacyMarathonHistoryRows(annotatedRows)
 
       const orderedRows = orderUnifiedHistoryRows(recomputeUnifiedHistoryMostRecentFlags(annotatedRows))
       if (orderedRows.length > 0) {

@@ -1542,10 +1542,9 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('getHistoryStats should preserve data-bearing unresolved legacy numeric Marathon Match rows', async () => {
+  it('getHistoryStats should drop unresolved legacy numeric Marathon Match rows', async () => {
     const ratingDate = new Date('2025-08-27T17:05:00.000Z')
     const legacyDate = new Date('2014-04-18T00:00:00.000Z')
-    const emptyLegacyDate = new Date('2013-04-18T00:00:00.000Z')
     const challenge = {
       id: 'mm-challenge-uuid',
       legacyId: null,
@@ -1578,10 +1577,11 @@ describe('statistics service unit tests', () => {
             newRating: 2946,
             mostRecent: true
           }, {
-            trackId: 'track-ds-id',
+            trackId: 'track-dev-id',
             typeId: 'type-mm-id',
-            challengeId: '15949',
-            eventDate: emptyLegacyDate,
+            challengeId: 'mm-challenge-uuid',
+            challengeName: 'Marathon Match 163',
+            eventDate: ratingDate,
             mostRecent: false
           }, {
             trackId: 'track-ds-id',
@@ -1605,13 +1605,11 @@ describe('statistics service unit tests', () => {
 
       result.should.have.length(1)
       should.exist(result[0].DATA_SCIENCE)
-      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(2)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeId.should.equal('mm-challenge-uuid')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].rating.should.equal(2739)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
-      result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].challengeId.should.equal(15948)
-      result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].rating.should.equal(2946)
-      result[0].DATA_SCIENCE.MARATHON_MATCH.history[1].mostRecent.should.equal(false)
     } finally {
       restore()
     }
