@@ -1478,6 +1478,73 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should use the best duplicate passed-review Marathon Match placement', async () => {
+    const ratingDate = new Date('2023-05-31T10:02:00.000Z')
+    const challenge = {
+      id: 'mm-145',
+      name: 'Marathon Match 145',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: ratingDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null,
+      winners: [{
+        placement: 1
+      }]
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-145',
+            eventDate: ratingDate,
+            placement: 1,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [challenge],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'mm-145',
+        type: 'PASSED_REVIEW',
+        placement: 4,
+        createdAt: ratingDate,
+        challenge
+      }, {
+        challengeId: 'mm-145',
+        type: 'PASSED_REVIEW',
+        placement: 43,
+        createdAt: ratingDate,
+        challenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 145')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(5)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should hydrate persisted Marathon Match names from challenge winners', async () => {
     const ratingDate = new Date('2025-08-27T17:05:00.000Z')
     const challenge = {
@@ -1610,6 +1677,105 @@ describe('statistics service unit tests', () => {
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].rating.should.equal(2739)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should preserve hydrated legacy Marathon Match ratings over overlapping rerates', async () => {
+    const legacyDate = new Date('2023-05-02T00:00:00.000Z')
+    const oldCanonicalDate = new Date('2023-03-08T18:14:00.000Z')
+    const newCanonicalDate = new Date('2025-08-27T17:05:00.000Z')
+    const newChallenge = {
+      id: 'new-mm-challenge',
+      legacyId: null,
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: newCanonicalDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const oldChallenge = {
+      id: 'old-mm-challenge',
+      legacyId: null,
+      name: 'Marathon Match 144',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: oldCanonicalDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [{
+          challengeId: global.BigInt(19708),
+          challengeName: 'MM 148',
+          date: legacyDate,
+          rating: 2955,
+          placement: 3,
+          percentile: 97.973
+        }],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '19708',
+            eventDate: legacyDate,
+            newRating: 2955,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'old-mm-challenge',
+            challengeName: 'Marathon Match 144',
+            eventDate: oldCanonicalDate,
+            newRating: 2560,
+            placement: 1,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'new-mm-challenge',
+            challengeName: 'Marathon Match 163',
+            eventDate: newCanonicalDate,
+            newRating: 2279,
+            placement: 5,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [newChallenge, oldChallenge],
+      reviewRows: [],
+      challengeWinnerRows: []
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      const history = result[0].DATA_SCIENCE.MARATHON_MATCH.history
+      history.should.have.length(2)
+      history[0].challengeId.should.equal('new-mm-challenge')
+      history[0].rating.should.equal(2279)
+      history[0].mostRecent.should.equal(true)
+      history[1].challengeId.should.equal(19708)
+      history[1].challengeName.should.equal('MM 148')
+      history[1].rating.should.equal(2955)
+      history[1].placement.should.equal(3)
     } finally {
       restore()
     }

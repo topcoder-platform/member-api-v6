@@ -501,6 +501,8 @@ function resolveLegacyDesignTypeId (typeValue, fallbackValue) {
 
 /**
  * Merge non-null stat values into the keyed legacy rating lookup.
+ * Legacy rating queries order duplicate snapshots newest-first, so existing
+ * non-null values win and older snapshots only fill fields missing upstream.
  * @param {Map<string, Object>} lookup keyed legacy stat lookup
  * @param {string} key unified track/type lookup key
  * @param {Object} values legacy rating/rank values for the key
@@ -510,7 +512,8 @@ function mergeLegacyStatLookup (lookup, key, values) {
   const merged = { ...existing }
 
   Object.keys(values).forEach((field) => {
-    if (values[field] !== null && values[field] !== undefined) {
+    if (values[field] !== null && values[field] !== undefined &&
+      (merged[field] === null || merged[field] === undefined)) {
       merged[field] = values[field]
     }
   })

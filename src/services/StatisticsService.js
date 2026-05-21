@@ -1811,25 +1811,39 @@ function dedupeUnifiedHistoryRows (rows) {
 }
 
 /**
- * Remove imported Marathon Match rows that still reference unmapped numeric
- * legacy challenge ids.
+ * Reconcile imported Marathon Match legacy rows with canonical rerated rows.
  *
- * Resolved legacy ids are canonicalized before this point. Any remaining
- * numeric MM challenge id cannot be matched to challenge-api metadata, so it is
- * ignored to avoid surfacing stale legacy rating rows or double-counting history.
+ * Hydrated numeric legacy rows are official migrated ratings and remain
+ * authoritative through their latest event date. Canonical rerated rows after
+ * that date are kept so newer unified-only challenges still appear. Numeric
+ * rows that cannot be hydrated are still dropped as unresolved placeholders.
  *
  * @param {Array<Object>} rows persisted and/or transient history rows
- * @returns {Array<Object>} history rows without unresolved legacy MM entries
+ * @returns {Array<Object>} reconciled Marathon Match history rows
  */
-function filterUnresolvedLegacyMarathonHistoryRows (rows) {
-  return _.filter(rows || [], (row) => {
-    const challengeId = normalizeChallengeLookupKey(row && row.challengeId)
-    const isLegacyNumericChallenge = challengeId && /^\d+$/.test(challengeId)
-    const isMarathonHistory = row &&
-      row.trackName === TRACK_NAMES.DATA_SCIENCE &&
-      row.typeName === TYPE_NAMES.MARATHON_MATCH
+function reconcileLegacyMarathonHistoryRows (rows) {
+  const authoritativeLegacyRows = _.filter(rows || [], row =>
+    isLegacyNumericMarathonHistoryRow(row) &&
+    !!row.challengeName &&
+    !_.isNil(row.newRating)
+  )
+  const latestLegacyTimestamp = _.max(
+    _.map(authoritativeLegacyRows, row => row.eventDate ? row.eventDate.getTime() : 0)
+  ) || 0
 
-    return !(isMarathonHistory && isLegacyNumericChallenge && !row.challengeName)
+  return _.filter(rows || [], (row) => {
+    if (!row ||
+      row.trackName !== TRACK_NAMES.DATA_SCIENCE ||
+      row.typeName !== TYPE_NAMES.MARATHON_MATCH) {
+      return true
+    }
+
+    if (isLegacyNumericMarathonHistoryRow(row)) {
+      return !!row.challengeName
+    }
+
+    const eventTimestamp = row.eventDate ? row.eventDate.getTime() : 0
+    return !latestLegacyTimestamp || eventTimestamp > latestLegacyTimestamp
   })
 }
 
@@ -2051,7 +2065,7 @@ async function getLegacyMemberStatsRow (userId, groupId) {
           THEN 0
         ELSE 1
       END,
-      ms."id" ASC
+      ms."id" DESC
     LIMIT 1
   `
 
@@ -2269,6 +2283,114 @@ function buildUnifiedHistoryRecordsFromPayload (payload, dimensionLookup) {
   }
 
   return _.values(_.keyBy(records, record => `${record.trackId}::${record.typeId}::${record.challengeId}`))
+}
+
+/**
+ * Determine whether a history row is an imported Marathon Match legacy row that
+ * still uses a numeric challenge id from legacy stats history.
+ * @param {Object} row unified history row annotated with track/type names
+ * @returns {boolean} true when the row is a legacy Marathon Match history row
+ */
+function isLegacyNumericMarathonHistoryRow (row) {
+  const challengeId = normalizeChallengeLookupKey(row && row.challengeId)
+
+  return !!challengeId &&
+    /^\d+$/.test(challengeId) &&
+    row &&
+    row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+    row.typeName === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
+ * Load legacy Marathon Match history details for numeric imported history rows.
+ * The unified history table stores ratings and challenge ids but not the legacy
+ * challenge names, so this narrow fallback lets the read path distinguish
+ * authoritative imported legacy rows from unresolved numeric placeholders.
+ * @param {BigInt} userId member user id
+ * @param {Array<string>} challengeIds numeric legacy challenge ids to hydrate
+ * @returns {Promise<Map<string, Object>>} legacy history fields keyed by challenge id
+ */
+async function fetchLegacyMarathonHistoryLookup (userId, challengeIds) {
+  const normalizedChallengeIds = _.chain(challengeIds || [])
+    .map(normalizeChallengeLookupKey)
+    .filter(challengeId => challengeId && /^\d+$/.test(challengeId))
+    .uniq()
+    .value()
+
+  if (normalizedChallengeIds.length === 0) {
+    return new Map()
+  }
+
+  const rows = await prisma.$queryRaw`
+    SELECT dsh."challengeId",
+           dsh."challengeName",
+           dsh."date",
+           dsh."rating",
+           dsh."placement",
+           dsh."percentile"
+    FROM "members"."memberHistoryStats" hs
+    INNER JOIN "members"."memberDataScienceHistoryStats" dsh
+      ON dsh."historyStatsId" = hs."id"
+    WHERE hs."userId" = ${userId}
+      AND hs."isPrivate" = false
+      AND dsh."subTrack" = 'MARATHON_MATCH'
+      AND dsh."challengeId"::text IN (${Prisma.join(normalizedChallengeIds)})
+    ORDER BY dsh."date" DESC, dsh."id" DESC
+  `
+
+  const lookup = new Map()
+  _.forEach(rows || [], (row) => {
+    const challengeId = normalizeChallengeLookupKey(row.challengeId)
+    if (challengeId && !lookup.has(challengeId)) {
+      lookup.set(challengeId, row)
+    }
+  })
+
+  return lookup
+}
+
+/**
+ * Hydrate imported numeric Marathon Match history rows from legacy history
+ * details when those source rows are still available.
+ * @param {BigInt} userId member user id
+ * @param {Array<Object>} rows annotated unified history rows
+ * @returns {Promise<Array<Object>>} history rows with legacy names and metadata
+ */
+async function hydrateLegacyMarathonHistoryRows (userId, rows) {
+  const legacyChallengeIds = _.chain(rows || [])
+    .filter(isLegacyNumericMarathonHistoryRow)
+    .map(row => normalizeChallengeLookupKey(row.challengeId))
+    .filter(Boolean)
+    .value()
+
+  if (legacyChallengeIds.length === 0) {
+    return rows || []
+  }
+
+  const legacyLookup = await fetchLegacyMarathonHistoryLookup(userId, legacyChallengeIds)
+  if (legacyLookup.size === 0) {
+    return rows || []
+  }
+
+  return _.map(rows || [], (row) => {
+    if (!isLegacyNumericMarathonHistoryRow(row)) {
+      return row
+    }
+
+    const legacyRow = legacyLookup.get(normalizeChallengeLookupKey(row.challengeId))
+    if (!legacyRow) {
+      return row
+    }
+
+    return {
+      ...row,
+      challengeName: row.challengeName || legacyRow.challengeName,
+      eventDate: row.eventDate || legacyRow.date,
+      newRating: _.isNil(row.newRating) ? legacyRow.rating : row.newRating,
+      placement: toVisiblePlacement(row.placement) || toVisiblePlacement(legacyRow.placement),
+      percentile: _.isNil(row.percentile) ? legacyRow.percentile : row.percentile
+    }
+  })
 }
 
 /**
@@ -2706,7 +2828,8 @@ async function getHistoryStats (currentUser, handle, query) {
         unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, legacyCodeFallbackRows)
       }
 
-      annotatedRows = filterUnresolvedLegacyMarathonHistoryRows(annotatedRows)
+      annotatedRows = await hydrateLegacyMarathonHistoryRows(member.userId, annotatedRows)
+      annotatedRows = reconcileLegacyMarathonHistoryRows(annotatedRows)
 
       const orderedRows = orderUnifiedHistoryRows(recomputeUnifiedHistoryMostRecentFlags(annotatedRows))
       if (orderedRows.length > 0) {

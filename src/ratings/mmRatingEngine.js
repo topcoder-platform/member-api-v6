@@ -43,6 +43,7 @@ const RERATE_ACTOR = 'rerate-mm-stats'
 const SCORE_DIRECTION_MINIMIZE = 'MINIMIZE'
 const RATING_PATH_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_PATH_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
+const VALID_MM_SUBMISSION_STATUSES = ['ACTIVE', 'COMPLETED_WITHOUT_WIN', 'FAILED_REVIEW']
 const DEFAULT_MM_SCORING_CONFIG = Object.freeze({
   relativeScoringEnabled: true,
   scoreDirection: 'MAXIMIZE'
@@ -586,6 +587,117 @@ function toOptionalPlacement (value) {
 }
 
 /**
+ * Determine whether a Marathon Match submission status can contribute to final standings.
+ * Deleted submissions can retain historical system-test summations, but they are
+ * not authoritative standings rows and must not replace active placed submissions.
+ * Rows without a status are accepted for older in-memory callers; production
+ * review-api queries always provide and filter the status column.
+ * @param {*} value submission status value
+ * @returns {boolean} true when the submission is eligible for MM ratings/history
+ */
+function isEligibleMmSubmissionStatus (value) {
+  if (value === null || value === undefined) {
+    return true
+  }
+
+  return VALID_MM_SUBMISSION_STATUSES.includes(String(value || '').trim().toUpperCase())
+}
+
+/**
+ * Convert a date-like value into a comparable timestamp.
+ * @param {*} value source date value
+ * @returns {number} timestamp milliseconds, or 0 when unavailable
+ */
+function toTimestampSortValue (value) {
+  if (!value) {
+    return 0
+  }
+
+  const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+/**
+ * Compare two eligible MM result rows by final-standing priority.
+ * Placement rows are authoritative; otherwise higher aggregate score wins, with
+ * review and submission recency used only as deterministic tie-breakers.
+ * @param {Object} left candidate result row
+ * @param {Object} right candidate result row
+ * @returns {number} negative when left is a better standings row
+ */
+function compareMmResultRows (left, right) {
+  const leftPlacement = toOptionalPlacement(left && left.placement)
+  const rightPlacement = toOptionalPlacement(right && right.placement)
+
+  if (leftPlacement && !rightPlacement) {
+    return -1
+  }
+  if (!leftPlacement && rightPlacement) {
+    return 1
+  }
+  if (leftPlacement && rightPlacement && leftPlacement !== rightPlacement) {
+    return leftPlacement - rightPlacement
+  }
+
+  const leftScore = Number(left && left.aggregateScore)
+  const rightScore = Number(right && right.aggregateScore)
+  const hasLeftScore = Number.isFinite(leftScore)
+  const hasRightScore = Number.isFinite(rightScore)
+  if (hasLeftScore && !hasRightScore) {
+    return -1
+  }
+  if (!hasLeftScore && hasRightScore) {
+    return 1
+  }
+  if (hasLeftScore && hasRightScore && leftScore !== rightScore) {
+    return rightScore - leftScore
+  }
+
+  const leftReviewedAt = toTimestampSortValue((left && left.reviewedDate) || (left && left.createdAt))
+  const rightReviewedAt = toTimestampSortValue((right && right.reviewedDate) || (right && right.createdAt))
+  if (leftReviewedAt !== rightReviewedAt) {
+    return rightReviewedAt - leftReviewedAt
+  }
+
+  const leftSubmittedAt = toTimestampSortValue(left && left.submissionCreatedAt)
+  const rightSubmittedAt = toTimestampSortValue(right && right.submissionCreatedAt)
+  if (leftSubmittedAt !== rightSubmittedAt) {
+    return rightSubmittedAt - leftSubmittedAt
+  }
+
+  return String(right && right.submissionId).localeCompare(String(left && left.submissionId))
+}
+
+/**
+ * Select the best standings row for each Marathon Match challenge/member key.
+ * @param {Array<Object>} rows latest summation rows for candidate submissions
+ * @param {Function} keySelector returns the grouping key for one result row
+ * @returns {Array<Object>} one eligible result row per key
+ */
+function selectBestMmResultRows (rows, keySelector) {
+  const bestRowsByKey = new Map()
+  const candidateRows = rows || []
+
+  candidateRows.forEach((row) => {
+    if (!isEligibleMmSubmissionStatus(row && row.submissionStatus)) {
+      return
+    }
+
+    const key = String(keySelector(row) || '').trim()
+    if (!key) {
+      return
+    }
+
+    const existing = bestRowsByKey.get(key)
+    if (!existing || compareMmResultRows(row, existing) < 0) {
+      bestRowsByKey.set(key, row)
+    }
+  })
+
+  return Array.from(bestRowsByKey.values())
+}
+
+/**
  * Compute deterministic competition placements from participant scores.
  * @param {Array<Object>} participants Qubits participants containing coderId and score
  * @returns {Map<string, number>} placement keyed by coder id
@@ -643,7 +755,9 @@ function buildHistoryResultFields (participants, targetUserKey, sourceRow) {
 /**
  * Fetch all final Marathon Match system results for the target member.
  * The reviewSummation table is submission-scoped, so the latest final summation
- * per submission is selected before replay history is built. Some imported MM
+ * per submission is selected before replay history is built. Deleted
+ * submissions are ignored, and each challenge keeps the best eligible standings
+ * row for the target member. Some imported MM
  * summations have a null isFinal flag; those are treated as final unless the
  * row is explicitly marked false. Modern MM system-test summations expose
  * testProgressDetails while scoring is still in flight, so those rows are not
@@ -664,6 +778,8 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
           COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
           s."legacyChallengeId",
           s."placement",
+          s."status"::text AS "submissionStatus",
+          s."createdAt" AS "submissionCreatedAt",
           rs."aggregateScore",
           rs."reviewedDate",
           rs."createdAt",
@@ -685,6 +801,7 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
         INNER JOIN ${submissionRelation} s
           ON s."id" = rs."submissionId"
         WHERE s."memberId" = $1
+          AND s."status"::text = ANY($2::text[])
           AND (s."challengeId" IS NOT NULL OR s."legacyChallengeId" IS NOT NULL)
           AND rs."isFinal" IS NOT FALSE
           ${READY_MM_REVIEW_SUMMATION_FILTER}
@@ -695,6 +812,8 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
         "challengeId",
         "legacyChallengeId",
         "placement",
+        "submissionStatus",
+        "submissionCreatedAt",
         "aggregateScore",
         "reviewedDate",
         "createdAt",
@@ -703,18 +822,18 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
       WHERE "summationRank" = 1
       ORDER BY COALESCE("reviewedDate", "createdAt") ASC, "submissionId" ASC
     `,
-    [String(userId)]
+    [String(userId), VALID_MM_SUBMISSION_STATUSES]
   )
 
-  return result.rows
+  return selectBestMmResultRows(result.rows, row => row.challengeId)
 }
 
 /**
- * Fetch all challenge participants using the latest scored submission per member.
- * Historical Marathon Match data is read from review-api only; ready
- * reviewSummation aggregateScore is treated as already normalized for
- * higher-is-better ordering. Both submission.challengeId and
- * submission.legacyChallengeId are considered.
+ * Fetch all challenge participants using the best eligible standings submission per member.
+ * Historical Marathon Match data is read from review-api only; deleted submissions
+ * are ignored, placement-bearing rows are preferred, and ready reviewSummation
+ * aggregateScore is treated as already normalized for higher-is-better ordering.
+ * Both submission.challengeId and submission.legacyChallengeId are considered.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string|Object} challengeId challenge identifier or history entry with legacy aliases
  * @returns {Promise<Object>} participant rows and scoring config for the challenge
@@ -740,6 +859,7 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
           COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
           s."legacyChallengeId",
           s."placement",
+          s."status"::text AS "submissionStatus",
           s."createdAt" AS "submissionCreatedAt",
           rs."aggregateScore",
           rs."reviewedDate",
@@ -759,6 +879,7 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
             OR s."legacyChallengeId"::text = ANY($1::text[])
           )
           AND s."memberId" IS NOT NULL
+          AND s."status"::text = ANY($2::text[])
           AND rs."isFinal" IS NOT FALSE
           ${READY_MM_REVIEW_SUMMATION_FILTER}
       ),
@@ -772,46 +893,29 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
           AND "placement" IS NOT NULL
           AND "placement" > 0
         ORDER BY "userId", "createdAt" DESC
-      ),
-      "latestMemberSubmission" AS (
-        SELECT
-          "submissionId",
-          "memberId",
-          "challengeId",
-          "legacyChallengeId",
-          "placement",
-          "aggregateScore",
-          "reviewedDate",
-          "createdAt",
-          "submissionCreatedAt",
-          ROW_NUMBER() OVER (
-            PARTITION BY "memberId"
-            ORDER BY "submissionCreatedAt" DESC, "submissionId" DESC
-          ) AS "memberRank"
-        FROM "latestSubmissionSummation"
-        WHERE "summationRank" = 1
       )
       SELECT
-        lms."submissionId",
-        lms."memberId",
-        lms."challengeId",
-        lms."legacyChallengeId",
-        COALESCE(crp."placement", lms."placement") AS "placement",
-        lms."aggregateScore",
-        lms."reviewedDate",
-        lms."createdAt",
-        lms."submissionCreatedAt"
-      FROM "latestMemberSubmission" lms
+        lss."submissionId",
+        lss."memberId",
+        lss."challengeId",
+        lss."legacyChallengeId",
+        COALESCE(crp."placement", lss."placement") AS "placement",
+        lss."submissionStatus",
+        lss."aggregateScore",
+        lss."reviewedDate",
+        lss."createdAt",
+        lss."submissionCreatedAt"
+      FROM "latestSubmissionSummation" lss
       LEFT JOIN "challengeResultPlacement" crp
-        ON crp."userId"::text = lms."memberId"::text
-      WHERE lms."memberRank" = 1
-      ORDER BY lms."submissionCreatedAt" ASC, lms."submissionId" ASC
+        ON crp."userId"::text = lss."memberId"::text
+      WHERE lss."summationRank" = 1
+      ORDER BY lss."submissionCreatedAt" ASC, lss."submissionId" ASC
     `,
-    [challengeIds]
+    [challengeIds, VALID_MM_SUBMISSION_STATUSES]
   )
 
   return {
-    participantRows: result.rows,
+    participantRows: selectBestMmResultRows(result.rows, row => row.memberId),
     scoringConfig: getDefaultMmScoringConfig()
   }
 }
@@ -918,8 +1022,8 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
 
 /**
  * Build the ordered rerate history for the target member.
- * Multiple submission-level rows for one challenge are collapsed to the latest
- * final system result so the rating pass replays each challenge only once.
+ * Multiple submission-level rows for one challenge are collapsed to the best
+ * eligible final system result so the rating pass replays each challenge only once.
  * Challenge-level rating metadata decides whether the challenge is rated.
  * @param {Array<Object>} mmResultRows submission-level MM result rows
  * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by id
