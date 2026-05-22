@@ -675,6 +675,8 @@ describe('marathon match rating engine unit tests', () => {
 
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
+    should.equal(statsRow.maxRating, expectedTargetState.rating)
+    should.equal(statsRow.minRating, expectedTargetState.rating)
     should.equal(statsRow.challenges, 1)
     should.equal(statsRow.mostRecentEventDate.getTime(), challengeMetadata[challengeId].endDate.getTime())
     should.equal(statsRow.mostRecentSubmission.getTime(), baseReviewRows[0].createdAt.getTime())
@@ -689,6 +691,111 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTargetState.rating)
     should.equal(historyRow.placement, 1)
+  })
+
+  it('rerateMmTrack should persist Marathon Match rating bounds from canonical rerated history', async () => {
+    const firstChallengeId = 'mm-bound-first'
+    const secondChallengeId = 'mm-bound-second'
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [{
+        id: toBigInt(901),
+        userId: targetUserId,
+        trackId: DATA_SCIENCE_TRACK_ID,
+        typeId: MARATHON_MATCH_TYPE_ID,
+        challengeId: '19708',
+        newRating: 2955,
+        eventDate: new Date('2023-05-02T00:00:00.000Z')
+      }],
+      statsRows: [{
+        userId: targetUserId,
+        trackId: DATA_SCIENCE_TRACK_ID,
+        typeId: MARATHON_MATCH_TYPE_ID,
+        rating: 2187,
+        maxRating: 2187,
+        minRating: 1362,
+        isPrivate: false
+      }],
+      maxRatingRows: []
+    })
+    const reviewRows = [
+      {
+        submissionId: 'submission-target-first',
+        memberId: targetUserId,
+        challengeId: firstChallengeId,
+        placement: 1,
+        aggregateScore: 25,
+        reviewedDate: new Date('2024-06-01T10:00:00.000Z'),
+        createdAt: new Date('2024-06-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-first',
+        memberId: opponentUserId,
+        challengeId: firstChallengeId,
+        placement: 2,
+        aggregateScore: 10,
+        reviewedDate: new Date('2024-06-01T10:05:00.000Z'),
+        createdAt: new Date('2024-06-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:05:00.000Z')
+      },
+      {
+        submissionId: 'submission-target-second',
+        memberId: targetUserId,
+        challengeId: secondChallengeId,
+        placement: 2,
+        aggregateScore: 5,
+        reviewedDate: new Date('2024-07-01T10:00:00.000Z'),
+        createdAt: new Date('2024-07-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-07-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-second',
+        memberId: opponentUserId,
+        challengeId: secondChallengeId,
+        placement: 1,
+        aggregateScore: 30,
+        reviewedDate: new Date('2024-07-01T10:05:00.000Z'),
+        createdAt: new Date('2024-07-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-07-01T09:05:00.000Z')
+      }
+    ]
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient({
+        [firstChallengeId]: {
+          id: firstChallengeId,
+          endDate: new Date('2024-06-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        },
+        [secondChallengeId]: {
+          id: secondChallengeId,
+          endDate: new Date('2024-07-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        }
+      }),
+      null,
+      createMmReviewDbClient(reviewRows),
+      targetUserId
+    )
+
+    should.equal(result.ratingsUpdated, 2)
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    const canonicalRatings = state.historyRows
+      .filter(row => String(row.userId) === String(targetUserId) && !/^\d+$/.test(String(row.challengeId)))
+      .map(row => row.newRating)
+
+    should.equal(statsRow.maxRating, Math.max(...canonicalRatings))
+    should.equal(statsRow.minRating, Math.min(...canonicalRatings))
+    statsRow.maxRating.should.not.equal(2955)
   })
 
   it('rerateMmTrack should allow bulk rerates to skip rank recalculation', async () => {

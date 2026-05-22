@@ -400,6 +400,32 @@ function matchesNormalizedStatsFilters (dimension, options) {
 }
 
 /**
+ * Determine whether a review-api challengeResult row represents a real submission.
+ * Rows explicitly marked invalid, or rows from queries that expose an empty
+ * submissionId, are placeholders and should not create stats/history activity.
+ * Older in-memory callers that do not provide submission fields are treated as
+ * unknown instead of invalid so legacy fixture data can still exercise mapping.
+ * @param {Object} row raw challengeResult row
+ * @returns {boolean} true when the row can be used for stats/history backfill
+ */
+function isUsableReviewChallengeResultRow (row) {
+  if (!row || row.validSubmission === false) {
+    return false
+  }
+
+  if (Object.prototype.hasOwnProperty.call(row, 'submissionId')) {
+    const submissionId = row.submissionId === null || row.submissionId === undefined
+      ? ''
+      : String(row.submissionId).trim()
+    if (!submissionId) {
+      return false
+    }
+  }
+
+  return true
+}
+
+/**
  * Build the composite lookup key for one user's unified stats row.
  * @param {BigInt} userId member user id
  * @param {string} trackId unified track id
@@ -749,6 +775,10 @@ function getLatestAggregateTimestamp (record) {
  * @returns {Object|null} normalized aggregate delta or null when the row cannot be used
  */
 function buildReviewAggregateRecord (row, challenge, options) {
+  if (!isUsableReviewChallengeResultRow(row)) {
+    return null
+  }
+
   if (!challenge || !challenge.trackId || !challenge.typeId) {
     return null
   }
@@ -841,9 +871,12 @@ async function fetchReviewChallengeResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "placement", "createdAt"
+      SELECT "challengeId", "userId", "submissionId", "placement",
+             "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = $1
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
       ORDER BY "createdAt" ASC, "challengeId" ASC
     `,
     [String(userId)]
@@ -873,9 +906,12 @@ async function fetchReviewChallengeResultsByUserIds (reviewDbClient, userIds) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "placement", "createdAt"
+      SELECT "challengeId", "userId", "submissionId", "placement",
+             "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = ANY($1::text[])
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
       ORDER BY "userId" ASC, "createdAt" ASC, "challengeId" ASC
     `,
     [normalizedUserIds]
@@ -1010,6 +1046,8 @@ async function getReviewUserIds (reviewDbClient, challengesClient, options) {
         SELECT DISTINCT "userId"
         FROM ${challengeResultRelation}
         WHERE "userId" ~ '^[0-9]+$'
+          AND "validSubmission" IS DISTINCT FROM FALSE
+          AND "submissionId" IS NOT NULL
         ORDER BY "userId" ASC
       `
     )
@@ -1028,6 +1066,8 @@ async function getReviewUserIds (reviewDbClient, challengesClient, options) {
           FROM ${challengeResultRelation}
           WHERE "userId" ~ '^[0-9]+$'
             AND "challengeId" = ANY($1::text[])
+            AND "validSubmission" IS DISTINCT FROM FALSE
+            AND "submissionId" IS NOT NULL
         `,
         [challengeIds]
       )
@@ -2043,6 +2083,10 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
   const historyLookup = new Map()
 
   ;(reviewRows || []).forEach((row) => {
+    if (!isUsableReviewChallengeResultRow(row)) {
+      return
+    }
+
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !challenge.id || !challenge.trackId || !challenge.typeId || !isCompletedChallengeStatus(challenge.status)) {
       return

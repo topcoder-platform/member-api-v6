@@ -65,6 +65,7 @@ if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
 const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
+const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
 const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
 const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
 const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
@@ -519,6 +520,8 @@ async function fetchChallengeResultParticipantIds (reviewDbClient, challengeId) 
       FROM ${challengeResultRelation}
       WHERE "challengeId" = $1
         AND "userId" IS NOT NULL
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
         AND (
           "finalScore" IS NOT NULL OR
           ("placement" IS NOT NULL AND "placement" > 0)
@@ -891,13 +894,40 @@ function getReviewDbClientOrThrow () {
   return reviewDb
 }
 
+/**
+ * Determine whether a review-api challengeResult row represents a real submission.
+ * Rows explicitly marked invalid, or rows from queries that expose an empty
+ * submissionId, are placeholders and should not create stats/history activity.
+ * Older in-memory callers that do not provide submission fields are treated as
+ * unknown instead of invalid so legacy fallback tests can still exercise mapping.
+ * @param {Object} row raw challengeResult row
+ * @returns {boolean} true when the row can be used for stats/history fallback
+ */
+function isUsableReviewChallengeResultRow (row) {
+  if (!row || row.validSubmission === false) {
+    return false
+  }
+
+  if (Object.prototype.hasOwnProperty.call(row, 'submissionId')) {
+    const submissionId = _.isNil(row.submissionId) ? '' : String(row.submissionId).trim()
+    if (!submissionId) {
+      return false
+    }
+  }
+
+  return true
+}
+
 async function fetchReviewChallengeResultsForMember (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "createdAt"
+      SELECT "challengeId", "userId", "submissionId", "finalScore",
+             "placement", "rated", "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = $1
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
       ORDER BY "createdAt" ASC
     `,
     [userId.toString()]
@@ -1363,6 +1393,10 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
   const aggregateByKey = new Map()
 
   _.forEach(reviewRows, (row) => {
+    if (!isUsableReviewChallengeResultRow(row)) {
+      return
+    }
+
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !isCompletedChallenge(challenge) || !challenge.trackId || !challenge.typeId) {
       return
@@ -1474,6 +1508,10 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
   const fallbackRowsByChallengeKey = new Map()
 
   _.forEach(reviewRows || [], (row) => {
+    if (!isUsableReviewChallengeResultRow(row)) {
+      return
+    }
+
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !isCompletedChallenge(challenge) || !challenge.trackId || !challenge.typeId) {
       return
@@ -1813,15 +1851,21 @@ function dedupeUnifiedHistoryRows (rows) {
 /**
  * Reconcile imported Marathon Match legacy rows with canonical rerated rows.
  *
- * Hydrated numeric legacy rows are official migrated ratings and remain
- * authoritative through their latest event date. Canonical rerated rows after
- * that date are kept so newer unified-only challenges still appear. Numeric
- * rows that cannot be hydrated are still dropped as unresolved placeholders.
+ * After rerating, canonical UUID rows are authoritative and numeric legacy rows
+ * are hidden. Before rerating, hydrated numeric legacy rows remain authoritative
+ * and older overlapping canonical migration rows are suppressed. Numeric rows
+ * that cannot be hydrated are always dropped as unresolved placeholders.
  *
  * @param {Array<Object>} rows persisted and/or transient history rows
  * @returns {Array<Object>} reconciled Marathon Match history rows
  */
 function reconcileLegacyMarathonHistoryRows (rows) {
+  const visibleRows = selectVisibleMarathonHistoryRows(rows)
+  const hasReratedCanonicalRows = _.some(visibleRows, isReratedCanonicalMarathonHistoryRow)
+  if (hasReratedCanonicalRows) {
+    return visibleRows
+  }
+
   const authoritativeLegacyRows = _.filter(rows || [], row =>
     isLegacyNumericMarathonHistoryRow(row) &&
     !!row.challengeName &&
@@ -2299,6 +2343,169 @@ function isLegacyNumericMarathonHistoryRow (row) {
     row &&
     row.trackName === TRACK_NAMES.DATA_SCIENCE &&
     row.typeName === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
+ * Determine whether a history row is a canonical rerated Marathon Match row.
+ * Rerated UUID rows are the authoritative replay source after MM ratings are
+ * regenerated, while numeric legacy rows remain a migration fallback.
+ * @param {Object} row unified history row annotated with track/type names
+ * @returns {boolean} true when the row is a rerated canonical Marathon Match row
+ */
+function isReratedCanonicalMarathonHistoryRow (row) {
+  const challengeId = normalizeChallengeLookupKey(row && row.challengeId)
+
+  return !!challengeId &&
+    !/^\d+$/.test(challengeId) &&
+    row &&
+    row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+    row.typeName === TYPE_NAMES.MARATHON_MATCH &&
+    (row.createdBy === RERATE_MARATHON_ACTOR || row.updatedBy === RERATE_MARATHON_ACTOR) &&
+    !_.isNil(row.newRating)
+}
+
+/**
+ * Select Marathon Match rows that should drive visible history and rating bounds.
+ * Once a rerate has produced canonical UUID rows, imported numeric legacy rows are
+ * hidden so the response reflects the replayed rating timeline. Before a rerate,
+ * hydrated legacy rows remain available for legacy parity.
+ * @param {Array<Object>} rows annotated history rows for one response
+ * @returns {Array<Object>} rows after applying canonical-vs-legacy precedence
+ */
+function selectVisibleMarathonHistoryRows (rows) {
+  const hasReratedCanonicalRows = _.some(rows || [], isReratedCanonicalMarathonHistoryRow)
+
+  if (!hasReratedCanonicalRows) {
+    return _.filter(rows || [], (row) => {
+      if (isLegacyNumericMarathonHistoryRow(row)) {
+        return !!row.challengeName
+      }
+
+      return true
+    })
+  }
+
+  return _.filter(rows || [], row => !isLegacyNumericMarathonHistoryRow(row))
+}
+
+/**
+ * Select Marathon Match history rows that should drive aggregate rating bounds.
+ * The bounds path runs directly from memberStatsHistory, which does not store
+ * legacy challenge names, so unresolved-name filtering is intentionally skipped.
+ * @param {Array<Object>} rows annotated history rows for one Marathon Match stat
+ * @returns {Array<Object>} rows used to compute min/max rating
+ */
+function selectMarathonHistoryRowsForRatingBounds (rows) {
+  const hasReratedCanonicalRows = _.some(rows || [], isReratedCanonicalMarathonHistoryRow)
+  if (hasReratedCanonicalRows) {
+    return _.filter(rows || [], row => !isLegacyNumericMarathonHistoryRow(row))
+  }
+
+  return rows || []
+}
+
+/**
+ * Compute min/max rating values from selected history rows.
+ * @param {Array<Object>} rows history rows with newRating values
+ * @returns {{minRating: number|null, maxRating: number|null}} rating bounds
+ */
+function calculateHistoryRatingBounds (rows) {
+  const bounds = {
+    minRating: null,
+    maxRating: null
+  }
+
+  _.forEach(selectMarathonHistoryRowsForRatingBounds(rows), (row) => {
+    if (_.isNil(row && row.newRating)) {
+      return
+    }
+
+    const rating = Number(row.newRating)
+    if (!Number.isFinite(rating)) {
+      return
+    }
+
+    bounds.minRating = bounds.minRating === null ? rating : Math.min(bounds.minRating, rating)
+    bounds.maxRating = bounds.maxRating === null ? rating : Math.max(bounds.maxRating, rating)
+  })
+
+  return bounds
+}
+
+/**
+ * Determine whether a unified stats row is Data Science / Marathon Match.
+ * @param {Object} row annotated memberStats row
+ * @returns {boolean} true when the row is the Marathon Match aggregate
+ */
+function isMarathonStatsRow (row) {
+  return row &&
+    row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+    row.typeName === TYPE_NAMES.MARATHON_MATCH &&
+    row.trackId &&
+    row.typeId
+}
+
+/**
+ * Overlay Marathon Match aggregate min/max rating from history rows. This keeps
+ * stats responses correct immediately after rerates even when an older aggregate
+ * maxRating was left behind by migration or a previous rerate.
+ * @param {BigInt} userId member user id
+ * @param {Array<Object>} statsRows annotated memberStats rows
+ * @returns {Promise<Array<Object>>} stats rows with corrected MM rating bounds
+ */
+async function hydrateMarathonRatingBoundsFromHistory (userId, statsRows) {
+  const marathonStatsRows = _.filter(statsRows || [], isMarathonStatsRow)
+  if (marathonStatsRows.length === 0) {
+    return statsRows || []
+  }
+
+  const historyRows = await prisma.memberStatsHistory.findMany({
+    where: {
+      userId,
+      OR: _.map(marathonStatsRows, row => ({
+        trackId: row.trackId,
+        typeId: row.typeId
+      }))
+    },
+    select: {
+      trackId: true,
+      typeId: true,
+      challengeId: true,
+      newRating: true,
+      createdBy: true,
+      updatedBy: true
+    }
+  })
+
+  if (!historyRows || historyRows.length === 0) {
+    return statsRows || []
+  }
+
+  return _.map(statsRows || [], (row) => {
+    if (!isMarathonStatsRow(row)) {
+      return row
+    }
+
+    const annotatedHistoryRows = _.map(_.filter(historyRows, historyRow =>
+      String(historyRow.trackId) === String(row.trackId) &&
+      String(historyRow.typeId) === String(row.typeId)
+    ), historyRow => ({
+      ...historyRow,
+      trackName: TRACK_NAMES.DATA_SCIENCE,
+      typeName: TYPE_NAMES.MARATHON_MATCH
+    }))
+    const bounds = calculateHistoryRatingBounds(annotatedHistoryRows)
+
+    if (bounds.minRating === null || bounds.maxRating === null) {
+      return row
+    }
+
+    return {
+      ...row,
+      minRating: bounds.minRating,
+      maxRating: bounds.maxRating
+    }
+  })
 }
 
 /**
@@ -3170,7 +3377,11 @@ async function getUnifiedMemberStats (member, groupIds, query, fields) {
 
     if (unifiedStats && unifiedStats.length > 0) {
       const rankedStats = await hydrateComputedGlobalRanks(unifiedStats)
-      const scopedStats = _.map(annotateUnifiedDimensionRows(rankedStats, dimensionLookup), stat => ({
+      const boundedStats = await hydrateMarathonRatingBoundsFromHistory(
+        member.userId,
+        annotateUnifiedDimensionRows(rankedStats, dimensionLookup)
+      )
+      const scopedStats = _.map(boundedStats, stat => ({
         ...stat,
         groupId: _.toNumber(groupId)
       }))
@@ -3247,7 +3458,11 @@ async function getMemberStats (currentUser, handle, query, throwError) {
 
       if (unifiedStats && unifiedStats.length > 0) {
         const rankedStats = await hydrateComputedGlobalRanks(unifiedStats)
-        const scopedStats = _.map(annotateUnifiedDimensionRows(rankedStats, dimensionLookup), stat => ({
+        const boundedStats = await hydrateMarathonRatingBoundsFromHistory(
+          member.userId,
+          annotateUnifiedDimensionRows(rankedStats, dimensionLookup)
+        )
+        const scopedStats = _.map(boundedStats, stat => ({
           ...stat,
           groupId: _.toNumber(groupId)
         }))

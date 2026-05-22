@@ -798,6 +798,79 @@ describe('recalculateMemberStats unit tests', () => {
     results[0].mostRecentSubmission.toISOString().should.equal('2024-03-03T10:00:00.000Z')
   })
 
+  it('should ignore invalid or placeholder review challenge results', () => {
+    const reviewRows = [
+      {
+        challengeId: 'valid-challenge',
+        userId: '456',
+        submissionId: 'submission-1',
+        validSubmission: true,
+        placement: 1,
+        createdAt: '2024-03-01T10:00:00.000Z'
+      },
+      {
+        challengeId: 'invalid-challenge',
+        userId: '456',
+        submissionId: 'submission-2',
+        validSubmission: false,
+        placement: 1,
+        createdAt: '2024-03-02T10:00:00.000Z'
+      },
+      {
+        challengeId: 'missing-submission-challenge',
+        userId: '456',
+        submissionId: null,
+        validSubmission: true,
+        placement: 1,
+        createdAt: '2024-03-03T10:00:00.000Z'
+      }
+    ]
+    const challengeMetadataById = new Map([
+      ['valid-challenge', {
+        id: 'valid-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'COMPLETED',
+        endDate: '2024-03-02T00:00:00.000Z'
+      }],
+      ['invalid-challenge', {
+        id: 'invalid-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'COMPLETED',
+        endDate: '2024-03-03T00:00:00.000Z'
+      }],
+      ['missing-submission-challenge', {
+        id: 'missing-submission-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'COMPLETED',
+        endDate: '2024-03-04T00:00:00.000Z'
+      }]
+    ])
+
+    const aggregateRows = recalculateMemberStats.buildAggregatedStatsFromReviewResults(
+      reviewRows,
+      challengeMetadataById,
+      {}
+    )
+    const historyRows = recalculateMemberStats.buildSupplementalHistoryRowsFromCompletedChallenges(
+      global.BigInt(456),
+      reviewRows,
+      challengeMetadataById,
+      [],
+      {}
+    )
+
+    aggregateRows.should.have.length(1)
+    aggregateRows[0].challenges.should.equal(1)
+    aggregateRows[0].wins.should.equal(1)
+    aggregateRows[0].mostRecentEventDate.toISOString().should.equal('2024-03-02T00:00:00.000Z')
+
+    historyRows.should.have.length(1)
+    historyRows[0].challengeId.should.equal('valid-challenge')
+  })
+
   it('should synchronize memberMaxRating from the highest current memberStats rating', async () => {
     const fakeChallengesClient = {
       $queryRaw (strings) {

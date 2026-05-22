@@ -223,6 +223,71 @@ function cloneState (state) {
 }
 
 /**
+ * Normalize a rating value for rating-bound calculations.
+ * @param {*} value candidate rating value
+ * @returns {number|null} integer rating, or null when unavailable
+ */
+function toOptionalRating (value) {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const rating = Number(value)
+  return Number.isFinite(rating) ? Math.trunc(rating) : null
+}
+
+/**
+ * Determine whether a challenge id is a numeric legacy stats-history id.
+ * @param {*} value candidate challenge id
+ * @returns {boolean} true when the id is a legacy numeric id
+ */
+function isLegacyNumericChallengeId (value) {
+  return /^\d+$/.test(String(value || '').trim())
+}
+
+/**
+ * Add one rating to a mutable min/max rating bounds object.
+ * @param {{minRating: number|null, maxRating: number|null}} bounds current bounds
+ * @param {*} value candidate rating value
+ * @returns {{minRating: number|null, maxRating: number|null}} updated bounds
+ */
+function extendRatingBounds (bounds, value) {
+  const rating = toOptionalRating(value)
+  if (rating === null) {
+    return bounds
+  }
+
+  bounds.minRating = bounds.minRating === null ? rating : Math.min(bounds.minRating, rating)
+  bounds.maxRating = bounds.maxRating === null ? rating : Math.max(bounds.maxRating, rating)
+  return bounds
+}
+
+/**
+ * Build min/max rating bounds from existing canonical history rows before a rerate
+ * start point. Numeric legacy import rows are ignored when any UUID history exists,
+ * because rerated MM aggregates should describe the canonical replayed timeline.
+ * @param {Array<Object>} historyRows existing memberStatsHistory rows sorted by event date
+ * @param {number} seedIndex last existing row before the rerate start
+ * @returns {{minRating: number|null, maxRating: number|null}} rating bounds
+ */
+function buildSeedRatingBounds (historyRows, seedIndex) {
+  const bounds = {
+    minRating: null,
+    maxRating: null
+  }
+  if (!Array.isArray(historyRows) || seedIndex < 0) {
+    return bounds
+  }
+
+  const seedRows = historyRows.slice(0, seedIndex + 1)
+  const canonicalRows = seedRows.filter(row => !isLegacyNumericChallengeId(row && row.challengeId))
+  const ratingRows = canonicalRows.length > 0 ? canonicalRows : seedRows
+
+  ratingRows.forEach(row => extendRatingBounds(bounds, row && row.newRating))
+  return bounds
+}
+
+/**
  * Build the cache key used for participant state maps.
  * @param {string|number|BigInt} userId participant identifier
  * @returns {string} normalized cache key
@@ -1620,6 +1685,10 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
   let challengesProcessed = 0
   let ratingPathChallengesProcessed = 0
   let ratingsUpdated = 0
+  const targetRatingBounds = {
+    minRating: null,
+    maxRating: null
+  }
   const shouldRecalculateRanks = options.recalculateRanks !== false
 
   for (let index = 0; index < pathHistory.length; index += 1) {
@@ -1671,6 +1740,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
 
     targetChallengeCount += 1
     targetMostRecentEventDate = historyEntry.eventDate
+    extendRatingBounds(targetRatingBounds, updatedTarget.rating)
     const targetHistoryFields = buildHistoryResultFields(
       participants,
       targetUserKey,
@@ -1692,7 +1762,9 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
         dimensionIds,
         {
           challenges: targetChallengeCount,
-          mostRecentEventDate: targetMostRecentEventDate
+          mostRecentEventDate: targetMostRecentEventDate,
+          maxRating: targetRatingBounds.maxRating,
+          minRating: targetRatingBounds.minRating
         }
       )
 
@@ -1806,22 +1878,25 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
 
   const participantHistoryByUserId = new Map()
   let targetState = createDefaultState()
+  let targetSeedHistoryRows = []
+  let targetSeedIndex = -1
 
   if (startIndex > 0) {
     await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
 
-    const targetHistoryRows = participantHistoryByUserId.get(targetUserKey) || []
-    let startSeedIndex = findHistoryIndexForChallenge(targetHistoryRows, targetHistory[startIndex - 1])
+    targetSeedHistoryRows = participantHistoryByUserId.get(targetUserKey) || []
+    targetSeedIndex = findHistoryIndexForChallenge(targetSeedHistoryRows, targetHistory[startIndex - 1])
 
-    if (startSeedIndex < 0) {
-      startSeedIndex = findHistorySeedIndexForChallenge(targetHistoryRows, targetHistory[startIndex])
+    if (targetSeedIndex < 0) {
+      targetSeedIndex = findHistorySeedIndexForChallenge(targetSeedHistoryRows, targetHistory[startIndex])
     }
 
-    targetState = createHistorySeedState(targetHistoryRows, startSeedIndex)
+    targetState = createHistorySeedState(targetSeedHistoryRows, targetSeedIndex)
   }
 
   let challengesProcessed = 0
   let ratingsUpdated = 0
+  const targetRatingBounds = buildSeedRatingBounds(targetSeedHistoryRows, targetSeedIndex)
   const shouldRecalculateRanks = options.recalculateRanks !== false
 
   for (let index = startIndex; index < targetHistory.length; index += 1) {
@@ -1869,6 +1944,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     }
 
     targetState = cloneState(updatedTarget)
+    extendRatingBounds(targetRatingBounds, updatedTarget.rating)
     challengesProcessed += 1
     ratingsUpdated += 1
     const targetHistoryFields = buildHistoryResultFields(
@@ -1883,7 +1959,11 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
         normalizedUserId,
         updatedTarget,
         dimensionIds,
-        targetAggregateFields
+        {
+          ...targetAggregateFields,
+          maxRating: targetRatingBounds.maxRating,
+          minRating: targetRatingBounds.minRating
+        }
       )
 
       await upsertHistoryRow(
