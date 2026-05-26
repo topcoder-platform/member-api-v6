@@ -57,9 +57,11 @@
  *   legacy rating/rank fields on the rebuilt aggregate rows. When rerates are
  *   enabled, legacy-backed review rows preserve challengeResult oldRating/newRating
  *   because those rows already carry authoritative legacy rating output.
+ * - Development rank recalculation runs once per batch after concurrent member rerates
+ *   complete, avoiding per-user rank update contention.
  * - --concurrency controls how many users are processed in parallel within each batch.
  * - Batch logs include timing breakdowns for preload queries, user aggregation,
- *   stats/history writes, rerates, and processed-user checkpoint writes.
+ *   stats/history writes, rerates, rank recalculation, and processed-user checkpoint writes.
  * - Slow-user samples are emitted for aggregate/history/rerate phases so the
  *   worst outliers can be investigated first.
  * - Processed member user IDs are written after each completed batch so long runs can
@@ -78,6 +80,7 @@ const { getMembersClient, getChallengesClient } = require('../common/prisma')
 const helper = require('../common/helper')
 const reviewDb = require('../common/reviewDb')
 const { assertChallengeResultRelation, resolveChallengeResultRelation } = require('../common/reviewDbHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const {
   TYPE_NAMES,
@@ -104,6 +107,7 @@ const CHALLENGE_WINNER_HISTORY_TYPES = ['PLACEMENT', 'PASSED_REVIEW']
 const CHALLENGE_WINNER_HISTORY_TYPE_SQL = CHALLENGE_WINNER_HISTORY_TYPES.map(type => `'${type}'`).join(', ')
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'recalculateMemberStats.processedUserIds.json'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
+const RERATE_ACTOR = 'rerate-member-stats'
 const NULL_PRESERVED_STAT_FIELDS = [
   'rating',
   'avgRank',
@@ -3584,6 +3588,7 @@ async function main () {
   let updatedHistoryFlags = 0
   let reratedChallenges = 0
   let reratedRatings = 0
+  let recalculatedRankRows = 0
   let syncedMemberMaxRatings = 0
   let deletedMemberMaxRatings = 0
 
@@ -3669,6 +3674,7 @@ async function main () {
       let historyDurationMs = 0
       let historyRefreshDurationMs = 0
       let rerateDurationMs = 0
+      let rankRecalculationDurationMs = 0
       let maxRatingSyncDurationMs = 0
 
       for (const userId of batchUserIds) {
@@ -3835,6 +3841,7 @@ async function main () {
       let batchHistoryRefreshes = 0
       let batchReratedChallenges = 0
       let batchReratedRatings = 0
+      let batchRecalculatedRankRows = 0
       let batchSyncedMemberMaxRatings = 0
       let batchDeletedMemberMaxRatings = 0
 
@@ -3912,7 +3919,8 @@ async function main () {
             mapWithConcurrency(existingBatchUserIds, options.concurrency, async (userId) => {
               const rerateStartedAt = startTimer()
               const rerateResult = await rerateDevTrack(membersClient, challengesClient, reviewDb, userId, null, {
-                useLegacySourceRatings: true
+                useLegacySourceRatings: true,
+                recalculateRanks: false
               })
               return {
                 userId,
@@ -3939,6 +3947,24 @@ async function main () {
           if (batchReratedChallenges > 0) {
             logInfo(`Re-rated ${batchReratedChallenges} development challenge(s) for users ${batchStart + 1}-${processedUsers}`)
           }
+
+          if (batchReratedRatings > 0) {
+            const {
+              result: updatedRankRows,
+              durationMs
+            } = await measureAsyncStep(async () => recalculateRatingRanks(
+              membersClient,
+              {
+                trackId: legacyLookupCache.trackIds.DEVELOP,
+                typeId: legacyLookupCache.typeIds.CHALLENGE || resolveChallengeTypeId(TYPE_NAMES.CHALLENGE)
+              },
+              { updatedBy: RERATE_ACTOR }
+            ))
+            rankRecalculationDurationMs = durationMs
+            batchRecalculatedRankRows = updatedRankRows
+            recalculatedRankRows += updatedRankRows
+            logInfo(`Recomputed ${updatedRankRows} development challenge rank row(s) after batch rerates`)
+          }
         }
 
         if (!options.skipRatings) {
@@ -3961,7 +3987,7 @@ async function main () {
       const { durationMs: checkpointDurationMs } = await measureAsyncStep(async () => processedUserIdsWriter.appendUserIds(existingBatchUserIds))
       const batchTotalDurationMs = getElapsedMilliseconds(batchStartedAt)
 
-      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}, maxRatingUpserts=${batchSyncedMemberMaxRatings}, maxRatingDeletes=${batchDeletedMemberMaxRatings}`)
+      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}, rankRows=${batchRecalculatedRankRows}, maxRatingUpserts=${batchSyncedMemberMaxRatings}, maxRatingDeletes=${batchDeletedMemberMaxRatings}`)
       logInfo(`Batch ${batchNumber}/${totalBatches} timings: ${formatTimingSegments([
         { label: 'existingUsers', durationMs: existingUsersDurationMs },
         { label: 'legacyIds', durationMs: legacyIdsDurationMs },
@@ -3976,6 +4002,7 @@ async function main () {
         !options.csvOnly && !options.skipHistory ? { label: 'historyBackfill', durationMs: historyDurationMs } : null,
         !options.csvOnly ? { label: 'historyMostRecent', durationMs: historyRefreshDurationMs } : null,
         !options.csvOnly && !options.skipRatings && !options.skipRerate ? { label: 'rerate', durationMs: rerateDurationMs } : null,
+        !options.csvOnly && !options.skipRatings && !options.skipRerate ? { label: 'rankRecalc', durationMs: rankRecalculationDurationMs } : null,
         !options.csvOnly && !options.skipRatings ? { label: 'maxRatingSync', durationMs: maxRatingSyncDurationMs } : null,
         { label: 'checkpoint', durationMs: checkpointDurationMs },
         { label: 'total', durationMs: batchTotalDurationMs }
@@ -3990,7 +4017,7 @@ async function main () {
     }
 
     const totalRuntimeMs = getElapsedMilliseconds(scriptStartedAt)
-    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), synchronized ${syncedMemberMaxRatings} memberMaxRating row(s), deleted ${deletedMemberMaxRatings} stale memberMaxRating row(s), total runtime ${formatDuration(totalRuntimeMs)}`)
+    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), recomputed ${recalculatedRankRows} development challenge rank row(s), synchronized ${syncedMemberMaxRatings} memberMaxRating row(s), deleted ${deletedMemberMaxRatings} stale memberMaxRating row(s), total runtime ${formatDuration(totalRuntimeMs)}`)
   } finally {
     await Promise.allSettled([
       membersClient.$disconnect(),
