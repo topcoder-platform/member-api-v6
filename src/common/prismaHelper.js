@@ -3,7 +3,9 @@ const helper = require('./helper')
 const errors = require('./errors')
 const {
   getCanonicalTrackName,
-  getCanonicalTypeName
+  getCanonicalTypeName,
+  resolveTrackNameFromLookup,
+  resolveTypeNameFromLookup
 } = require('./statsDimensionHelper')
 
 const designBasicFields = [
@@ -49,6 +51,8 @@ const auditFields = [
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
 ]
 
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function getUnifiedTrackName (trackId) {
   const canonical = getCanonicalTrackName(trackId)
   return canonical || String(trackId || '').toUpperCase().trim()
@@ -57,6 +61,10 @@ function getUnifiedTrackName (trackId) {
 function getUnifiedTypeName (typeId) {
   const canonical = getCanonicalTypeName(typeId)
   return canonical || typeId
+}
+
+function isUuidValue (value) {
+  return uuidPattern.test(String(value || '').trim())
 }
 
 function toUnixTime (value) {
@@ -167,6 +175,51 @@ function toComparableTimestamp (value) {
 }
 
 /**
+ * Attach canonical track/type names to memberStats rows using the shared
+ * challenge dimension lookup. Profile and search endpoints load only compact
+ * memberStats rows for max rating derivation, so this annotation keeps UUID
+ * challenge dimension ids from leaking into member maxRating responses.
+ * @param {Array<Object>} statsRows loaded memberStats rows
+ * @param {Object} dimensionLookup shared challenge track/type lookup
+ * @returns {Array<Object>} rows annotated with trackName/typeName when resolvable
+ */
+function annotateStatsRowsWithDimensionNames (statsRows, dimensionLookup) {
+  return _.map(statsRows || [], row => ({
+    ...row,
+    trackName: row.trackName || resolveTrackNameFromLookup(dimensionLookup, row.trackId),
+    typeName: row.typeName || resolveTypeNameFromLookup(dimensionLookup, row.typeId)
+  }))
+}
+
+/**
+ * Annotate a member object's loaded memberStats rows in place for later response
+ * conversion. The object is mutated because convertMember already mutates the
+ * Prisma member payload into the public response shape.
+ * @param {Object} member member payload that may include memberStats
+ * @param {Object} dimensionLookup shared challenge track/type lookup
+ * @returns {Object} the same member object
+ */
+function annotateMemberStatsWithDimensionNames (member, dimensionLookup) {
+  if (member && _.isArray(member.memberStats)) {
+    member.memberStats = annotateStatsRowsWithDimensionNames(member.memberStats, dimensionLookup)
+  }
+  return member
+}
+
+/**
+ * Determine whether loaded memberStats rows need challenge dimension lookup
+ * annotation before deriving current maxRating labels.
+ * @param {Object|Array<Object>} memberOrMembers one member object or a list
+ * @returns {boolean} true when any loaded stats row contains UUID dimensions
+ */
+function shouldResolveCurrentMaxRatingDimensions (memberOrMembers) {
+  const members = _.isArray(memberOrMembers) ? memberOrMembers : [memberOrMembers]
+  return _.some(members, member => _.some(member && member.memberStats, row =>
+    isUuidValue(row && row.trackId) || isUuidValue(row && row.typeId)
+  ))
+}
+
+/**
  * Resolve the highest current rating from unified memberStats rows.
  * When stats rows are loaded, only their current `rating` values count toward the
  * response. Rows missing unified track/type ids are ignored so partially-migrated
@@ -226,6 +279,49 @@ function resolveCurrentMaxRating (maxRating, statsRows) {
  */
 function buildCurrentMaxRatingResponse (maxRating, statsRows) {
   return buildMaxRatingResponse(resolveCurrentMaxRating(maxRating, statsRows))
+}
+
+function applyMaxRatingToRank (rank, maxRating) {
+  if (!rank || !maxRating || _.isNil(maxRating.rating) || !_.isNil(rank.rating)) {
+    return
+  }
+
+  rank.rating = maxRating.rating
+}
+
+/**
+ * Fill an empty subtrack rank rating from the resolved current max rating when
+ * both point at the same track/type. This protects unfiltered stats responses
+ * from stale aggregate rows that have counters but no rank snapshot.
+ * @param {Object} item member stats response being built
+ */
+function applyMaxRatingRankFallback (item) {
+  const maxRating = item && item.maxRating
+  if (!maxRating || _.isNil(maxRating.rating) || !maxRating.track || !maxRating.subTrack) {
+    return
+  }
+
+  const trackName = getUnifiedTrackName(maxRating.track)
+  const typeName = getUnifiedTypeName(maxRating.subTrack)
+
+  if (trackName === 'DATA_SCIENCE') {
+    const statsItem = item.DATA_SCIENCE && item.DATA_SCIENCE[typeName]
+    if (statsItem) {
+      statsItem.rank = statsItem.rank || {}
+      applyMaxRatingToRank(statsItem.rank, maxRating)
+    }
+    return
+  }
+
+  if (trackName === 'DEVELOP' && item.DEVELOP && _.isArray(item.DEVELOP.subTracks)) {
+    const statsItem = _.find(item.DEVELOP.subTracks, subTrack =>
+      getUnifiedTypeName(subTrack.id || subTrack.name) === typeName
+    )
+    if (statsItem) {
+      statsItem.rank = statsItem.rank || {}
+      applyMaxRatingToRank(statsItem.rank, maxRating)
+    }
+  }
 }
 
 /**
@@ -670,6 +766,8 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
       }, _.isNil)
     }
   })
+
+  applyMaxRatingRankFallback(item)
 
   return fields ? _.pick(item, fields) : item
 }
@@ -1221,6 +1319,9 @@ module.exports = {
   buildSearchMemberFilter,
   buildUnifiedStatsHistoryResponse,
   currentMaxRatingStatsSelect,
+  annotateStatsRowsWithDimensionNames,
+  annotateMemberStatsWithDimensionNames,
+  shouldResolveCurrentMaxRatingDimensions,
   unifiedStatsIncludeParams,
   skillsIncludeParams,
   convertDate,

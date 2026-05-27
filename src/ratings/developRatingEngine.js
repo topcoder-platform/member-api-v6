@@ -17,7 +17,9 @@ const {
   resolveTrackIdFromLookup,
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
-const { runQubitsRating, getRatingColor, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
+const { runQubitsRating, DEFAULT_VOLATILITY, FIRST_VOLATILITY } = require('./qubitsAlgorithm')
+const { syncCurrentMemberMaxRating } = require('./memberMaxRatingSync')
 const {
   RATING_METADATA_SELECT,
   isChallengeRated
@@ -28,6 +30,7 @@ const TYPE_NAME = 'Challenge'
 const CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
 const CHALLENGE_TYPE_NAMES = [TYPE_NAMES.CHALLENGE, TYPE_NAMES.CODE]
 const RERATE_ACTOR = 'rerate-member-stats'
+const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
@@ -165,12 +168,60 @@ function isDevelopmentRatingChallenge (challenge) {
   return normalizedTrackName === CHALLENGE_TRACK_NAME && supportedTypeNames.includes(normalizedTypeName)
 }
 
+function isCompletedChallenge (challenge) {
+  const status = String(challenge && challenge.status ? challenge.status : '').trim().toUpperCase()
+  return !status || status === COMPLETED_CHALLENGE_STATUS
+}
+
 function createDefaultState () {
   return {
     rating: 0,
     volatility: 0,
     numRatings: 0
   }
+}
+
+function hasRatingCheckpoint (historyRow) {
+  return historyRow && Number.isFinite(Number(historyRow.newRating)) && Number(historyRow.newRating) > 0
+}
+
+/**
+ * Normalize a source rating value into a positive integer checkpoint.
+ * @param {*} value raw rating value
+ * @returns {number|null} positive rating or null when unavailable
+ */
+function toSourceRating (value) {
+  const rating = Number(value)
+  return Number.isFinite(rating) && rating > 0 ? Math.round(rating) : null
+}
+
+function findRatingCheckpointIndex (historyRows, seedIndex) {
+  if (!Array.isArray(historyRows) || seedIndex < 0) {
+    return -1
+  }
+
+  for (let index = Math.min(seedIndex, historyRows.length - 1); index >= 0; index -= 1) {
+    if (hasRatingCheckpoint(historyRows[index])) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+function countRatingCheckpointsThroughIndex (historyRows, endIndex) {
+  if (!Array.isArray(historyRows) || endIndex < 0) {
+    return 0
+  }
+
+  let count = 0
+  for (let index = 0; index <= endIndex && index < historyRows.length; index += 1) {
+    if (hasRatingCheckpoint(historyRows[index])) {
+      count += 1
+    }
+  }
+
+  return count
 }
 
 /**
@@ -197,7 +248,7 @@ function buildUserStateKey (userId) {
 /**
  * Resolve the unified track/type UUIDs used for DEVELOPMENT / Challenge rows.
  * @param {Object} challengeClient prisma challenge client
- * @returns {Promise<{trackId: string, typeId: string}>} resolved unified ids
+ * @returns {Promise<{trackId: string, typeId: string, trackName: string, typeName: string, dimensionLookup: Object}>} resolved unified ids
  */
 async function resolveUnifiedDimensionIds (challengeClient) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
@@ -210,31 +261,35 @@ async function resolveUnifiedDimensionIds (challengeClient) {
 
   return {
     trackId,
-    typeId
+    typeId,
+    trackName: TRACK_NAME,
+    typeName: TYPE_NAME,
+    dimensionLookup
   }
 }
 
 /**
- * Build a rerate seed state from the latest authoritative history row before a challenge.
- * Historical volatility is used when available. Older history rows that predate
- * volatility checkpoints fall back to the default Qubits volatility.
+ * Build a rerate seed state from the latest authoritative rating checkpoint at or
+ * before a history index. Aggregate-only history rows can have null ratings and
+ * must not count as prior rated events. Historical volatility is used when available.
+ * Older history rows that predate volatility checkpoints fall back to the default
+ * Qubits volatility.
  * @param {Array<Object>} historyRows participant history rows sorted by event date and id
  * @param {number} seedIndex index of the last history row before the target challenge
  * @returns {Object} seeded rating state
  */
 function createHistorySeedState (historyRows, seedIndex) {
-  if (!Array.isArray(historyRows) || seedIndex < 0 || !historyRows[seedIndex]) {
+  const checkpointIndex = findRatingCheckpointIndex(historyRows, seedIndex)
+  if (checkpointIndex < 0 || !historyRows[checkpointIndex]) {
     return createDefaultState()
   }
 
   return {
-    rating: Number.isFinite(Number(historyRows[seedIndex].newRating))
-      ? Number(historyRows[seedIndex].newRating)
-      : 0,
-    volatility: Number.isFinite(Number(historyRows[seedIndex].newVolatility))
-      ? Number(historyRows[seedIndex].newVolatility)
+    rating: Number(historyRows[checkpointIndex].newRating),
+    volatility: Number.isFinite(Number(historyRows[checkpointIndex].newVolatility))
+      ? Number(historyRows[checkpointIndex].newVolatility)
       : DEFAULT_VOLATILITY,
-    numRatings: seedIndex + 1
+    numRatings: countRatingCheckpointsThroughIndex(historyRows, checkpointIndex)
   }
 }
 
@@ -295,29 +350,6 @@ function findHistorySeedIndexForChallenge (historyRows, challengeEntry) {
   return seedIndex
 }
 
-/**
- * Compute the highest historical rating reached through the supplied history index.
- * @param {Array<Object>} historyRows participant history rows sorted by event date and id
- * @param {number} endIndex inclusive history index bound
- * @returns {number} maximum rating through that bound
- */
-function computeMaxRatingFromHistory (historyRows, endIndex) {
-  if (!Array.isArray(historyRows) || endIndex < 0) {
-    return 0
-  }
-
-  let maxRating = 0
-
-  for (let index = 0; index <= endIndex; index += 1) {
-    const rating = Number(historyRows[index].newRating)
-    if (Number.isFinite(rating) && rating > maxRating) {
-      maxRating = rating
-    }
-  }
-
-  return maxRating
-}
-
 function normalizeScore (row) {
   const finalScore = Number(row.finalScore)
   if (Number.isFinite(finalScore)) {
@@ -335,27 +367,35 @@ function normalizeScore (row) {
 /**
  * Resolve whether one participant row should count toward Development rerating.
  * review-api challengeResult.rated can be false for backfilled rows when the
- * producer lacked explicit challenge metadata, so rerates rely on the final
- * score/placement emitted for the participant while challenge-level rated
- * intent is enforced separately.
+ * producer lacked explicit challenge metadata, so rerates rely on a usable
+ * positive score or placement while challenge-level rated intent is enforced
+ * separately.
  * @param {Object} row challengeResult row
  * @returns {boolean} true when the participant should be included in rerating
  */
 function isParticipantEligibleForRating (row) {
-  const finalScore = Number(row && row.finalScore)
-  if (Number.isFinite(finalScore)) {
-    return true
+  if (!row || row.validSubmission === false) {
+    return false
   }
 
   const placement = Number(row && row.placement)
-  return Number.isInteger(placement) && placement > 0
+  if (Number.isInteger(placement) && placement > 0) {
+    return true
+  }
+
+  const finalScore = Number(row && row.finalScore)
+  if (Number.isFinite(finalScore) && finalScore > 0) {
+    return true
+  }
+
+  return false
 }
 
 async function fetchReviewResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "validSubmission", "oldRating", "newRating", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = $1
       ORDER BY "createdAt" ASC
@@ -376,7 +416,7 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeRef) {
   const placeholders = challengeIds.map((_, index) => `$${index + 1}`).join(', ')
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "createdAt"
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "validSubmission", "oldRating", "newRating", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "challengeId" IN (${placeholders})
       ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC
@@ -435,6 +475,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
       id: true,
       legacyId: true,
       endDate: true,
+      status: true,
       track: {
         select: {
           name: true
@@ -464,7 +505,52 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
   return metadataByChallengeId
 }
 
-function buildTargetHistory (reviewRows, challengeMetadataById) {
+/**
+ * Resolve whether a challenge-api row is backed by migrated legacy metadata.
+ * Some environments keep review-api rows keyed by legacy numeric ids, while
+ * others have canonicalized those rows to challenge UUIDs. Bulk rerates use
+ * this marker to preserve source oldRating/newRating for migrated challenges.
+ * @param {Object} challenge challenge metadata resolved from challenge-api
+ * @returns {boolean} true when the challenge carries legacy metadata
+ */
+function hasLegacyChallengeMetadata (challenge) {
+  if (!challenge) {
+    return false
+  }
+
+  if (challenge.legacyId !== null && challenge.legacyId !== undefined) {
+    return true
+  }
+
+  const legacyRecord = challenge.legacyRecord
+  if (Array.isArray(legacyRecord)) {
+    return legacyRecord.some((record) => record && record.legacySystemId !== null && record.legacySystemId !== undefined)
+  }
+
+  return !!(legacyRecord && legacyRecord.legacySystemId !== null && legacyRecord.legacySystemId !== undefined)
+}
+
+/**
+ * Resolve whether a review-api row uses the canonical challenge-api id instead
+ * of a migrated legacy numeric alias.
+ * @param {Object} row challengeResult row
+ * @param {Object} challenge challenge metadata resolved from challenge-api
+ * @returns {boolean} true when the source row is keyed by the canonical challenge id
+ */
+function isCanonicalReviewChallengeRow (row, challenge) {
+  return !!(row && challenge && String(row.challengeId) === String(challenge.id))
+}
+
+/**
+ * Build the ordered Development Challenge rerate history for a target member.
+ * @param {Array<Object>} reviewRows raw challengeResult rows for the member
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by review id aliases
+ * @param {Object} [options] history filtering options
+ * @param {boolean} [options.skipLegacyReviewIds=false] ignore legacy numeric review ids that are already represented by legacy subtrack history
+ * @param {boolean} [options.useLegacySourceRatings=false] preserve challengeResult oldRating/newRating for legacy-backed rows
+ * @returns {Array<Object>} ordered challenge history entries for rerating
+ */
+function buildTargetHistory (reviewRows, challengeMetadataById, options = {}) {
   const historyByChallengeId = new Map()
 
   reviewRows.forEach((row) => {
@@ -474,6 +560,10 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
 
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !challenge.endDate) {
+      return
+    }
+
+    if (!isCompletedChallenge(challenge)) {
       return
     }
 
@@ -489,18 +579,31 @@ function buildTargetHistory (reviewRows, challengeMetadataById) {
       return
     }
 
+    if (options.skipLegacyReviewIds && !isCanonicalReviewChallengeRow(row, challenge)) {
+      return
+    }
+
     const eventDate = normalizeDate(challenge.endDate, row.createdAt)
     if (!eventDate) {
       return
     }
 
     const canonicalChallengeId = String(challenge.id)
+    const useSourceRating = options.useLegacySourceRatings && hasLegacyChallengeMetadata(challenge)
+    const sourceNewRating = toSourceRating(row.newRating)
+    if (useSourceRating && !sourceNewRating) {
+      return
+    }
+
     historyByChallengeId.set(canonicalChallengeId, {
       challengeId: canonicalChallengeId,
       reviewChallengeIds: buildReviewChallengeIds(challenge, row.challengeId),
       createdAt: normalizeDate(row.createdAt, challenge.endDate),
       endDate: normalizeDate(challenge.endDate, row.createdAt),
-      eventDate
+      eventDate,
+      sourceOldRating: useSourceRating ? toSourceRating(row.oldRating) : null,
+      sourceNewRating: useSourceRating ? sourceNewRating : null,
+      useSourceRating
     })
   })
 
@@ -668,61 +771,77 @@ async function upsertHistoryRow (tx, userId, challengeId, previousState, updated
 }
 
 /**
- * Decide whether a rerated peak should replace the stored global max rating row.
- * @param {Object|null} existingMaxRating current memberMaxRating row
- * @param {number} rating rerated peak rating for this track
- * @returns {boolean} true when the rerated peak should replace the stored row
+ * Build the prior rating state used when a legacy-backed challengeResult row
+ * already carries authoritative source ratings.
+ * @param {Object} targetState current replay state before this challenge
+ * @param {number|null} sourceOldRating oldRating from challengeResult
+ * @returns {Object} previous state used for history oldRating/oldVolatility
  */
-function shouldReplaceGlobalMaxRating (existingMaxRating, rating) {
-  if (!existingMaxRating) {
-    return true
+function buildSourcePreviousState (targetState, sourceOldRating) {
+  const previousState = cloneState(targetState)
+  if (sourceOldRating) {
+    previousState.rating = sourceOldRating
+    if (previousState.numRatings === 0) {
+      previousState.numRatings = 1
+    }
+    if (!previousState.volatility) {
+      previousState.volatility = DEFAULT_VOLATILITY
+    }
   }
 
-  const storedRating = Number(existingMaxRating.rating)
-  return !Number.isFinite(storedRating) || rating > storedRating
+  return previousState
 }
 
 /**
- * Persist the member's global max rating row when the rerated Develop peak exceeds it.
- * @param {Object} tx prisma transaction client
- * @param {BigInt} userId member identifier
- * @param {number} rating recomputed peak rating
- * @returns {Promise<void>} resolves when max rating is stored
+ * Build the updated target state from an authoritative legacy source rating.
+ * The legacy tables do not expose per-event volatility, so the current replay
+ * volatility is carried forward after the first event while first ratings use
+ * the same initial volatility produced by the Qubits implementation.
+ * @param {Object} previousState previous replay state
+ * @param {number} sourceNewRating newRating from challengeResult
+ * @returns {Object} updated target participant state
  */
-async function updateMaxRating (tx, userId, rating) {
-  const existingMaxRating = await tx.memberMaxRating.findFirst({
-    where: {
-      userId
-    },
-    select: {
-      rating: true
-    }
-  })
+function buildSourceUpdatedState (previousState, sourceNewRating) {
+  const hasPreviousRating = previousState && previousState.numRatings > 0
+  const previousVolatility = hasPreviousRating && previousState.volatility ? previousState.volatility : FIRST_VOLATILITY
 
-  if (!shouldReplaceGlobalMaxRating(existingMaxRating, rating)) {
+  return {
+    rating: sourceNewRating,
+    volatility: previousVolatility,
+    numRatings: (hasPreviousRating ? previousState.numRatings : 0) + 1
+  }
+}
+
+async function deleteStaleHistoryRows (tx, userId, targetHistory, dimensionIds) {
+  const retainedChallengeIds = targetHistory.map((entry) => entry.challengeId)
+  if (retainedChallengeIds.length === 0) {
     return
   }
 
-  await tx.memberMaxRating.upsert({
+  await tx.memberStatsHistory.deleteMany({
     where: {
-      userId
-    },
-    create: {
       userId,
-      rating,
-      track: TRACK_NAME,
-      subTrack: TYPE_NAME,
-      ratingColor: getRatingColor(rating),
-      createdBy: RERATE_ACTOR,
-      updatedBy: RERATE_ACTOR
-    },
-    update: {
-      rating,
-      track: TRACK_NAME,
-      subTrack: TYPE_NAME,
-      ratingColor: getRatingColor(rating),
-      updatedBy: RERATE_ACTOR
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
+      challengeId: {
+        notIn: retainedChallengeIds
+      }
     }
+  })
+}
+
+/**
+ * Persist the member's global max rating row after a Develop rating update.
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId member identifier
+ * @param {Object} dimensionIds unified Develop rating dimensions
+ * @returns {Promise<void>} resolves when max rating is stored
+ */
+async function updateMaxRating (tx, userId, dimensionIds) {
+  await syncCurrentMemberMaxRating(tx, userId, {
+    actor: RERATE_ACTOR,
+    currentDimension: dimensionIds,
+    dimensionLookup: dimensionIds.dimensionLookup
   })
 }
 
@@ -768,19 +887,23 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
     }
   })
 
-  const previousHistory = await tx.memberStatsHistory.findFirst({
+  const orderedHistoryRows = await tx.memberStatsHistory.findMany({
     where: {
       userId,
       trackId: dimensionIds.trackId,
       typeId: dimensionIds.typeId
     },
     orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
-    skip: 1,
     select: {
+      id: true,
       newRating: true,
       newVolatility: true
     }
   })
+  const latestHistoryIndex = orderedHistoryRows.findIndex((row) => String(row.id) === String(latestHistory.id))
+  const previousHistory = orderedHistoryRows
+    .slice(latestHistoryIndex >= 0 ? latestHistoryIndex + 1 : 1)
+    .find(hasRatingCheckpoint)
 
   const latestUpdate = {
     mostRecent: true,
@@ -804,7 +927,25 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
   })
 }
 
-async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, userId, fromChallengeId) {
+/**
+ * Re-rate one member's Development Challenge timeline from the requested point.
+ * The target member's challenge history is replayed in event order, while
+ * opponent states are loaded from persisted history at each challenge boundary.
+ * Rank recalculation is enabled by default for direct rerates, but bulk scripts
+ * can disable it and run one final rank update after all member rows are stored.
+ * @param {Object} membersClient member Prisma client
+ * @param {Object} challengeClient challenge Prisma client
+ * @param {Object} reviewDbClient review database client
+ * @param {BigInt|string|number} userId target member id
+ * @param {string|null} fromChallengeId optional challenge id to start from
+ * @param {Object} [options] rerate controls
+ * @param {boolean} [options.recalculateRanks=true] recompute Develop Challenge ranks after this member rerate
+ * @param {boolean} [options.skipLegacyReviewIds=false] skip legacy numeric challengeResult aliases during full migration rerates
+ * @param {boolean} [options.useLegacySourceRatings=false] preserve challengeResult oldRating/newRating for legacy-backed rows
+ * @returns {Promise<{challengesProcessed: number, ratingsUpdated: number}>} rerate counters
+ * @throws {Error} when required review DB or dimension data is unavailable
+ */
+async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, userId, fromChallengeId, options = {}) {
   if (!reviewDbClient) {
     throw new Error('REVIEW_DB_URL must be configured to rerate development stats')
   }
@@ -823,7 +964,10 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     Array.from(new Set(reviewRows.map((row) => String(row.challengeId))))
   )
 
-  const targetHistory = buildTargetHistory(reviewRows, challengeMetadataById)
+  const targetHistory = buildTargetHistory(reviewRows, challengeMetadataById, {
+    skipLegacyReviewIds: options.skipLegacyReviewIds === true,
+    useLegacySourceRatings: options.useLegacySourceRatings === true
+  })
   if (targetHistory.length === 0) {
     return {
       challengesProcessed: 0,
@@ -843,7 +987,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   const participantHistoryByUserId = new Map()
   let targetState = createDefaultState()
-  let recomputedMaxRating = 0
+  const shouldPruneStaleHistory = startIndex === 0 && !fromChallengeId
 
   if (startIndex > 0) {
     await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
@@ -856,14 +1000,68 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     }
 
     targetState = createHistorySeedState(targetHistoryRows, startSeedIndex)
-    recomputedMaxRating = computeMaxRatingFromHistory(targetHistoryRows, startSeedIndex)
   }
 
   let challengesProcessed = 0
   let ratingsUpdated = 0
+  let targetChallengeCount = startIndex
+  const shouldRecalculateRanks = options.recalculateRanks !== false
 
   for (let index = startIndex; index < targetHistory.length; index += 1) {
     const historyEntry = targetHistory[index]
+    if (historyEntry.useSourceRating && historyEntry.sourceNewRating) {
+      const targetStateBeforeRun = buildSourcePreviousState(targetState, historyEntry.sourceOldRating)
+      const updatedTarget = buildSourceUpdatedState(targetStateBeforeRun, historyEntry.sourceNewRating)
+
+      targetState = cloneState(updatedTarget)
+      challengesProcessed += 1
+      ratingsUpdated += 1
+      targetChallengeCount += 1
+
+      await membersClient.$transaction(async (tx) => {
+        await tx.memberStats.upsert({
+          where: {
+            userId_trackId_typeId: {
+              userId: normalizedUserId,
+              trackId: dimensionIds.trackId,
+              typeId: dimensionIds.typeId
+            }
+          },
+          create: {
+            userId: normalizedUserId,
+            trackId: dimensionIds.trackId,
+            typeId: dimensionIds.typeId,
+            rating: updatedTarget.rating,
+            volatility: updatedTarget.volatility,
+            challenges: targetChallengeCount,
+            mostRecentEventDate: historyEntry.eventDate,
+            isPrivate: false,
+            createdBy: RERATE_ACTOR,
+            updatedBy: RERATE_ACTOR
+          },
+          update: {
+            rating: updatedTarget.rating,
+            volatility: updatedTarget.volatility,
+            challenges: targetChallengeCount,
+            mostRecentEventDate: historyEntry.eventDate,
+            isPrivate: false,
+            updatedBy: RERATE_ACTOR
+          }
+        })
+
+        await upsertHistoryRow(
+          tx,
+          normalizedUserId,
+          historyEntry.challengeId,
+          targetStateBeforeRun,
+          updatedTarget,
+          historyEntry.eventDate,
+          dimensionIds
+        )
+      })
+      continue
+    }
+
     const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry))
       .filter((row) => isParticipantEligibleForRating(row))
     if (participantRows.length === 0) {
@@ -905,7 +1103,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     targetState = cloneState(updatedTarget)
     challengesProcessed += 1
     ratingsUpdated += 1
-    recomputedMaxRating = Math.max(recomputedMaxRating, updatedTarget.rating)
+    targetChallengeCount += 1
 
     await membersClient.$transaction(async (tx) => {
       await tx.memberStats.upsert({
@@ -922,12 +1120,18 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
           typeId: dimensionIds.typeId,
           rating: updatedTarget.rating,
           volatility: updatedTarget.volatility,
+          challenges: targetChallengeCount,
+          mostRecentEventDate: historyEntry.eventDate,
+          isPrivate: false,
           createdBy: RERATE_ACTOR,
           updatedBy: RERATE_ACTOR
         },
         update: {
           rating: updatedTarget.rating,
           volatility: updatedTarget.volatility,
+          challenges: targetChallengeCount,
+          mostRecentEventDate: historyEntry.eventDate,
+          isPrivate: false,
           updatedBy: RERATE_ACTOR
         }
       })
@@ -946,9 +1150,16 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   if (ratingsUpdated > 0) {
     await membersClient.$transaction(async (tx) => {
+      if (shouldPruneStaleHistory) {
+        await deleteStaleHistoryRows(tx, normalizedUserId, targetHistory, dimensionIds)
+      }
       await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds)
-      await updateMaxRating(tx, normalizedUserId, recomputedMaxRating)
+      await updateMaxRating(tx, normalizedUserId, dimensionIds)
     })
+
+    if (shouldRecalculateRanks) {
+      await recalculateRatingRanks(membersClient, dimensionIds, { updatedBy: RERATE_ACTOR })
+    }
   }
 
   return {

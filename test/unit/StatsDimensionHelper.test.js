@@ -150,6 +150,40 @@ describe('stats dimension helper unit tests', () => {
     })
   })
 
+  it('buildUnifiedStatsResponse should backfill an empty matching subtrack rank from maxRating', () => {
+    const result = prismaHelper.buildUnifiedStatsResponse(
+      {
+        userId: global.BigInt(88770025),
+        handle: 'devtest1400',
+        handleLower: 'devtest1400',
+        maxRating: {
+          rating: 1301,
+          track: TRACK_NAMES.DATA_SCIENCE,
+          subTrack: TYPE_NAMES.MARATHON_MATCH,
+          ratingColor: '#616BD5'
+        }
+      },
+      [
+        {
+          groupId: global.BigInt(10),
+          trackId: 'track-dev-id',
+          typeId: 'type-mm-id',
+          trackName: TRACK_NAMES.DATA_SCIENCE,
+          typeName: TYPE_NAMES.MARATHON_MATCH,
+          challenges: 1,
+          wins: 1,
+          mostRecentSubmission: new Date('2025-10-30T19:11:01.774Z'),
+          mostRecentEventDate: new Date('2025-10-30T19:11:01.774Z')
+        }
+      ],
+      ['DATA_SCIENCE']
+    )
+
+    result.DATA_SCIENCE.MARATHON_MATCH.rank.should.deep.equal({
+      rating: 1301
+    })
+  })
+
   it('buildUnifiedStatsHistoryResponse should preserve canonical challenge ids and names', () => {
     const ratingDate = new Date('2024-01-01T00:00:00.000Z')
     const result = prismaHelper.buildUnifiedStatsHistoryResponse(

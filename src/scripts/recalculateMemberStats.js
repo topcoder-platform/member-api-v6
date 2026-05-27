@@ -54,10 +54,14 @@
  * - --skip-history skips the legacy history backfill pass.
  * - --skip-ratings skips the legacy rating/rank enrichment pass and the Qubits rerate backfill.
  * - --skip-rerate skips the expensive Development rerate replay while still preserving
- *   legacy rating/rank fields on the rebuilt aggregate rows.
+ *   legacy rating/rank fields on the rebuilt aggregate rows. When rerates are
+ *   enabled, legacy-backed review rows preserve challengeResult oldRating/newRating
+ *   because those rows already carry authoritative legacy rating output.
+ * - Development rank recalculation runs once per batch after concurrent member rerates
+ *   complete, avoiding per-user rank update contention.
  * - --concurrency controls how many users are processed in parallel within each batch.
  * - Batch logs include timing breakdowns for preload queries, user aggregation,
- *   stats/history writes, rerates, and processed-user checkpoint writes.
+ *   stats/history writes, rerates, rank recalculation, and processed-user checkpoint writes.
  * - Slow-user samples are emitted for aggregate/history/rerate phases so the
  *   worst outliers can be investigated first.
  * - Processed member user IDs are written after each completed batch so long runs can
@@ -76,6 +80,7 @@ const { getMembersClient, getChallengesClient } = require('../common/prisma')
 const helper = require('../common/helper')
 const reviewDb = require('../common/reviewDb')
 const { assertChallengeResultRelation, resolveChallengeResultRelation } = require('../common/reviewDbHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const {
   TYPE_NAMES,
@@ -102,6 +107,7 @@ const CHALLENGE_WINNER_HISTORY_TYPES = ['PLACEMENT', 'PASSED_REVIEW']
 const CHALLENGE_WINNER_HISTORY_TYPE_SQL = CHALLENGE_WINNER_HISTORY_TYPES.map(type => `'${type}'`).join(', ')
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'recalculateMemberStats.processedUserIds.json'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
+const RERATE_ACTOR = 'rerate-member-stats'
 const NULL_PRESERVED_STAT_FIELDS = [
   'rating',
   'avgRank',
@@ -398,6 +404,32 @@ function matchesNormalizedStatsFilters (dimension, options) {
 }
 
 /**
+ * Determine whether a review-api challengeResult row represents a real submission.
+ * Rows explicitly marked invalid, or rows from queries that expose an empty
+ * submissionId, are placeholders and should not create stats/history activity.
+ * Older in-memory callers that do not provide submission fields are treated as
+ * unknown instead of invalid so legacy fixture data can still exercise mapping.
+ * @param {Object} row raw challengeResult row
+ * @returns {boolean} true when the row can be used for stats/history backfill
+ */
+function isUsableReviewChallengeResultRow (row) {
+  if (!row || row.validSubmission === false) {
+    return false
+  }
+
+  if (Object.prototype.hasOwnProperty.call(row, 'submissionId')) {
+    const submissionId = row.submissionId === null || row.submissionId === undefined
+      ? ''
+      : String(row.submissionId).trim()
+    if (!submissionId) {
+      return false
+    }
+  }
+
+  return true
+}
+
+/**
  * Build the composite lookup key for one user's unified stats row.
  * @param {BigInt} userId member user id
  * @param {string} trackId unified track id
@@ -499,6 +531,8 @@ function resolveLegacyDesignTypeId (typeValue, fallbackValue) {
 
 /**
  * Merge non-null stat values into the keyed legacy rating lookup.
+ * Legacy rating queries order duplicate snapshots newest-first, so existing
+ * non-null values win and older snapshots only fill fields missing upstream.
  * @param {Map<string, Object>} lookup keyed legacy stat lookup
  * @param {string} key unified track/type lookup key
  * @param {Object} values legacy rating/rank values for the key
@@ -508,7 +542,8 @@ function mergeLegacyStatLookup (lookup, key, values) {
   const merged = { ...existing }
 
   Object.keys(values).forEach((field) => {
-    if (values[field] !== null && values[field] !== undefined) {
+    if (values[field] !== null && values[field] !== undefined &&
+      (merged[field] === null || merged[field] === undefined)) {
       merged[field] = values[field]
     }
   })
@@ -744,6 +779,10 @@ function getLatestAggregateTimestamp (record) {
  * @returns {Object|null} normalized aggregate delta or null when the row cannot be used
  */
 function buildReviewAggregateRecord (row, challenge, options) {
+  if (!isUsableReviewChallengeResultRow(row)) {
+    return null
+  }
+
   if (!challenge || !challenge.trackId || !challenge.typeId) {
     return null
   }
@@ -836,9 +875,12 @@ async function fetchReviewChallengeResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "placement", "createdAt"
+      SELECT "challengeId", "userId", "submissionId", "placement",
+             "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = $1
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
       ORDER BY "createdAt" ASC, "challengeId" ASC
     `,
     [String(userId)]
@@ -868,9 +910,12 @@ async function fetchReviewChallengeResultsByUserIds (reviewDbClient, userIds) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "placement", "createdAt"
+      SELECT "challengeId", "userId", "submissionId", "placement",
+             "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = ANY($1::text[])
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
       ORDER BY "userId" ASC, "createdAt" ASC, "challengeId" ASC
     `,
     [normalizedUserIds]
@@ -1005,6 +1050,8 @@ async function getReviewUserIds (reviewDbClient, challengesClient, options) {
         SELECT DISTINCT "userId"
         FROM ${challengeResultRelation}
         WHERE "userId" ~ '^[0-9]+$'
+          AND "validSubmission" IS DISTINCT FROM FALSE
+          AND "submissionId" IS NOT NULL
         ORDER BY "userId" ASC
       `
     )
@@ -1023,6 +1070,8 @@ async function getReviewUserIds (reviewDbClient, challengesClient, options) {
           FROM ${challengeResultRelation}
           WHERE "userId" ~ '^[0-9]+$'
             AND "challengeId" = ANY($1::text[])
+            AND "validSubmission" IS DISTINCT FROM FALSE
+            AND "submissionId" IS NOT NULL
         `,
         [challengeIds]
       )
@@ -2038,6 +2087,10 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
   const historyLookup = new Map()
 
   ;(reviewRows || []).forEach((row) => {
+    if (!isUsableReviewChallengeResultRow(row)) {
+      return
+    }
+
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !challenge.id || !challenge.trackId || !challenge.typeId || !isCompletedChallengeStatus(challenge.status)) {
       return
@@ -3535,6 +3588,7 @@ async function main () {
   let updatedHistoryFlags = 0
   let reratedChallenges = 0
   let reratedRatings = 0
+  let recalculatedRankRows = 0
   let syncedMemberMaxRatings = 0
   let deletedMemberMaxRatings = 0
 
@@ -3620,6 +3674,7 @@ async function main () {
       let historyDurationMs = 0
       let historyRefreshDurationMs = 0
       let rerateDurationMs = 0
+      let rankRecalculationDurationMs = 0
       let maxRatingSyncDurationMs = 0
 
       for (const userId of batchUserIds) {
@@ -3786,6 +3841,7 @@ async function main () {
       let batchHistoryRefreshes = 0
       let batchReratedChallenges = 0
       let batchReratedRatings = 0
+      let batchRecalculatedRankRows = 0
       let batchSyncedMemberMaxRatings = 0
       let batchDeletedMemberMaxRatings = 0
 
@@ -3862,7 +3918,10 @@ async function main () {
           } = await measureAsyncStep(async () => (
             mapWithConcurrency(existingBatchUserIds, options.concurrency, async (userId) => {
               const rerateStartedAt = startTimer()
-              const rerateResult = await rerateDevTrack(membersClient, challengesClient, reviewDb, userId)
+              const rerateResult = await rerateDevTrack(membersClient, challengesClient, reviewDb, userId, null, {
+                useLegacySourceRatings: true,
+                recalculateRanks: false
+              })
               return {
                 userId,
                 challengesProcessed: rerateResult.challengesProcessed,
@@ -3888,6 +3947,24 @@ async function main () {
           if (batchReratedChallenges > 0) {
             logInfo(`Re-rated ${batchReratedChallenges} development challenge(s) for users ${batchStart + 1}-${processedUsers}`)
           }
+
+          if (batchReratedRatings > 0) {
+            const {
+              result: updatedRankRows,
+              durationMs
+            } = await measureAsyncStep(async () => recalculateRatingRanks(
+              membersClient,
+              {
+                trackId: legacyLookupCache.trackIds.DEVELOP,
+                typeId: legacyLookupCache.typeIds.CHALLENGE || resolveChallengeTypeId(TYPE_NAMES.CHALLENGE)
+              },
+              { updatedBy: RERATE_ACTOR }
+            ))
+            rankRecalculationDurationMs = durationMs
+            batchRecalculatedRankRows = updatedRankRows
+            recalculatedRankRows += updatedRankRows
+            logInfo(`Recomputed ${updatedRankRows} development challenge rank row(s) after batch rerates`)
+          }
         }
 
         if (!options.skipRatings) {
@@ -3910,7 +3987,7 @@ async function main () {
       const { durationMs: checkpointDurationMs } = await measureAsyncStep(async () => processedUserIdsWriter.appendUserIds(existingBatchUserIds))
       const batchTotalDurationMs = getElapsedMilliseconds(batchStartedAt)
 
-      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}, maxRatingUpserts=${batchSyncedMemberMaxRatings}, maxRatingDeletes=${batchDeletedMemberMaxRatings}`)
+      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}, rankRows=${batchRecalculatedRankRows}, maxRatingUpserts=${batchSyncedMemberMaxRatings}, maxRatingDeletes=${batchDeletedMemberMaxRatings}`)
       logInfo(`Batch ${batchNumber}/${totalBatches} timings: ${formatTimingSegments([
         { label: 'existingUsers', durationMs: existingUsersDurationMs },
         { label: 'legacyIds', durationMs: legacyIdsDurationMs },
@@ -3925,6 +4002,7 @@ async function main () {
         !options.csvOnly && !options.skipHistory ? { label: 'historyBackfill', durationMs: historyDurationMs } : null,
         !options.csvOnly ? { label: 'historyMostRecent', durationMs: historyRefreshDurationMs } : null,
         !options.csvOnly && !options.skipRatings && !options.skipRerate ? { label: 'rerate', durationMs: rerateDurationMs } : null,
+        !options.csvOnly && !options.skipRatings && !options.skipRerate ? { label: 'rankRecalc', durationMs: rankRecalculationDurationMs } : null,
         !options.csvOnly && !options.skipRatings ? { label: 'maxRatingSync', durationMs: maxRatingSyncDurationMs } : null,
         { label: 'checkpoint', durationMs: checkpointDurationMs },
         { label: 'total', durationMs: batchTotalDurationMs }
@@ -3939,7 +4017,7 @@ async function main () {
     }
 
     const totalRuntimeMs = getElapsedMilliseconds(scriptStartedAt)
-    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), synchronized ${syncedMemberMaxRatings} memberMaxRating row(s), deleted ${deletedMemberMaxRatings} stale memberMaxRating row(s), total runtime ${formatDuration(totalRuntimeMs)}`)
+    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), recomputed ${recalculatedRankRows} development challenge rank row(s), synchronized ${syncedMemberMaxRatings} memberMaxRating row(s), deleted ${deletedMemberMaxRatings} stale memberMaxRating row(s), total runtime ${formatDuration(totalRuntimeMs)}`)
   } finally {
     await Promise.allSettled([
       membersClient.$disconnect(),

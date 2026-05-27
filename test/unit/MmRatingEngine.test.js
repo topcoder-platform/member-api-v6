@@ -128,7 +128,8 @@ function createMembersClient (seed) {
   const state = {
     historyRows: seed.historyRows.map(cloneRow),
     statsRows: seed.statsRows.map(cloneRow),
-    maxRatingRows: seed.maxRatingRows.map(cloneRow)
+    maxRatingRows: seed.maxRatingRows.map(cloneRow),
+    rankRecalculationCalls: []
   }
 
   let nextHistoryId = state.historyRows.reduce((maxId, row) => {
@@ -187,6 +188,11 @@ function createMembersClient (seed) {
   }
 
   const memberStats = {
+    async findMany (args = {}) {
+      return state.statsRows
+        .filter((item) => matchesWhere(item, args.where))
+        .map((row) => selectRow(row, args.select))
+    },
     async findFirst (args = {}) {
       const row = state.statsRows.find((item) => matchesWhere(item, args.where))
       return row ? selectRow(row, args.select) : null
@@ -225,15 +231,40 @@ function createMembersClient (seed) {
     }
   }
 
+  async function executeRawUnsafe (sql, trackId, typeId, isPrivate) {
+    state.rankRecalculationCalls.push({ sql, trackId, typeId, isPrivate })
+    const scopedRows = state.statsRows
+      .filter((row) =>
+        row.trackId === trackId &&
+        row.typeId === typeId &&
+        (row.isPrivate === true) === isPrivate
+      )
+      .sort((left, right) => Number(right.rating) - Number(left.rating))
+
+    let previousRating
+    let previousRank = 0
+    scopedRows.forEach((row, index) => {
+      const rating = Number(row.rating)
+      const rank = rating === previousRating ? previousRank : index + 1
+      row.globalRank = Number.isFinite(rating) ? rank : null
+      row.countryRank = null
+      previousRating = rating
+      previousRank = rank
+    })
+    return scopedRows.length
+  }
+
   const client = {
     memberStatsHistory,
     memberStats,
     memberMaxRating,
+    $executeRawUnsafe: executeRawUnsafe,
     async $transaction (transactionWork) {
       return transactionWork({
         memberStatsHistory,
         memberStats,
-        memberMaxRating
+        memberMaxRating,
+        $executeRawUnsafe: executeRawUnsafe
       })
     }
   }
@@ -243,6 +274,28 @@ function createMembersClient (seed) {
 
 function createMmReviewDbClient (rows) {
   const resultRows = rows.map(cloneRow)
+
+  /**
+   * Match the production MM reviewSummation readiness guard.
+   * Rows without test progress metadata are legacy/imported rows and remain
+   * eligible; rows with progress metadata need a successful reviewed checkpoint.
+   * @param {Object} row stub review summation row
+   * @returns {boolean} true when the row is ready for MM rating replay
+   */
+  function isMmReviewRowReady (row) {
+    const testProgressDetails = row && row.metadata && row.metadata.testProgressDetails
+    if (!testProgressDetails) {
+      return true
+    }
+
+    const reviewedDate = row.reviewedDate ? new Date(row.reviewedDate) : null
+    return !!(
+      reviewedDate &&
+      !Number.isNaN(reviewedDate.getTime()) &&
+      testProgressDetails.status === 'SUCCESS'
+    )
+  }
+
   const normalizeReviewRow = (row) => {
     const normalized = cloneRow(row)
     if ((normalized.challengeId === null || normalized.challengeId === undefined) && normalized.legacyChallengeId !== null && normalized.legacyChallengeId !== undefined) {
@@ -262,6 +315,7 @@ function createMmReviewDbClient (rows) {
       if (sql.includes('WHERE s."memberId" = $1')) {
         return {
           rows: resultRows
+            .filter(isMmReviewRowReady)
             .filter((row) => String(row.memberId) === String(params[0]))
             .map(normalizeReviewRow)
             .sort((left, right) => {
@@ -284,6 +338,7 @@ function createMmReviewDbClient (rows) {
         const challengeIds = new Set((Array.isArray(params[0]) ? params[0] : [params[0]]).map((value) => String(value)))
         return {
           rows: resultRows
+            .filter(isMmReviewRowReady)
             .filter((row) =>
               challengeIds.has(String(row.challengeId)) ||
               challengeIds.has(String(row.legacyChallengeId))
@@ -616,10 +671,213 @@ describe('marathon match rating engine unit tests', () => {
       row.typeId === MARATHON_MATCH_TYPE_ID
     )
     const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+    const maxRatingRow = state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
 
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
+    should.equal(statsRow.maxRating, expectedTargetState.rating)
+    should.equal(statsRow.minRating, expectedTargetState.rating)
+    should.equal(statsRow.challenges, 1)
+    should.equal(statsRow.mostRecentEventDate.getTime(), challengeMetadata[challengeId].endDate.getTime())
+    should.equal(statsRow.mostRecentSubmission.getTime(), baseReviewRows[0].createdAt.getTime())
+    should.equal(maxRatingRow.rating, expectedTargetState.rating)
+    should.equal(maxRatingRow.track, 'DATA_SCIENCE')
+    should.equal(maxRatingRow.subTrack, 'MARATHON_MATCH')
+    should.equal(maxRatingRow.ratingColor, getRatingColor(expectedTargetState.rating))
+    should.equal(statsRow.globalRank, 1)
+    state.rankRecalculationCalls.should.have.length(1)
+    state.rankRecalculationCalls[0].trackId.should.equal(DATA_SCIENCE_TRACK_ID)
+    state.rankRecalculationCalls[0].typeId.should.equal(MARATHON_MATCH_TYPE_ID)
     should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTargetState.rating)
+    should.equal(historyRow.placement, 1)
+  })
+
+  it('rerateMmTrack should persist Marathon Match rating bounds from canonical rerated history', async () => {
+    const firstChallengeId = 'mm-bound-first'
+    const secondChallengeId = 'mm-bound-second'
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [{
+        id: toBigInt(901),
+        userId: targetUserId,
+        trackId: DATA_SCIENCE_TRACK_ID,
+        typeId: MARATHON_MATCH_TYPE_ID,
+        challengeId: '19708',
+        newRating: 2955,
+        eventDate: new Date('2023-05-02T00:00:00.000Z')
+      }],
+      statsRows: [{
+        userId: targetUserId,
+        trackId: DATA_SCIENCE_TRACK_ID,
+        typeId: MARATHON_MATCH_TYPE_ID,
+        rating: 2187,
+        maxRating: 2187,
+        minRating: 1362,
+        isPrivate: false
+      }],
+      maxRatingRows: []
+    })
+    const reviewRows = [
+      {
+        submissionId: 'submission-target-first',
+        memberId: targetUserId,
+        challengeId: firstChallengeId,
+        placement: 1,
+        aggregateScore: 25,
+        reviewedDate: new Date('2024-06-01T10:00:00.000Z'),
+        createdAt: new Date('2024-06-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-first',
+        memberId: opponentUserId,
+        challengeId: firstChallengeId,
+        placement: 2,
+        aggregateScore: 10,
+        reviewedDate: new Date('2024-06-01T10:05:00.000Z'),
+        createdAt: new Date('2024-06-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:05:00.000Z')
+      },
+      {
+        submissionId: 'submission-target-second',
+        memberId: targetUserId,
+        challengeId: secondChallengeId,
+        placement: 2,
+        aggregateScore: 5,
+        reviewedDate: new Date('2024-07-01T10:00:00.000Z'),
+        createdAt: new Date('2024-07-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-07-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-second',
+        memberId: opponentUserId,
+        challengeId: secondChallengeId,
+        placement: 1,
+        aggregateScore: 30,
+        reviewedDate: new Date('2024-07-01T10:05:00.000Z'),
+        createdAt: new Date('2024-07-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-07-01T09:05:00.000Z')
+      }
+    ]
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient({
+        [firstChallengeId]: {
+          id: firstChallengeId,
+          endDate: new Date('2024-06-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        },
+        [secondChallengeId]: {
+          id: secondChallengeId,
+          endDate: new Date('2024-07-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        }
+      }),
+      null,
+      createMmReviewDbClient(reviewRows),
+      targetUserId
+    )
+
+    should.equal(result.ratingsUpdated, 2)
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    const canonicalRatings = state.historyRows
+      .filter(row => String(row.userId) === String(targetUserId) && !/^\d+$/.test(String(row.challengeId)))
+      .map(row => row.newRating)
+
+    should.equal(statsRow.maxRating, Math.max(...canonicalRatings))
+    should.equal(statsRow.minRating, Math.min(...canonicalRatings))
+    statsRow.maxRating.should.not.equal(2955)
+  })
+
+  it('rerateMmTrack should allow bulk rerates to skip rank recalculation', async () => {
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient(challengeMetadata),
+      null,
+      createMmReviewDbClient(baseReviewRows),
+      targetUserId,
+      null,
+      { recalculateRanks: false }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    state.rankRecalculationCalls.should.have.length(0)
+    should.exist(findHistoryRow(state.historyRows, targetUserId, challengeId))
+    should.exist(state.statsRows.find((row) => String(row.userId) === String(targetUserId)))
+    should.exist(state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId)))
+  })
+
+  it('rerateMmTrack should prefer final MM standings placement over raw aggregate score order', async () => {
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const conflictingScoreRows = [
+      {
+        submissionId: 'submission-target',
+        memberId: targetUserId,
+        challengeId,
+        placement: 1,
+        aggregateScore: 10,
+        reviewedDate: new Date('2024-06-01T10:00:00.000Z'),
+        createdAt: new Date('2024-06-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent',
+        memberId: opponentUserId,
+        challengeId,
+        placement: 2,
+        aggregateScore: 20,
+        reviewedDate: new Date('2024-06-01T10:05:00.000Z'),
+        createdAt: new Date('2024-06-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:05:00.000Z')
+      }
+    ]
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, -1),
+      createParticipant(opponentUserId, 0, 0, 0, -2)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTargetState = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient(challengeMetadata),
+      null,
+      createMmReviewDbClient(conflictingScoreRows),
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+
+    should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(historyRow.newRating, expectedTargetState.rating)
     should.equal(historyRow.placement, 1)
   })
@@ -654,6 +912,80 @@ describe('marathon match rating engine unit tests', () => {
     state.statsRows.should.have.length(0)
     state.historyRows.should.have.length(0)
     state.maxRatingRows.should.have.length(0)
+  })
+
+  it('rerateMmTrack should wait for MM system test progress before rating', async () => {
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const inProgressRows = baseReviewRows.map((row) => ({
+      ...cloneRow(row),
+      placement: null,
+      aggregateScore: 0,
+      reviewedDate: null,
+      metadata: {
+        testProgressDetails: {
+          status: 'RUNNING',
+          progress: 0.5
+        }
+      }
+    }))
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient(challengeMetadata),
+      null,
+      createMmReviewDbClient(inProgressRows),
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 0)
+    should.equal(result.ratingsUpdated, 0)
+    state.statsRows.should.have.length(0)
+    state.historyRows.should.have.length(0)
+    state.maxRatingRows.should.have.length(0)
+  })
+
+  it('rerateMmTrack should still replay legacy MM summations without progress metadata', async () => {
+    const scoringConfig = {
+      relativeScoringEnabled: true,
+      scoreDirection: 'MAXIMIZE'
+    }
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const legacyRows = baseReviewRows.map((row) => ({
+      ...cloneRow(row),
+      reviewedDate: null
+    }))
+    const expectedTargetState = buildExpectedTargetState(
+      targetUserId,
+      opponentUserId,
+      20,
+      10,
+      scoringConfig
+    )
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient(challengeMetadata),
+      null,
+      createMmReviewDbClient(legacyRows),
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+    should.equal(historyRow.newRating, expectedTargetState.rating)
+    should.equal(historyRow.placement, 1)
   })
 
   it('rerateMmTrack should rate MM summations when challenge metadata is rated despite stale row metadata', async () => {
@@ -887,6 +1219,9 @@ describe('marathon match rating engine unit tests', () => {
 
     should.equal(statsRow.rating, expectedTarget.rating)
     should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(statsRow.challenges, 2)
+    should.equal(statsRow.mostRecentEventDate.getTime(), new Date('2024-02-01T00:00:00.000Z').getTime())
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-02-01T10:00:00.000Z').getTime())
     should.equal(historyRow.oldRating, targetSeedRating)
     should.equal(historyRow.oldVolatility, targetSeedVolatility)
     should.equal(historyRow.newRating, expectedTarget.rating)
@@ -1117,6 +1452,103 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(unratedAiHistoryRow, undefined)
     should.equal(maxRatingRow.track, 'DEVELOP')
     should.equal(maxRatingRow.subTrack, 'AI')
+  })
+
+  it('rerateMmTrack should skip invalid zero-score Development Challenge rows for configured rating paths', async () => {
+    const targetUserId = toBigInt(7201)
+    const opponentUserId = toBigInt(7202)
+    const invalidChallengeId = 'ai-invalid-zero-dev'
+    const validChallengeId = 'ai-valid-score-dev'
+    const ratingPath = normalizeRatingPathConfig({
+      name: 'AI',
+      track: 'DEVELOPMENT',
+      tags: ['AI']
+    })
+    const pathMetadata = {
+      [invalidChallengeId]: {
+        id: invalidChallengeId,
+        endDate: new Date('2024-05-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['AI'],
+        metadata: []
+      },
+      [validChallengeId]: {
+        id: validChallengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['AI'],
+        metadata: []
+      }
+    }
+    const reviewRows = [
+      {
+        challengeId: invalidChallengeId,
+        userId: targetUserId,
+        finalScore: 0,
+        placement: 0,
+        rated: false,
+        passedReview: false,
+        validSubmission: false,
+        createdAt: new Date('2024-05-01T09:00:00.000Z')
+      },
+      {
+        challengeId: validChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        challengeId: validChallengeId,
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        passedReview: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:05:00.000Z')
+      }
+    ]
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createMmReviewDbClient(reviewRows)
+    const challengeClient = createChallengeClient(pathMetadata)
+
+    const result = await rerateMmTrack(
+      membersClient,
+      challengeClient,
+      null,
+      reviewDbClient,
+      targetUserId,
+      null,
+      {
+        ratingPath
+      }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingPathChallengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, invalidChallengeId), undefined)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, validChallengeId)
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
   })
 
   it('rerateMmTrack should replay only challenges with every configured rating path skill', async () => {

@@ -154,6 +154,7 @@ describe('rerateDevelopmentChallenge unit tests', () => {
 
   it('should rerate each existing Development Challenge member from the beginning', async () => {
     const rerated = []
+    const rankRecalculationCalls = []
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rerate-development-challenge-'))
     const processedUserIdsPath = path.join(tempDir, 'processed.json')
 
@@ -177,6 +178,8 @@ describe('rerateDevelopmentChallenge unit tests', () => {
         disconnect: false,
         fetchDevelopmentChallengeHistory: async () => ({
           trackId: 'track-dev-id',
+          ratingTrackId: 'track-dev-id',
+          ratingTypeId: 'type-ch-id',
           typeIds: ['type-ch-id', 'type-code-id'],
           history: [
             { challengeId: 'dev-1', eventDate: new Date('2024-01-01T00:00:00Z') },
@@ -189,15 +192,20 @@ describe('rerateDevelopmentChallenge unit tests', () => {
             : [{ userId: '1003' }, { userId: '1001' }]
         ),
         resolveParticipantId: row => global.BigInt(row.userId),
-        rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, fromChallengeId) => {
+        rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, fromChallengeId, options) => {
           rerated.push({
             userId: String(userId),
-            fromChallengeId
+            fromChallengeId,
+            options
           })
           return {
             challengesProcessed: 3,
             ratingsUpdated: 3
           }
+        },
+        recalculateRatingRanks: async (membersClient, dimensionIds, options) => {
+          rankRecalculationCalls.push({ dimensionIds, options })
+          return 2
         }
       })
 
@@ -208,9 +216,21 @@ describe('rerateDevelopmentChallenge unit tests', () => {
       summary.usersFailed.should.equal(0)
       summary.challengesProcessed.should.equal(6)
       summary.ratingsUpdated.should.equal(6)
+      summary.rankRowsUpdated.should.equal(2)
       rerated.sort((left, right) => left.userId.localeCompare(right.userId)).should.deep.equal([
-        { userId: '1001', fromChallengeId: null },
-        { userId: '1002', fromChallengeId: null }
+        { userId: '1001', fromChallengeId: null, options: { recalculateRanks: false, useLegacySourceRatings: true } },
+        { userId: '1002', fromChallengeId: null, options: { recalculateRanks: false, useLegacySourceRatings: true } }
+      ])
+      rankRecalculationCalls.should.deep.equal([
+        {
+          dimensionIds: {
+            trackId: 'track-dev-id',
+            typeId: 'type-ch-id'
+          },
+          options: {
+            updatedBy: 'rerate-member-stats'
+          }
+        }
       ])
       JSON.parse(fs.readFileSync(processedUserIdsPath, 'utf8')).sort().should.deep.equal(['1001', '1002'])
     } finally {

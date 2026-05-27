@@ -22,12 +22,14 @@
  * Notes:
  * - Challenge discovery uses the Development ChallengeTrack id and includes both
  *   ChallengeType Challenge and CODE rows.
- * - Existing CODE rows are rated into the same DEVELOP / Challenge stream used
- *   by the Development rating engine.
+ * - Legacy-backed review rows are replayed with their source oldRating/newRating
+ *   values because those rows already carry authoritative legacy rating output.
  * - Handles are not required. Participants are discovered from review-api
  *   challengeResult rows.
  * - Each member is replayed from the beginning by calling rerateDevTrack with no
- *   starting challenge id, so complete Development history is persisted.
+ *   starting challenge id, so canonical Development Challenge history is persisted.
+ * - Current Develop / Challenge ranks are recalculated once after the batch,
+ *   not once per member, to avoid long repeated interactive transactions.
  */
 
 require('dotenv').config()
@@ -47,6 +49,7 @@ const {
   resolveTrackIdFromLookup,
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
 const {
   RATING_METADATA_SELECT,
   isChallengeRated
@@ -61,6 +64,7 @@ const DEFAULT_CONCURRENCY = 4
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'rerateDevelopmentChallenge.processedUserIds.json'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 const MEMBER_LOOKUP_BATCH_SIZE = 5000
+const RERATE_ACTOR = 'rerate-member-stats'
 
 /**
  * Write an informational message with a timestamp for long-running operator logs.
@@ -389,6 +393,7 @@ async function fetchDevelopmentChallengeHistory (challengeClient) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
   const developmentTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DEVELOP)
   const developmentTypeIds = resolveDevelopmentTypeIds(dimensionLookup)
+  const developmentRatingTypeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAMES.CHALLENGE)
 
   if (!developmentTrackId) {
     throw new Error('Unable to resolve Development ChallengeTrack id')
@@ -467,8 +472,32 @@ async function fetchDevelopmentChallengeHistory (challengeClient) {
 
   return {
     trackId: developmentTrackId,
+    ratingTrackId: developmentTrackId,
+    ratingTypeId: developmentRatingTypeId,
     typeIds: developmentTypeIds,
     history
+  }
+}
+
+/**
+ * Resolve the unified memberStats dimensions that receive Development Challenge ratings.
+ * CODE challenge rows are discovered for replay, but the rating stream persists
+ * into the DEVELOP / Challenge memberStats dimension.
+ * @param {Object} developmentHistoryResult result from fetchDevelopmentChallengeHistory
+ * @returns {{trackId: string, typeId: string}} memberStats rank dimensions
+ * @throws {Error} when required rank dimensions are missing
+ */
+function resolveDevelopmentRankDimensionIds (developmentHistoryResult) {
+  const trackId = developmentHistoryResult && (developmentHistoryResult.ratingTrackId || developmentHistoryResult.trackId)
+  const typeId = developmentHistoryResult && (developmentHistoryResult.ratingTypeId || (developmentHistoryResult.typeIds || [])[0])
+
+  if (!trackId || !typeId) {
+    throw new Error('Unable to resolve Develop Challenge rank dimensions')
+  }
+
+  return {
+    trackId,
+    typeId
   }
 }
 
@@ -579,6 +608,8 @@ async function filterExistingMembers (membersClient, members) {
  * Run the Development Challenge bulk rerate workflow.
  * @param {Object} options parsed script options
  * @param {Object} dependencies optional clients and functions for tests
+ * @param {Function} [dependencies.rerateDevTrack] optional member rerate function
+ * @param {Function} [dependencies.recalculateRatingRanks] optional final rank recalculation function
  * @returns {Promise<Object>} bulk rerate summary
  */
 async function run (options, dependencies = {}) {
@@ -671,7 +702,11 @@ async function run (options, dependencies = {}) {
           challengeClient,
           reviewDbClient,
           member.userId,
-          null
+          null,
+          {
+            recalculateRanks: false,
+            useLegacySourceRatings: true
+          }
         )
 
         await processedUserIdsWriter.appendUserId(member.userId)
@@ -697,6 +732,19 @@ async function run (options, dependencies = {}) {
     const usersFailed = rerateResults.length - usersProcessed
     const ratingsUpdated = rerateResults.reduce((sum, result) => sum + (result.ok ? result.ratingsUpdated || 0 : 0), 0)
     const challengesProcessed = rerateResults.reduce((sum, result) => sum + (result.ok ? result.challengesProcessed || 0 : 0), 0)
+    let rankRowsUpdated = 0
+
+    if (ratingsUpdated > 0) {
+      const rankStartedAt = startTimer()
+      logInfo('Recalculating Development Challenge ranks after member rerates')
+      rankRowsUpdated = await (dependencies.recalculateRatingRanks || recalculateRatingRanks)(
+        membersClient,
+        resolveDevelopmentRankDimensionIds(developmentHistoryResult),
+        { updatedBy: RERATE_ACTOR }
+      )
+      logInfo(`Recalculated Development Challenge ranks rowsUpdated=${rankRowsUpdated} duration=${formatDuration(getElapsedMilliseconds(rankStartedAt))}`)
+    }
+
     const durationMs = getElapsedMilliseconds(startedAt)
 
     logInfo(`Completed Development Challenge rerate: usersProcessed=${usersProcessed}, usersFailed=${usersFailed}, usersSkippedMissing=${skippedMembers.length}, ratingsUpdated=${ratingsUpdated}, duration=${formatDuration(durationMs)}`)
@@ -715,6 +763,7 @@ async function run (options, dependencies = {}) {
       usersFailed,
       challengesProcessed,
       ratingsUpdated,
+      rankRowsUpdated,
       durationMs
     }
   } finally {

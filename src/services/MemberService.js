@@ -25,6 +25,7 @@ const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
 const identityPrismaManager = require('../common/identityPrisma')
+const { loadChallengeDimensionLookup } = require('../common/statsDimensionHelper')
 const vanillaDb = require('../common/vanillaDb')
 const prisma = prismaManager.getClient()
 const skillsPrisma = prismaManager.getSkillsClient()
@@ -49,6 +50,21 @@ const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyToke
 const SENDGRID_BASE_URL = 'https://api.sendgrid.com'
 const SENDGRID_EMAIL_ACTIVITY_LOOKBACK_DAYS = 30
 const SENDGRID_EMAIL_ACTIVITY_RESULT_LIMIT = 20
+
+/**
+ * Resolve compact memberStats track/type UUIDs before deriving current
+ * maxRating labels for member profile responses.
+ * @param {Object} member member payload that may include compact memberStats rows
+ * @returns {Promise<void>} resolves after in-place annotation when needed
+ */
+async function annotateCurrentMaxRatingStats (member) {
+  if (!prismaHelper.shouldResolveCurrentMaxRatingDimensions(member)) {
+    return
+  }
+
+  const dimensionLookup = await loadChallengeDimensionLookup(challengesPrisma)
+  prismaHelper.annotateMemberStatsWithDimensionNames(member, dimensionLookup)
+}
 
 /**
  * Clean member fields according to current user.
@@ -283,6 +299,7 @@ async function getMember (currentUser, handle, query) {
     throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
   }
   // convert members data structure to response
+  await annotateCurrentMaxRatingStats(member)
   prismaHelper.convertMember(member)
 
   // Query identity verification status from finance schema if user has permission

@@ -34,6 +34,8 @@
  *   come from reviewSummation.aggregateScore.
  * - Each member is replayed from the beginning by calling rerateMmTrack with no
  *   starting challenge id, so complete native MM history is persisted.
+ * - Current Marathon Match ranks are recalculated once after the batch, not once
+ *   per member, to avoid long repeated interactive transactions.
  */
 
 require('dotenv').config()
@@ -54,6 +56,7 @@ const {
   resolveTrackIdFromLookup,
   resolveTypeIdFromLookup
 } = require('../common/statsDimensionHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
 const {
   RATING_METADATA_SELECT,
   isChallengeRated
@@ -69,6 +72,7 @@ const DEFAULT_PROCESSED_USER_IDS_PATH = 'rerateMarathonMatches.processedUserIds.
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 const MARATHON_MATCH_SOURCE = 'MARATHON_MATCH'
 const MEMBER_LOOKUP_BATCH_SIZE = 5000
+const RERATE_ACTOR = 'rerate-member-stats'
 
 /**
  * Add a normalized challenge id candidate to a target set.
@@ -476,15 +480,16 @@ function toDateOrNull (value) {
  * Science are replayed as one native MM stream. Each history entry includes
  * canonical and legacy challenge id aliases for review-api submission lookups.
  * @param {Object} challengeClient Prisma challenge client
- * @returns {Promise<Object>} resolved type id and ordered challenge history
- * @throws {Error} when the Marathon Match ChallengeType id cannot be resolved
+ * @returns {Promise<Object>} resolved rank dimensions and ordered challenge history
+ * @throws {Error} when the native MM memberStats dimensions cannot be resolved
  */
 async function fetchMarathonMatchHistory (challengeClient) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
+  const dataScienceTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DATA_SCIENCE)
   const marathonMatchTypeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAMES.MARATHON_MATCH)
 
-  if (!marathonMatchTypeId) {
-    throw new Error('Unable to resolve Marathon Match ChallengeType id')
+  if (!dataScienceTrackId || !marathonMatchTypeId) {
+    throw new Error('Unable to resolve Marathon Match rank dimensions')
   }
 
   const challenges = await challengeClient.challenge.findMany({
@@ -553,8 +558,34 @@ async function fetchMarathonMatchHistory (challengeClient) {
   })
 
   return {
+    trackId: dataScienceTrackId,
     typeId: marathonMatchTypeId,
     history
+  }
+}
+
+/**
+ * Resolve the unified memberStats dimensions that receive native MM ratings.
+ * Challenge discovery intentionally ignores source challenge track, but native
+ * MM ratings persist into DATA_SCIENCE / MARATHON_MATCH.
+ * @param {Object} marathonHistoryResult result from fetchMarathonMatchHistory
+ * @param {Object} persistedHistoryResult result from fetchPersistedMarathonMatchHistory
+ * @returns {{trackId: string, typeId: string}} memberStats rank dimensions
+ * @throws {Error} when required rank dimensions are missing
+ */
+function resolveMarathonMatchRankDimensionIds (marathonHistoryResult, persistedHistoryResult) {
+  const trackId = (marathonHistoryResult && marathonHistoryResult.trackId) ||
+    (persistedHistoryResult && persistedHistoryResult.trackId)
+  const typeId = (marathonHistoryResult && marathonHistoryResult.typeId) ||
+    (persistedHistoryResult && persistedHistoryResult.typeId)
+
+  if (!trackId || !typeId) {
+    throw new Error('Unable to resolve Marathon Match rank dimensions')
+  }
+
+  return {
+    trackId,
+    typeId
   }
 }
 
@@ -820,7 +851,10 @@ async function run (options, dependencies = {}) {
           null,
           reviewDbClient,
           member.userId,
-          null
+          null,
+          {
+            recalculateRanks: false
+          }
         )
 
         await processedUserIdsWriter.appendUserId(member.userId)
@@ -846,6 +880,19 @@ async function run (options, dependencies = {}) {
     const usersFailed = rerateResults.length - usersProcessed
     const ratingsUpdated = rerateResults.reduce((sum, result) => sum + (result.ok ? result.ratingsUpdated || 0 : 0), 0)
     const challengesProcessed = rerateResults.reduce((sum, result) => sum + (result.ok ? result.challengesProcessed || 0 : 0), 0)
+    let rankRowsUpdated = 0
+
+    if (ratingsUpdated > 0) {
+      const rankStartedAt = startTimer()
+      logInfo('Recalculating native Marathon Match ranks after member rerates')
+      rankRowsUpdated = await (dependencies.recalculateRatingRanks || recalculateRatingRanks)(
+        membersClient,
+        resolveMarathonMatchRankDimensionIds(marathonHistoryResult, persistedHistoryResult),
+        { updatedBy: RERATE_ACTOR }
+      )
+      logInfo(`Recalculated native Marathon Match ranks rowsUpdated=${rankRowsUpdated} duration=${formatDuration(getElapsedMilliseconds(rankStartedAt))}`)
+    }
+
     const durationMs = getElapsedMilliseconds(startedAt)
 
     logInfo(`Completed native Marathon Match rerate: usersProcessed=${usersProcessed}, usersFailed=${usersFailed}, usersSkippedMissing=${skippedMembers.length}, ratingsUpdated=${ratingsUpdated}, duration=${formatDuration(durationMs)}`)
@@ -865,6 +912,7 @@ async function run (options, dependencies = {}) {
       usersFailed,
       challengesProcessed,
       ratingsUpdated,
+      rankRowsUpdated,
       durationMs
     }
   } finally {
@@ -903,6 +951,7 @@ module.exports = {
   fetchMarathonMatchHistory,
   fetchPersistedMarathonMatchHistory,
   mergeMarathonHistories,
+  resolveMarathonMatchRankDimensionIds,
   discoverMarathonMatchMembers,
   filterExistingMembers,
   run

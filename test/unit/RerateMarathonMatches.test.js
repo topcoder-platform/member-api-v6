@@ -119,6 +119,7 @@ describe('rerateMarathonMatches unit tests', () => {
       typeId: 'type-mm-id',
       status: 'COMPLETED'
     })
+    result.trackId.should.equal('track-ds-id')
     result.typeId.should.equal('type-mm-id')
     result.history.map(row => row.challengeId).should.deep.equal(['dev-mm', 'ds-mm'])
     result.history.map(row => row.reviewChallengeIds).should.deep.equal([
@@ -197,6 +198,7 @@ describe('rerateMarathonMatches unit tests', () => {
 
   it('should rerate each existing Marathon Match member from the beginning', async () => {
     const rerated = []
+    const rankRecalculationCalls = []
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rerate-marathon-matches-'))
     const processedUserIdsPath = path.join(tempDir, 'processed.json')
 
@@ -219,6 +221,7 @@ describe('rerateMarathonMatches unit tests', () => {
         reviewDbClient: {},
         disconnect: false,
         fetchMarathonMatchHistory: async () => ({
+          trackId: 'track-ds-id',
           typeId: 'type-mm-id',
           history: [
             { challengeId: 'mm-1', eventDate: new Date('2024-01-01T00:00:00Z') },
@@ -231,16 +234,21 @@ describe('rerateMarathonMatches unit tests', () => {
             : [{ memberId: '1003' }, { memberId: '1001' }]
         }),
         resolveParticipantId: row => global.BigInt(row.memberId),
-        rerateMmTrack: async (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId) => {
+        rerateMmTrack: async (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId, options) => {
           should.equal(mmDbClient, null)
           rerated.push({
             userId: String(userId),
-            fromChallengeId
+            fromChallengeId,
+            options
           })
           return {
             challengesProcessed: 3,
             ratingsUpdated: 3
           }
+        },
+        recalculateRatingRanks: async (membersClient, dimensionIds, options) => {
+          rankRecalculationCalls.push({ dimensionIds, options })
+          return 2
         }
       })
 
@@ -251,9 +259,21 @@ describe('rerateMarathonMatches unit tests', () => {
       summary.usersFailed.should.equal(0)
       summary.challengesProcessed.should.equal(6)
       summary.ratingsUpdated.should.equal(6)
+      summary.rankRowsUpdated.should.equal(2)
       rerated.sort((left, right) => left.userId.localeCompare(right.userId)).should.deep.equal([
-        { userId: '1001', fromChallengeId: null },
-        { userId: '1002', fromChallengeId: null }
+        { userId: '1001', fromChallengeId: null, options: { recalculateRanks: false } },
+        { userId: '1002', fromChallengeId: null, options: { recalculateRanks: false } }
+      ])
+      rankRecalculationCalls.should.deep.equal([
+        {
+          dimensionIds: {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          },
+          options: {
+            updatedBy: 'rerate-member-stats'
+          }
+        }
       ])
       JSON.parse(fs.readFileSync(processedUserIdsPath, 'utf8')).sort().should.deep.equal(['1001', '1002'])
     } finally {

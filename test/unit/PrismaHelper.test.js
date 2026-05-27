@@ -7,6 +7,11 @@
 require('../../app-bootstrap')
 const chai = require('chai')
 const prismaHelper = require('../../src/common/prismaHelper')
+const {
+  TRACK_NAMES,
+  TYPE_NAMES,
+  buildChallengeDimensionLookup
+} = require('../../src/common/statsDimensionHelper')
 
 const should = chai.should()
 
@@ -101,6 +106,53 @@ describe('prisma helper unit tests', () => {
       track: 'DEVELOP',
       subTrack: 'Challenge',
       ratingColor: '#9D9FA0'
+    })
+  })
+
+  it('convertMember should use annotated dimension names for current maxRating rows with UUID ids', () => {
+    const member = {
+      userId: BigInt(100000221),
+      createdAt: new Date('2026-03-26T00:00:00.000Z'),
+      updatedAt: new Date('2026-03-26T00:00:00.000Z'),
+      verified: false,
+      maxRating: null,
+      memberStats: [
+        {
+          trackId: 'c0f5d461-8219-4c14-878a-c3a3f356466d',
+          typeId: '929bc408-9cf2-4b3e-ba71-adfbf693046c',
+          rating: 1301,
+          mostRecentEventDate: new Date('2026-05-14T16:31:00.000Z')
+        }
+      ]
+    }
+    const lookup = buildChallengeDimensionLookup(
+      [
+        {
+          id: 'c0f5d461-8219-4c14-878a-c3a3f356466d',
+          name: 'Data Science',
+          abbreviation: 'DS',
+          legacyId: null
+        }
+      ],
+      [
+        {
+          id: '929bc408-9cf2-4b3e-ba71-adfbf693046c',
+          name: 'Marathon Match',
+          abbreviation: 'MM',
+          legacyId: null,
+          isTask: false
+        }
+      ]
+    )
+
+    prismaHelper.annotateMemberStatsWithDimensionNames(member, lookup)
+    prismaHelper.convertMember(member)
+
+    member.maxRating.should.deep.equal({
+      rating: 1301,
+      track: TRACK_NAMES.DATA_SCIENCE,
+      subTrack: TYPE_NAMES.MARATHON_MATCH,
+      ratingColor: '#616BD5'
     })
   })
 
