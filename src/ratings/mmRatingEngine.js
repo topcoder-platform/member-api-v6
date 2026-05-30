@@ -604,23 +604,39 @@ function resolveRatingPathSource (challenge) {
 }
 
 /**
+ * Determine whether a challenge has complete placement data for score ordering.
+ * Partial placement backfills are common in older MM imports; if only some rows
+ * have placements, aggregate scores are the only comparable value across all
+ * participants.
+ * @param {Array<Object>} participantRows challenge participant rows
+ * @returns {boolean} true when every participant has a positive placement
+ */
+function shouldUsePlacementScores (participantRows) {
+  return (participantRows || []).length > 0 &&
+    (participantRows || []).every(row => !!toOptionalPlacement(row && row.placement))
+}
+
+/**
  * Normalize one Marathon Match score for Qubits ordering.
- * Source placements are authoritative final standings when present. Otherwise,
+ * Complete source placements are authoritative final standings. Otherwise,
  * relative-scoring aggregates are treated as higher-is-better, while
  * non-relative MINIMIZE challenges need inversion to match standings order.
+ * Placement is only a fallback when the row does not have an aggregate score.
  * @param {Object} row participant result row
  * @param {Object} scoringConfig relative scoring configuration for the challenge
+ * @param {Object} [options] score normalization options
+ * @param {boolean} [options.usePlacementScore=false] whether to rank by placement
  * @returns {number} normalized Qubits score
  */
-function normalizeScore (row, scoringConfig) {
+function normalizeScore (row, scoringConfig, options = {}) {
   const placement = toOptionalPlacement(row && row.placement)
-  if (placement) {
+  if (options.usePlacementScore && placement) {
     return -placement
   }
 
   const aggregateScore = Number(row.aggregateScore)
   if (!Number.isFinite(aggregateScore)) {
-    return 0
+    return placement ? -placement : 0
   }
 
   if (
@@ -834,24 +850,18 @@ function computePlacementByCoderId (participants) {
 
 /**
  * Build optional history metadata for the target participant.
- * Source-provided placements are preferred; score ordering is the fallback for
- * historical MM submissions that do not expose a stored placement.
+ * Placement is computed from the same normalized scores used by the rating run,
+ * with the source placement kept as a fallback when computed placement is absent.
  * @param {Array<Object>} participants rated participant states for one challenge
  * @param {string} targetUserKey normalized target user id
  * @param {Object} sourceRow source participant row for the target user
  * @returns {Object} persisted memberStatsHistory metadata
  */
 function buildHistoryResultFields (participants, targetUserKey, sourceRow) {
-  const sourcePlacement = toOptionalPlacement(sourceRow && sourceRow.placement)
-  if (sourcePlacement) {
-    return {
-      placement: sourcePlacement
-    }
-  }
-
   const computedPlacement = computePlacementByCoderId(participants).get(String(targetUserKey))
+  const sourcePlacement = toOptionalPlacement(sourceRow && sourceRow.placement)
   return omitUndefinedFields({
-    placement: computedPlacement
+    placement: computedPlacement || sourcePlacement
   })
 }
 
@@ -1650,14 +1660,15 @@ function resolveRatingPathParticipantId (row, source) {
  * @param {Object} row participant source row
  * @param {string} source rating path source
  * @param {Object} scoringConfig MM scoring config when source is Marathon Match
+ * @param {Object} [options] score normalization options
  * @returns {number} normalized Qubits score
  */
-function normalizeRatingPathScore (row, source, scoringConfig) {
+function normalizeRatingPathScore (row, source, scoringConfig, options = {}) {
   if (source === RATING_PATH_SOURCE_DEVELOPMENT) {
     return normalizeDevelopmentScore(row)
   }
 
-  return normalizeScore(row, scoringConfig)
+  return normalizeScore(row, scoringConfig, options)
 }
 
 /**
@@ -1729,6 +1740,8 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
 
     ratingPathChallengesProcessed += 1
 
+    const usePlacementScore = historyEntry.source === RATING_PATH_SOURCE_MARATHON_MATCH &&
+      shouldUsePlacementScores(participantRows)
     const targetStateBeforeRun = cloneState(stateByUserId.get(targetUserKey))
     const participantRowsByUserId = new Map()
     const participants = participantRows.map((row) => {
@@ -1741,7 +1754,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
         rating: participantState.rating,
         volatility: participantState.volatility,
         numRatings: participantState.numRatings,
-        score: normalizeRatingPathScore(row, historyEntry.source, scoringConfig)
+        score: normalizeRatingPathScore(row, historyEntry.source, scoringConfig, { usePlacementScore })
       }
     })
 
@@ -1952,6 +1965,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     }
 
     const participantIds = participantRows.map((row) => toBigIntUserId(row.memberId))
+    const usePlacementScore = shouldUsePlacementScores(participantRows)
     const missingParticipantIds = participantIds.filter((participantId) => !stateByUserId.has(buildUserStateKey(participantId)))
     if (missingParticipantIds.length > 0) {
       await loadParticipantHistoryCache(membersClient, missingParticipantIds, participantHistoryByUserId, dimensionIds)
@@ -1975,7 +1989,7 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
         rating: participantState.rating,
         volatility: participantState.volatility,
         numRatings: participantState.numRatings,
-        score: normalizeScore(row, scoringConfig)
+        score: normalizeScore(row, scoringConfig, { usePlacementScore })
       }
     })
 
