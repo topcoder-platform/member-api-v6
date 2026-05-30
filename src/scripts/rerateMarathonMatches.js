@@ -853,7 +853,8 @@ async function run (options, dependencies = {}) {
           member.userId,
           null,
           {
-            recalculateRanks: false
+            recalculateRanks: false,
+            pathHistory: marathonHistory
           }
         )
 

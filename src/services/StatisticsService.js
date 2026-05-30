@@ -1852,21 +1852,25 @@ function dedupeUnifiedHistoryRows (rows) {
  * Reconcile imported Marathon Match legacy rows with canonical rerated rows.
  *
  * After rerating, canonical UUID rows are authoritative and numeric legacy rows
- * are hidden. Before rerating, hydrated numeric legacy rows remain authoritative
- * and older overlapping canonical migration rows are suppressed. Numeric rows
- * that cannot be hydrated are always dropped as unresolved placeholders.
+ * are hidden. Before rerating, canonical rows with ChallengeWinner placements
+ * are still preferred for matching MM round numbers, while legacy rows can
+ * provide missing migrated ratings. Numeric rows that cannot be hydrated are
+ * dropped as unresolved placeholders.
  *
  * @param {Array<Object>} rows persisted and/or transient history rows
  * @returns {Array<Object>} reconciled Marathon Match history rows
  */
 function reconcileLegacyMarathonHistoryRows (rows) {
-  const visibleRows = selectVisibleMarathonHistoryRows(rows)
+  const preparedRows = mergeLegacyMarathonRowsIntoCanonicalRows(
+    backfillCanonicalMarathonRatingsFromNextOldRating(rows)
+  )
+  const visibleRows = selectVisibleMarathonHistoryRows(preparedRows)
   const hasReratedCanonicalRows = _.some(visibleRows, isReratedCanonicalMarathonHistoryRow)
   if (hasReratedCanonicalRows) {
     return visibleRows
   }
 
-  const authoritativeLegacyRows = _.filter(rows || [], row =>
+  const authoritativeLegacyRows = _.filter(visibleRows || [], row =>
     isLegacyNumericMarathonHistoryRow(row) &&
     !!row.challengeName &&
     !_.isNil(row.newRating)
@@ -1875,7 +1879,7 @@ function reconcileLegacyMarathonHistoryRows (rows) {
     _.map(authoritativeLegacyRows, row => row.eventDate ? row.eventDate.getTime() : 0)
   ) || 0
 
-  return _.filter(rows || [], (row) => {
+  return _.filter(visibleRows || [], (row) => {
     if (!row ||
       row.trackName !== TRACK_NAMES.DATA_SCIENCE ||
       row.typeName !== TYPE_NAMES.MARATHON_MATCH) {
@@ -1887,7 +1891,10 @@ function reconcileLegacyMarathonHistoryRows (rows) {
     }
 
     const eventTimestamp = row.eventDate ? row.eventDate.getTime() : 0
-    return !latestLegacyTimestamp || eventTimestamp > latestLegacyTimestamp
+    return !latestLegacyTimestamp ||
+      eventTimestamp > latestLegacyTimestamp ||
+      !_.isNil(row.newRating) ||
+      !_.isNil(toVisiblePlacement(row.placement))
   })
 }
 
@@ -2362,6 +2369,140 @@ function isReratedCanonicalMarathonHistoryRow (row) {
     row.typeName === TYPE_NAMES.MARATHON_MATCH &&
     (row.createdBy === RERATE_MARATHON_ACTOR || row.updatedBy === RERATE_MARATHON_ACTOR) &&
     !_.isNil(row.newRating)
+}
+
+/**
+ * Extract a Marathon Match round number from canonical or legacy challenge names.
+ * This lets migrated numeric legacy rows be reconciled with canonical Challenge
+ * rows even when their challenge ids are unrelated.
+ * @param {*} value challenge display name
+ * @returns {string|null} Marathon Match number, or null when unavailable
+ */
+function extractMarathonMatchNumber (value) {
+  const name = String(value || '').trim()
+  if (!name) {
+    return null
+  }
+
+  const match = name.match(/\b(?:MM|MARATHON\s+MATCH)\s*#?\s*(\d+)\b/i)
+  return match ? match[1] : null
+}
+
+/**
+ * Resolve a comparable Marathon Match number for a history row.
+ * @param {Object} row unified history row
+ * @returns {string|null} Marathon Match number, or null when unavailable
+ */
+function getMarathonHistoryMatchNumber (row) {
+  if (!row ||
+    row.trackName !== TRACK_NAMES.DATA_SCIENCE ||
+    row.typeName !== TYPE_NAMES.MARATHON_MATCH) {
+    return null
+  }
+
+  return extractMarathonMatchNumber(row.challengeName)
+}
+
+/**
+ * Fill missing canonical Marathon Match ratings from the next canonical row's
+ * oldRating. The migration stores many post-event MM ratings as the oldRating
+ * for the following challenge, so this recovers visible graph points until a
+ * native MM rerate rewrites canonical newRating values.
+ * @param {Array<Object>} rows annotated history rows
+ * @returns {Array<Object>} rows with recoverable canonical ratings filled
+ */
+function backfillCanonicalMarathonRatingsFromNextOldRating (rows) {
+  const clonedRows = _.map(rows || [], row => ({ ...row }))
+  const rowByIdentity = new Map(_.map(clonedRows, row => [row, row]))
+  const canonicalRows = _.filter(clonedRows, row =>
+    row &&
+    row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+    row.typeName === TYPE_NAMES.MARATHON_MATCH &&
+    !isLegacyNumericMarathonHistoryRow(row)
+  )
+
+  _.forEach(_.groupBy(canonicalRows, row => buildStatsTrackTypeKey(row.trackId, row.typeId)), (groupRows) => {
+    const orderedRows = _.orderBy(groupRows, [
+      row => (row.eventDate ? row.eventDate.getTime() : 0),
+      row => row.challengeId
+    ], ['asc', 'asc'])
+
+    for (let index = 0; index < orderedRows.length - 1; index += 1) {
+      const row = rowByIdentity.get(orderedRows[index]) || orderedRows[index]
+      const nextRow = orderedRows[index + 1]
+      if (_.isNil(row.newRating) && !_.isNil(nextRow.oldRating)) {
+        row.newRating = nextRow.oldRating
+      }
+      if (_.isNil(row.newVolatility) && !_.isNil(nextRow.oldVolatility)) {
+        row.newVolatility = nextRow.oldVolatility
+      }
+    }
+  })
+
+  return clonedRows
+}
+
+/**
+ * Merge duplicate legacy numeric Marathon Match rows into canonical rows with
+ * the same visible MM number. Canonical rows keep authoritative ChallengeWinner
+ * placements, while legacy rows can provide a rating or percentile when the
+ * canonical migration row has not been rerated yet.
+ * @param {Array<Object>} rows annotated history rows
+ * @returns {Array<Object>} reconciled rows without duplicate legacy MM numbers
+ */
+function mergeLegacyMarathonRowsIntoCanonicalRows (rows) {
+  const legacyByMatchNumber = new Map()
+  _.forEach(rows || [], (row) => {
+    if (!isLegacyNumericMarathonHistoryRow(row)) {
+      return
+    }
+
+    const matchNumber = getMarathonHistoryMatchNumber(row)
+    if (!matchNumber) {
+      return
+    }
+
+    const existing = legacyByMatchNumber.get(matchNumber)
+    const rowTimestamp = row.eventDate ? row.eventDate.getTime() : 0
+    const existingTimestamp = existing && existing.eventDate ? existing.eventDate.getTime() : 0
+    if (!existing || rowTimestamp >= existingTimestamp) {
+      legacyByMatchNumber.set(matchNumber, row)
+    }
+  })
+
+  const canonicalMatchNumbers = new Set()
+  const mergedRows = _.map(rows || [], (row) => {
+    if (!row || isLegacyNumericMarathonHistoryRow(row)) {
+      return row
+    }
+
+    const matchNumber = getMarathonHistoryMatchNumber(row)
+    if (!matchNumber) {
+      return row
+    }
+
+    canonicalMatchNumbers.add(matchNumber)
+    const legacyRow = legacyByMatchNumber.get(matchNumber)
+    if (!legacyRow) {
+      return row
+    }
+
+    return {
+      ...row,
+      newRating: _.isNil(row.newRating) ? legacyRow.newRating : row.newRating,
+      placement: toVisiblePlacement(row.placement) || toVisiblePlacement(legacyRow.placement),
+      percentile: _.isNil(row.percentile) ? legacyRow.percentile : row.percentile
+    }
+  })
+
+  return _.filter(mergedRows, (row) => {
+    if (!isLegacyNumericMarathonHistoryRow(row)) {
+      return true
+    }
+
+    const matchNumber = getMarathonHistoryMatchNumber(row)
+    return !matchNumber || !canonicalMatchNumbers.has(matchNumber)
+  })
 }
 
 /**

@@ -693,6 +693,96 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(historyRow.placement, 1)
   })
 
+  it('rerateMmTrack should skip non-completed Marathon Match challenges', async () => {
+    const completedChallengeId = 'mm-completed-challenge'
+    const activeChallengeId = 'mm-active-challenge'
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewRows = [
+      {
+        submissionId: 'submission-target-completed',
+        memberId: targetUserId,
+        challengeId: completedChallengeId,
+        aggregateScore: 100,
+        reviewedDate: new Date('2024-06-01T10:00:00.000Z'),
+        createdAt: new Date('2024-06-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-completed',
+        memberId: opponentUserId,
+        challengeId: completedChallengeId,
+        aggregateScore: 20,
+        reviewedDate: new Date('2024-06-01T10:05:00.000Z'),
+        createdAt: new Date('2024-06-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:05:00.000Z')
+      },
+      {
+        submissionId: 'submission-target-active',
+        memberId: targetUserId,
+        challengeId: activeChallengeId,
+        aggregateScore: 1,
+        reviewedDate: new Date('2024-07-01T10:00:00.000Z'),
+        createdAt: new Date('2024-07-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-07-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-active',
+        memberId: opponentUserId,
+        challengeId: activeChallengeId,
+        aggregateScore: 100,
+        reviewedDate: new Date('2024-07-01T10:05:00.000Z'),
+        createdAt: new Date('2024-07-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-07-01T09:05:00.000Z')
+      }
+    ]
+    const expectedTarget = buildExpectedTargetState(
+      targetUserId,
+      opponentUserId,
+      100,
+      20,
+      { relativeScoringEnabled: true, scoreDirection: 'MAXIMIZE' }
+    )
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient({
+        [completedChallengeId]: {
+          id: completedChallengeId,
+          status: 'COMPLETED',
+          endDate: new Date('2024-06-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        },
+        [activeChallengeId]: {
+          id: activeChallengeId,
+          status: 'ACTIVE',
+          endDate: new Date('2024-07-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        }
+      }),
+      null,
+      createMmReviewDbClient(reviewRows),
+      targetUserId
+    )
+
+    should.equal(result.ratingsUpdated, 1)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, activeChallengeId), undefined)
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    should.equal(statsRow.rating, expectedTarget.rating)
+    should.equal(statsRow.mostRecentEventDate.getTime(), new Date('2024-06-01T00:00:00.000Z').getTime())
+  })
+
   it('rerateMmTrack should persist Marathon Match rating bounds from canonical rerated history', async () => {
     const firstChallengeId = 'mm-bound-first'
     const secondChallengeId = 'mm-bound-second'

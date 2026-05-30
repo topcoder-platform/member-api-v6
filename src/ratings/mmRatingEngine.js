@@ -44,6 +44,7 @@ const SCORE_DIRECTION_MINIMIZE = 'MINIMIZE'
 const RATING_PATH_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_PATH_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 const VALID_MM_SUBMISSION_STATUSES = ['ACTIVE', 'COMPLETED_WITHOUT_WIN', 'FAILED_REVIEW']
+const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
 const DEFAULT_MM_SCORING_CONFIG = Object.freeze({
   relativeScoringEnabled: true,
   scoreDirection: 'MAXIMIZE'
@@ -203,6 +204,22 @@ function buildReviewChallengeIds (challenge, sourceChallengeId) {
 function historyEntryMatchesChallengeId (historyEntry, challengeId) {
   const normalizedChallengeId = String(challengeId).trim()
   return buildChallengeIdCandidates(historyEntry).includes(normalizedChallengeId)
+}
+
+/**
+ * Determine whether challenge metadata is complete enough to use for rerating.
+ * Older test fixtures omit status, so a missing status is treated as completed;
+ * production Challenge rows include status and must be explicitly completed.
+ * @param {Object} challenge challenge metadata row
+ * @returns {boolean} true when the challenge can be consumed by a rating replay
+ */
+function isCompletedChallenge (challenge) {
+  const status = challenge && challenge.status
+  if (status === null || status === undefined || String(status).trim() === '') {
+    return true
+  }
+
+  return String(status).trim().toUpperCase() === COMPLETED_CHALLENGE_STATUS
 }
 
 /**
@@ -447,6 +464,27 @@ function createHistorySeedState (historyRows, seedIndex) {
       : DEFAULT_VOLATILITY,
     numRatings: seedIndex + 1
   }
+}
+
+/**
+ * Fill missing history newRating values from the following row's oldRating.
+ * Migrated MM history may store the post-event rating as the oldRating of the
+ * next event. Rerate seeding needs that value so opponent states do not collapse
+ * to unrated defaults before the native MM rerate has rewritten every row.
+ * @param {Array<Object>} historyRows participant history sorted by event date
+ * @returns {Array<Object>} cloned history rows with recoverable ratings filled
+ */
+function backfillHistoryRatingsFromNextOldRating (historyRows) {
+  const rows = (historyRows || []).map(row => ({ ...row }))
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    if (rows[index].newRating === null || rows[index].newRating === undefined) {
+      rows[index].newRating = rows[index + 1].oldRating
+    }
+    if (rows[index].newVolatility === null || rows[index].newVolatility === undefined) {
+      rows[index].newVolatility = rows[index + 1].oldVolatility
+    }
+  }
+  return rows
 }
 
 /**
@@ -1055,6 +1093,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
       id: true,
       legacyId: true,
       endDate: true,
+      status: true,
       track: {
         select: {
           name: true
@@ -1100,6 +1139,10 @@ function buildTargetHistory (mmResultRows, challengeMetadataById, ratingPath) {
   mmResultRows.forEach((row) => {
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !challenge.endDate) {
+      return
+    }
+
+    if (!isCompletedChallenge(challenge)) {
       return
     }
 
@@ -1178,7 +1221,9 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       id: true,
       userId: true,
       challengeId: true,
+      oldRating: true,
       newRating: true,
+      oldVolatility: true,
       newVolatility: true,
       eventDate: true
     }
@@ -1188,60 +1233,31 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
     historyByUserId.set(buildUserStateKey(participantId), [])
   })
 
+  const groupedRows = new Map()
   historyRows.forEach((row) => {
     const stateKey = buildUserStateKey(row.userId)
-    const cachedRows = historyByUserId.get(stateKey)
     const eventDate = normalizeDate(row.eventDate, row.eventDate)
 
-    if (!cachedRows || !eventDate) {
+    if (!historyByUserId.has(stateKey) || !eventDate) {
       return
     }
 
+    const cachedRows = groupedRows.get(stateKey) || []
     cachedRows.push({
       id: row.id,
       challengeId: String(row.challengeId),
+      oldRating: row.oldRating,
       newRating: row.newRating,
+      oldVolatility: row.oldVolatility,
       newVolatility: row.newVolatility,
       eventDate
     })
-  })
-}
-
-/**
- * Build per-challenge participant seed states from authoritative history rows.
- * The target user's in-memory state is taken from the rerate replay so later challenges
- * in the rerate span see prior rerated values, while every other participant is loaded
- * fresh from history as of the current challenge boundary.
- * @param {Object} membersClient prisma members client
- * @param {Array<BigInt>} participantIds challenge participant identifiers
- * @param {BigInt} targetUserId target member id
- * @param {Object} targetState current rerated target state
- * @param {Object} challengeEntry rerate challenge metadata
- * @param {Map<string, Array<Object>>} historyByUserId cached history rows per participant
- * @returns {Promise<Map<string, Object>>} seed state keyed by participant id
- */
-async function loadParticipantStates (membersClient, participantIds, targetUserId, targetState, challengeEntry, historyByUserId, dimensionIds) {
-  const targetStateKey = buildUserStateKey(targetUserId)
-  const stateByUserId = new Map()
-  const nonTargetParticipantIds = participantIds.filter((participantId) => buildUserStateKey(participantId) !== targetStateKey)
-
-  if (nonTargetParticipantIds.length > 0) {
-    await loadParticipantHistoryCache(membersClient, nonTargetParticipantIds, historyByUserId, dimensionIds)
-  }
-
-  participantIds.forEach((participantId) => {
-    const stateKey = buildUserStateKey(participantId)
-    if (stateKey === targetStateKey) {
-      stateByUserId.set(stateKey, cloneState(targetState))
-      return
-    }
-
-    const historyRows = historyByUserId.get(stateKey) || []
-    const seedIndex = findHistorySeedIndexForChallenge(historyRows, challengeEntry)
-    stateByUserId.set(stateKey, createHistorySeedState(historyRows, seedIndex))
+    groupedRows.set(stateKey, cachedRows)
   })
 
-  return stateByUserId
+  groupedRows.forEach((rows, stateKey) => {
+    historyByUserId.set(stateKey, backfillHistoryRatingsFromNextOldRating(rows))
+  })
 }
 
 /**
@@ -1515,6 +1531,7 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
       id: true,
       legacyId: true,
       endDate: true,
+      status: true,
       track: {
         select: {
           name: true
@@ -1543,6 +1560,10 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
   const history = []
   challenges.forEach((challenge) => {
     if (!challenge || !challenge.endDate) {
+      return
+    }
+
+    if (!isCompletedChallenge(challenge)) {
       return
     }
 
@@ -1813,6 +1834,7 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
  * @param {string|number} fromChallengeId starting challenge identifier
  * @param {Object} options optional rerate controls
  * @param {Object} options.ratingPath normalized rating path config
+ * @param {Array<Object>} [options.pathHistory] ordered completed MM timeline to replay
  * @param {boolean} [options.recalculateRanks=true] recompute ranks after this member rerate
  * @returns {Promise<Object>} rerate summary counts
  * @throws {Error} when the required review database connection is missing
@@ -1867,10 +1889,28 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     mostRecentEventDate: latestTargetHistoryEntry.eventDate,
     mostRecentSubmission: latestTargetHistoryEntry.createdAt
   }
+  const ratingHistory = Array.isArray(options.pathHistory) && options.pathHistory.length > 0
+    ? options.pathHistory
+      .map((entry) => ({
+        ...entry,
+        challengeId: String(entry.challengeId),
+        eventDate: normalizeDate(entry.eventDate, entry.eventDate),
+        createdAt: normalizeDate(entry.createdAt, entry.eventDate)
+      }))
+      .filter(entry => entry.challengeId && entry.eventDate)
+      .sort((left, right) => {
+        const leftEventDate = left.eventDate.getTime()
+        const rightEventDate = right.eventDate.getTime()
+        if (leftEventDate !== rightEventDate) {
+          return leftEventDate - rightEventDate
+        }
+        return left.challengeId.localeCompare(right.challengeId)
+      })
+    : targetHistory
 
   let startIndex = 0
   if (fromChallengeId) {
-    startIndex = targetHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
+    startIndex = ratingHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
     if (startIndex < 0) {
       throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${TYPE_NAME} event for this member`)
     }
@@ -1885,10 +1925,10 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     await loadParticipantHistoryCache(membersClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
 
     targetSeedHistoryRows = participantHistoryByUserId.get(targetUserKey) || []
-    targetSeedIndex = findHistoryIndexForChallenge(targetSeedHistoryRows, targetHistory[startIndex - 1])
+    targetSeedIndex = findHistoryIndexForChallenge(targetSeedHistoryRows, ratingHistory[startIndex - 1])
 
     if (targetSeedIndex < 0) {
-      targetSeedIndex = findHistorySeedIndexForChallenge(targetSeedHistoryRows, targetHistory[startIndex])
+      targetSeedIndex = findHistorySeedIndexForChallenge(targetSeedHistoryRows, ratingHistory[startIndex])
     }
 
     targetState = createHistorySeedState(targetSeedHistoryRows, targetSeedIndex)
@@ -1898,9 +1938,11 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
   let ratingsUpdated = 0
   const targetRatingBounds = buildSeedRatingBounds(targetSeedHistoryRows, targetSeedIndex)
   const shouldRecalculateRanks = options.recalculateRanks !== false
+  const stateByUserId = new Map()
+  stateByUserId.set(targetUserKey, cloneState(targetState))
 
-  for (let index = startIndex; index < targetHistory.length; index += 1) {
-    const historyEntry = targetHistory[index]
+  for (let index = startIndex; index < ratingHistory.length; index += 1) {
+    const historyEntry = ratingHistory[index]
     const { participantRows, scoringConfig } = await fetchMmParticipantsForChallenge(
       reviewDbClient,
       historyEntry
@@ -1910,17 +1952,18 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     }
 
     const participantIds = participantRows.map((row) => toBigIntUserId(row.memberId))
-    const stateByUserId = await loadParticipantStates(
-      membersClient,
-      participantIds,
-      normalizedUserId,
-      targetState,
-      historyEntry,
-      participantHistoryByUserId,
-      dimensionIds
-    )
+    const missingParticipantIds = participantIds.filter((participantId) => !stateByUserId.has(buildUserStateKey(participantId)))
+    if (missingParticipantIds.length > 0) {
+      await loadParticipantHistoryCache(membersClient, missingParticipantIds, participantHistoryByUserId, dimensionIds)
+      missingParticipantIds.forEach((participantId) => {
+        const stateKey = buildUserStateKey(participantId)
+        const historyRows = participantHistoryByUserId.get(stateKey) || []
+        const seedIndex = findHistorySeedIndexForChallenge(historyRows, historyEntry)
+        stateByUserId.set(stateKey, createHistorySeedState(historyRows, seedIndex))
+      })
+    }
 
-    const targetStateBeforeRun = cloneState(targetState)
+    const targetStateBeforeRun = cloneState(stateByUserId.get(targetUserKey) || targetState)
     const participantRowsByUserId = new Map()
     const participants = participantRows.map((row) => {
       const participantUserId = toBigIntUserId(row.memberId)
@@ -1937,6 +1980,9 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     })
 
     runQubitsRating(participants)
+    participants.forEach((participant) => {
+      stateByUserId.set(buildUserStateKey(participant.coderId), cloneState(participant))
+    })
 
     const updatedTarget = participants.find((participant) => participant.coderId === String(normalizedUserId))
     if (!updatedTarget) {

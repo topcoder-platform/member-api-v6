@@ -1811,6 +1811,147 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should prefer canonical Marathon Match placements over matching legacy imports', async () => {
+    const mm144LegacyDate = new Date('2023-02-21T00:00:00.000Z')
+    const mm144Date = new Date('2023-03-08T18:14:00.000Z')
+    const mm145LegacyDate = new Date('2023-05-02T00:00:00.000Z')
+    const mm145Date = new Date('2023-05-31T10:02:00.000Z')
+    const mm149Date = new Date('2023-11-14T10:22:00.000Z')
+    const mm144Challenge = {
+      id: 'mm-144-canonical',
+      legacyId: null,
+      name: 'Marathon Match 144',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: mm144Date,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const mm145Challenge = {
+      id: 'mm-145-canonical',
+      legacyId: null,
+      name: 'Marathon Match 145',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: mm145Date,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const mm149Challenge = {
+      id: 'mm-149-canonical',
+      legacyId: null,
+      name: 'Marathon Match 149',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: mm149Date,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [{
+          challengeId: global.BigInt(19578),
+          challengeName: 'Marathon Match 144 ROUND',
+          date: mm144LegacyDate,
+          rating: 2779,
+          placement: 4,
+          percentile: 96.5217
+        }, {
+          challengeId: global.BigInt(19628),
+          challengeName: 'MM 145',
+          date: mm145LegacyDate,
+          rating: 2925,
+          placement: 2,
+          percentile: 98.1982
+        }],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '19578',
+            eventDate: mm144LegacyDate,
+            newRating: 2779,
+            placement: 4,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-144-canonical',
+            eventDate: mm144Date,
+            oldRating: 2343,
+            newRating: null,
+            placement: 1,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '19628',
+            eventDate: mm145LegacyDate,
+            newRating: 2925,
+            placement: 2,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-145-canonical',
+            eventDate: mm145Date,
+            oldRating: 2436,
+            newRating: null,
+            placement: 1,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-149-canonical',
+            eventDate: mm149Date,
+            oldRating: 2531,
+            newRating: null,
+            placement: 2,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [mm144Challenge, mm145Challenge, mm149Challenge],
+      reviewRows: [],
+      challengeWinnerRows: []
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      const history = result[0].DATA_SCIENCE.MARATHON_MATCH.history
+      history.map(row => row.challengeId).should.not.include(19578)
+      history.map(row => row.challengeId).should.not.include(19628)
+      const mm144 = history.find(row => row.challengeId === 'mm-144-canonical')
+      const mm145 = history.find(row => row.challengeId === 'mm-145-canonical')
+      should.exist(mm144)
+      should.exist(mm145)
+      mm144.placement.should.equal(1)
+      mm145.placement.should.equal(1)
+      mm144.rating.should.equal(2436)
+      mm145.rating.should.equal(2531)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should prefer rerated canonical Marathon Match history over legacy imports', async () => {
     const legacyDate = new Date('2023-05-02T00:00:00.000Z')
     const oldCanonicalDate = new Date('2023-03-08T18:14:00.000Z')

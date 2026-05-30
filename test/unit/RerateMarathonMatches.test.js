@@ -261,8 +261,28 @@ describe('rerateMarathonMatches unit tests', () => {
       summary.ratingsUpdated.should.equal(6)
       summary.rankRowsUpdated.should.equal(2)
       rerated.sort((left, right) => left.userId.localeCompare(right.userId)).should.deep.equal([
-        { userId: '1001', fromChallengeId: null, options: { recalculateRanks: false } },
-        { userId: '1002', fromChallengeId: null, options: { recalculateRanks: false } }
+        {
+          userId: '1001',
+          fromChallengeId: null,
+          options: {
+            recalculateRanks: false,
+            pathHistory: [
+              { challengeId: 'mm-1', reviewChallengeIds: ['mm-1'], eventDate: new Date('2024-01-01T00:00:00Z') },
+              { challengeId: 'mm-2', reviewChallengeIds: ['mm-2'], eventDate: new Date('2024-02-01T00:00:00Z') }
+            ]
+          }
+        },
+        {
+          userId: '1002',
+          fromChallengeId: null,
+          options: {
+            recalculateRanks: false,
+            pathHistory: [
+              { challengeId: 'mm-1', reviewChallengeIds: ['mm-1'], eventDate: new Date('2024-01-01T00:00:00Z') },
+              { challengeId: 'mm-2', reviewChallengeIds: ['mm-2'], eventDate: new Date('2024-02-01T00:00:00Z') }
+            ]
+          }
+        }
       ])
       rankRecalculationCalls.should.deep.equal([
         {
