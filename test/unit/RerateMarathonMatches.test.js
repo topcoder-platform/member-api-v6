@@ -261,8 +261,20 @@ describe('rerateMarathonMatches unit tests', () => {
       summary.ratingsUpdated.should.equal(6)
       summary.rankRowsUpdated.should.equal(2)
       rerated.sort((left, right) => left.userId.localeCompare(right.userId)).should.deep.equal([
-        { userId: '1001', fromChallengeId: null, options: { recalculateRanks: false } },
-        { userId: '1002', fromChallengeId: null, options: { recalculateRanks: false } }
+        {
+          userId: '1001',
+          fromChallengeId: null,
+          options: {
+            recalculateRanks: false
+          }
+        },
+        {
+          userId: '1002',
+          fromChallengeId: null,
+          options: {
+            recalculateRanks: false
+          }
+        }
       ])
       rankRecalculationCalls.should.deep.equal([
         {

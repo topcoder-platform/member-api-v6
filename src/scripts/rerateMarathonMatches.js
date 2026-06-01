@@ -34,6 +34,9 @@
  *   come from reviewSummation.aggregateScore.
  * - Each member is replayed from the beginning by calling rerateMmTrack with no
  *   starting challenge id, so complete native MM history is persisted.
+ * - Member rerates intentionally use each target member's own MM history rather
+ *   than the full discovered path to avoid scanning every MM challenge once per
+ *   user.
  * - Current Marathon Match ranks are recalculated once after the batch, not once
  *   per member, to avoid long repeated interactive transactions.
  */

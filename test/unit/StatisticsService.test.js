@@ -1607,6 +1607,70 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should keep rerated Marathon Match final placement over paid winner placement', async () => {
+    const ratingDate = new Date('2020-02-29T20:11:00.000Z')
+    const challenge = {
+      id: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+      legacyId: 30092303,
+      name: 'SingleCell - Trajectory Inference Methods',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: ratingDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null,
+      winners: []
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+            eventDate: ratingDate,
+            newRating: 1492,
+            placement: 6,
+            mostRecent: true,
+            createdBy: 'stats-migration',
+            updatedBy: 'rerate-mm-stats'
+          }]
+        }
+      },
+      challengeRows: [],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+        type: 'PLACEMENT',
+        placement: 4,
+        createdAt: ratingDate,
+        challenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('SingleCell - Trajectory Inference Methods')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].rating.should.equal(1492)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(6)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should use the best duplicate passed-review Marathon Match placement', async () => {
     const ratingDate = new Date('2023-05-31T10:02:00.000Z')
     const challenge = {
@@ -1806,6 +1870,147 @@ describe('statistics service unit tests', () => {
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].rating.should.equal(2739)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should prefer canonical Marathon Match placements over matching legacy imports', async () => {
+    const mm144LegacyDate = new Date('2023-02-21T00:00:00.000Z')
+    const mm144Date = new Date('2023-03-08T18:14:00.000Z')
+    const mm145LegacyDate = new Date('2023-05-02T00:00:00.000Z')
+    const mm145Date = new Date('2023-05-31T10:02:00.000Z')
+    const mm149Date = new Date('2023-11-14T10:22:00.000Z')
+    const mm144Challenge = {
+      id: 'mm-144-canonical',
+      legacyId: null,
+      name: 'Marathon Match 144',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: mm144Date,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const mm145Challenge = {
+      id: 'mm-145-canonical',
+      legacyId: null,
+      name: 'Marathon Match 145',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: mm145Date,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const mm149Challenge = {
+      id: 'mm-149-canonical',
+      legacyId: null,
+      name: 'Marathon Match 149',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: mm149Date,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [{
+          challengeId: global.BigInt(19578),
+          challengeName: 'Marathon Match 144 ROUND',
+          date: mm144LegacyDate,
+          rating: 2779,
+          placement: 4,
+          percentile: 96.5217
+        }, {
+          challengeId: global.BigInt(19628),
+          challengeName: 'MM 145',
+          date: mm145LegacyDate,
+          rating: 2925,
+          placement: 2,
+          percentile: 98.1982
+        }],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '19578',
+            eventDate: mm144LegacyDate,
+            newRating: 2779,
+            placement: 4,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-144-canonical',
+            eventDate: mm144Date,
+            oldRating: 2343,
+            newRating: null,
+            placement: 1,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '19628',
+            eventDate: mm145LegacyDate,
+            newRating: 2925,
+            placement: 2,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-145-canonical',
+            eventDate: mm145Date,
+            oldRating: 2436,
+            newRating: null,
+            placement: 1,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-149-canonical',
+            eventDate: mm149Date,
+            oldRating: 2531,
+            newRating: null,
+            placement: 2,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [mm144Challenge, mm145Challenge, mm149Challenge],
+      reviewRows: [],
+      challengeWinnerRows: []
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      const history = result[0].DATA_SCIENCE.MARATHON_MATCH.history
+      history.map(row => row.challengeId).should.not.include(19578)
+      history.map(row => row.challengeId).should.not.include(19628)
+      const mm144 = history.find(row => row.challengeId === 'mm-144-canonical')
+      const mm145 = history.find(row => row.challengeId === 'mm-145-canonical')
+      should.exist(mm144)
+      should.exist(mm145)
+      mm144.placement.should.equal(1)
+      mm145.placement.should.equal(1)
+      mm144.rating.should.equal(2436)
+      mm145.rating.should.equal(2531)
     } finally {
       restore()
     }
