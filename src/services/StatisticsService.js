@@ -1210,8 +1210,9 @@ function historyRowsNeedPlacementEnrichment (rows) {
 
 /**
  * Determine whether Marathon Match placements should be verified against ChallengeWinner.
- * MM completion can publish placement winner rows after memberStatsHistory was
- * written, so even a positive persisted placement may need correction.
+ * Rerated canonical MM rows already store final-standing placement computed
+ * from MM result scores, while ChallengeWinner rows can represent payment
+ * placement and must not replace those rerated standings.
  * @param {Array<Object>} rows history rows already shaped for response building
  * @returns {boolean} true when MM placement verification should be attempted
  */
@@ -1219,7 +1220,8 @@ function marathonHistoryRowsNeedPlacementVerification (rows) {
   return _.some(rows || [], row =>
     !_.isNil(row.challengeId) &&
     row.trackName === TRACK_NAMES.DATA_SCIENCE &&
-    row.typeName === TYPE_NAMES.MARATHON_MATCH
+    row.typeName === TYPE_NAMES.MARATHON_MATCH &&
+    !(isReratedCanonicalMarathonHistoryRow(row) && toVisiblePlacement(row.placement))
   )
 }
 
@@ -1294,8 +1296,9 @@ function buildChallengeWinnerPlacementLookup (winnerRows) {
 
 /**
  * Fill or correct persisted placements from challenge-api winner rows.
- * This keeps the profile challenge cards accurate while older or prematurely
- * written history rows are aligned with authoritative placement data.
+ * Rerated canonical Marathon Match placements are preserved because they are
+ * computed from final-standing scores; ChallengeWinner can store paid/winner
+ * placement for MM and is only a fallback for non-rerated or missing rows.
  * @param {Array<Object>} rows persisted and/or synthesized history rows
  * @param {Array<Object>} winnerRows placement winner rows from challenge-api
  * @returns {Array<Object>} history rows with corrected placements when available
@@ -1310,8 +1313,11 @@ function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
   return _.map(rows || [], (row) => {
     const challengeKey = normalizeChallengeLookupKey(row.challengeId)
     const placement = challengeKey ? placementByChallengeId.get(challengeKey) : undefined
+    const existingPlacement = toVisiblePlacement(row.placement)
 
-    if (!placement || toVisiblePlacement(row.placement) === placement) {
+    if ((isReratedCanonicalMarathonHistoryRow(row) && existingPlacement) ||
+      !placement ||
+      existingPlacement === placement) {
       return row
     }
 

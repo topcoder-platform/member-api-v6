@@ -1607,6 +1607,70 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should keep rerated Marathon Match final placement over paid winner placement', async () => {
+    const ratingDate = new Date('2020-02-29T20:11:00.000Z')
+    const challenge = {
+      id: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+      legacyId: 30092303,
+      name: 'SingleCell - Trajectory Inference Methods',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: ratingDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null,
+      winners: []
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+            eventDate: ratingDate,
+            newRating: 1492,
+            placement: 6,
+            mostRecent: true,
+            createdBy: 'stats-migration',
+            updatedBy: 'rerate-mm-stats'
+          }]
+        }
+      },
+      challengeRows: [],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+        type: 'PLACEMENT',
+        placement: 4,
+        createdAt: ratingDate,
+        challenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('SingleCell - Trajectory Inference Methods')
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].rating.should.equal(1492)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(6)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should use the best duplicate passed-review Marathon Match placement', async () => {
     const ratingDate = new Date('2023-05-31T10:02:00.000Z')
     const challenge = {
