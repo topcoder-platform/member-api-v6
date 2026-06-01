@@ -69,6 +69,7 @@ const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
 const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
 const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
 const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
+const LEGACY_MARATHON_CANONICAL_OVERLAP_WINDOW_MS = 120 * 24 * 60 * 60 * 1000
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -1136,9 +1137,19 @@ function enrichUnifiedHistoryRowsWithChallengeMetadata (rows, challengeMetadataB
       return row
     }
 
+    const canonicalChallengeId = String(challenge.id)
+    const legacyChallengeId = normalizeChallengeLookupKey(
+      !_.isNil(challenge.legacyId)
+        ? challenge.legacyId
+        : _.get(challenge, 'legacyRecord.legacySystemId')
+    )
+    const preserveLegacyChallengeId = isLegacyNumericMarathonHistoryRow(row)
+
     return {
       ...row,
-      challengeId: String(challenge.id),
+      challengeId: preserveLegacyChallengeId ? challengeId : canonicalChallengeId,
+      canonicalChallengeId,
+      legacyChallengeId,
       challengeName: row.challengeName || challenge.name
     }
   })
@@ -1857,19 +1868,16 @@ function dedupeUnifiedHistoryRows (rows) {
 /**
  * Reconcile imported Marathon Match legacy rows with canonical rerated rows.
  *
- * After rerating, canonical UUID rows are authoritative and numeric legacy rows
- * are hidden. Before rerating, canonical rows with ChallengeWinner placements
- * are still preferred for matching MM round numbers, while legacy rows can
- * provide missing migrated ratings. Numeric rows that cannot be hydrated are
- * dropped as unresolved placeholders.
+ * Imported numeric MM rows are the authoritative rating history for migrated
+ * events. Canonical rerate rows are retained for new events that are outside the
+ * migrated legacy window. Numeric rows that cannot be hydrated are dropped as
+ * unresolved placeholders.
  *
  * @param {Array<Object>} rows persisted and/or transient history rows
  * @returns {Array<Object>} reconciled Marathon Match history rows
  */
 function reconcileLegacyMarathonHistoryRows (rows) {
-  const preparedRows = mergeLegacyMarathonRowsIntoCanonicalRows(
-    backfillCanonicalMarathonRatingsFromNextOldRating(rows)
-  )
+  const preparedRows = backfillCanonicalMarathonRatingsFromNextOldRating(rows)
   const visibleRows = selectVisibleMarathonHistoryRows(preparedRows)
   const hasReratedCanonicalRows = _.some(visibleRows, isReratedCanonicalMarathonHistoryRow)
   if (hasReratedCanonicalRows) {
@@ -2410,6 +2418,109 @@ function getMarathonHistoryMatchNumber (row) {
 }
 
 /**
+ * Build stable aliases used to identify duplicated migrated/canonical MM rows.
+ * Imported legacy history uses numeric ids that do not always match challenge-api
+ * legacy ids, so the MM round number is retained as a narrow fallback.
+ * @param {Object} row unified history row
+ * @returns {Array<string>} aliases for duplicate detection
+ */
+function getMarathonHistoryAliasKeys (row) {
+  const keys = _.chain([
+    row && row.challengeId,
+    row && row.canonicalChallengeId,
+    row && row.legacyChallengeId
+  ])
+    .map(normalizeChallengeLookupKey)
+    .filter(Boolean)
+    .map(key => `id:${key}`)
+    .uniq()
+    .value()
+
+  const matchNumber = getMarathonHistoryMatchNumber(row)
+  if (matchNumber) {
+    keys.push(`match:${matchNumber}`)
+  }
+
+  return keys
+}
+
+/**
+ * Determine whether a numeric imported MM row has enough data to preserve as a
+ * historical rating point.
+ * @param {Object} row unified history row
+ * @returns {boolean} true when the legacy row should win over rerated duplicates
+ */
+function isAuthoritativeLegacyMarathonHistoryRow (row) {
+  return isLegacyNumericMarathonHistoryRow(row) &&
+    !!row.challengeName &&
+    !_.isNil(row.newRating)
+}
+
+/**
+ * Build the set of aliases covered by authoritative imported MM history rows.
+ * @param {Array<Object>} rows unified history rows
+ * @returns {Set<string>} duplicate-detection aliases
+ */
+function buildAuthoritativeLegacyMarathonAliasSet (rows) {
+  const aliases = new Set()
+
+  _.forEach(rows || [], (row) => {
+    if (!isAuthoritativeLegacyMarathonHistoryRow(row)) {
+      return
+    }
+
+    _.forEach(getMarathonHistoryAliasKeys(row), key => aliases.add(key))
+  })
+
+  return aliases
+}
+
+/**
+ * Resolve the latest imported MM rating timestamp.
+ * Canonical rerate rows shortly after this timestamp are usually alternate ids
+ * for the same migrated history window, not new post-migration events.
+ * @param {Array<Object>} rows unified history rows
+ * @returns {number} latest authoritative legacy timestamp, or 0 when absent
+ */
+function getLatestAuthoritativeLegacyMarathonTimestamp (rows) {
+  return _.max(
+    _.map(_.filter(rows || [], isAuthoritativeLegacyMarathonHistoryRow), row =>
+      row.eventDate ? row.eventDate.getTime() : 0
+    )
+  ) || 0
+}
+
+/**
+ * Determine whether a canonical MM row should be hidden because an imported
+ * legacy row remains the authoritative historical rating point.
+ * @param {Object} row candidate canonical history row
+ * @param {Set<string>} legacyAliases aliases covered by imported legacy rows
+ * @param {number} latestLegacyTimestamp latest imported MM rating timestamp
+ * @returns {boolean} true when the row is a duplicate historical rerate
+ */
+function isLegacyCoveredCanonicalMarathonRow (row, legacyAliases, latestLegacyTimestamp) {
+  if (!row ||
+    row.trackName !== TRACK_NAMES.DATA_SCIENCE ||
+    row.typeName !== TYPE_NAMES.MARATHON_MATCH ||
+    isLegacyNumericMarathonHistoryRow(row)) {
+    return false
+  }
+
+  const rowAliases = getMarathonHistoryAliasKeys(row)
+  if (_.some(rowAliases, key => legacyAliases.has(key))) {
+    return true
+  }
+
+  if (!latestLegacyTimestamp || !isReratedCanonicalMarathonHistoryRow(row)) {
+    return false
+  }
+
+  const rowTimestamp = row.eventDate ? row.eventDate.getTime() : 0
+  return !!rowTimestamp &&
+    rowTimestamp <= latestLegacyTimestamp + LEGACY_MARATHON_CANONICAL_OVERLAP_WINDOW_MS
+}
+
+/**
  * Fill missing canonical Marathon Match ratings from the next canonical row's
  * oldRating. The migration stores many post-event MM ratings as the oldRating
  * for the following challenge, so this recovers visible graph points until a
@@ -2449,106 +2560,41 @@ function backfillCanonicalMarathonRatingsFromNextOldRating (rows) {
 }
 
 /**
- * Merge duplicate legacy numeric Marathon Match rows into canonical rows with
- * the same visible MM number. Canonical rows keep authoritative ChallengeWinner
- * placements, while legacy rows can provide a rating or percentile when the
- * canonical migration row has not been rerated yet.
- * @param {Array<Object>} rows annotated history rows
- * @returns {Array<Object>} reconciled rows without duplicate legacy MM numbers
- */
-function mergeLegacyMarathonRowsIntoCanonicalRows (rows) {
-  const legacyByMatchNumber = new Map()
-  _.forEach(rows || [], (row) => {
-    if (!isLegacyNumericMarathonHistoryRow(row)) {
-      return
-    }
-
-    const matchNumber = getMarathonHistoryMatchNumber(row)
-    if (!matchNumber) {
-      return
-    }
-
-    const existing = legacyByMatchNumber.get(matchNumber)
-    const rowTimestamp = row.eventDate ? row.eventDate.getTime() : 0
-    const existingTimestamp = existing && existing.eventDate ? existing.eventDate.getTime() : 0
-    if (!existing || rowTimestamp >= existingTimestamp) {
-      legacyByMatchNumber.set(matchNumber, row)
-    }
-  })
-
-  const canonicalMatchNumbers = new Set()
-  const mergedRows = _.map(rows || [], (row) => {
-    if (!row || isLegacyNumericMarathonHistoryRow(row)) {
-      return row
-    }
-
-    const matchNumber = getMarathonHistoryMatchNumber(row)
-    if (!matchNumber) {
-      return row
-    }
-
-    canonicalMatchNumbers.add(matchNumber)
-    const legacyRow = legacyByMatchNumber.get(matchNumber)
-    if (!legacyRow) {
-      return row
-    }
-
-    return {
-      ...row,
-      newRating: _.isNil(row.newRating) ? legacyRow.newRating : row.newRating,
-      placement: toVisiblePlacement(row.placement) || toVisiblePlacement(legacyRow.placement),
-      percentile: _.isNil(row.percentile) ? legacyRow.percentile : row.percentile
-    }
-  })
-
-  return _.filter(mergedRows, (row) => {
-    if (!isLegacyNumericMarathonHistoryRow(row)) {
-      return true
-    }
-
-    const matchNumber = getMarathonHistoryMatchNumber(row)
-    return !matchNumber || !canonicalMatchNumbers.has(matchNumber)
-  })
-}
-
-/**
  * Select Marathon Match rows that should drive visible history and rating bounds.
- * Once a rerate has produced canonical UUID rows, imported numeric legacy rows are
- * hidden so the response reflects the replayed rating timeline. Before a rerate,
- * hydrated legacy rows remain available for legacy parity.
+ * Imported numeric rows keep historical ratings stable. Canonical rerate rows
+ * are hidden only when they duplicate the migrated legacy window; newer
+ * canonical rows remain visible as post-migration MM results.
  * @param {Array<Object>} rows annotated history rows for one response
  * @returns {Array<Object>} rows after applying canonical-vs-legacy precedence
  */
 function selectVisibleMarathonHistoryRows (rows) {
-  const hasReratedCanonicalRows = _.some(rows || [], isReratedCanonicalMarathonHistoryRow)
+  const legacyAliases = buildAuthoritativeLegacyMarathonAliasSet(rows)
+  const latestLegacyTimestamp = getLatestAuthoritativeLegacyMarathonTimestamp(rows)
 
-  if (!hasReratedCanonicalRows) {
-    return _.filter(rows || [], (row) => {
-      if (isLegacyNumericMarathonHistoryRow(row)) {
-        return !!row.challengeName
-      }
-
+  return _.filter(rows || [], (row) => {
+    if (!row ||
+      row.trackName !== TRACK_NAMES.DATA_SCIENCE ||
+      row.typeName !== TYPE_NAMES.MARATHON_MATCH) {
       return true
-    })
-  }
+    }
 
-  return _.filter(rows || [], row => !isLegacyNumericMarathonHistoryRow(row))
+    if (isLegacyNumericMarathonHistoryRow(row)) {
+      return !!row.challengeName
+    }
+
+    return !isLegacyCoveredCanonicalMarathonRow(row, legacyAliases, latestLegacyTimestamp)
+  })
 }
 
 /**
  * Select Marathon Match history rows that should drive aggregate rating bounds.
- * The bounds path runs directly from memberStatsHistory, which does not store
- * legacy challenge names, so unresolved-name filtering is intentionally skipped.
+ * Bounds use the same legacy-over-canonical precedence as visible history after
+ * challenge metadata enrichment has restored legacy names where possible.
  * @param {Array<Object>} rows annotated history rows for one Marathon Match stat
  * @returns {Array<Object>} rows used to compute min/max rating
  */
 function selectMarathonHistoryRowsForRatingBounds (rows) {
-  const hasReratedCanonicalRows = _.some(rows || [], isReratedCanonicalMarathonHistoryRow)
-  if (hasReratedCanonicalRows) {
-    return _.filter(rows || [], row => !isLegacyNumericMarathonHistoryRow(row))
-  }
-
-  return rows || []
+  return selectVisibleMarathonHistoryRows(rows)
 }
 
 /**
@@ -2620,13 +2666,19 @@ async function hydrateMarathonRatingBoundsFromHistory (userId, statsRows) {
       challengeId: true,
       newRating: true,
       createdBy: true,
-      updatedBy: true
+      updatedBy: true,
+      eventDate: true
     }
   })
 
   if (!historyRows || historyRows.length === 0) {
     return statsRows || []
   }
+
+  const challengeMetadataById = await fetchChallengeMetadataMap(
+    prismaManager.getChallengesClient(),
+    _.uniq(_.map(historyRows, row => row.challengeId))
+  )
 
   return _.map(statsRows || [], (row) => {
     if (!isMarathonStatsRow(row)) {
@@ -2641,7 +2693,11 @@ async function hydrateMarathonRatingBoundsFromHistory (userId, statsRows) {
       trackName: TRACK_NAMES.DATA_SCIENCE,
       typeName: TYPE_NAMES.MARATHON_MATCH
     }))
-    const bounds = calculateHistoryRatingBounds(annotatedHistoryRows)
+    const enrichedHistoryRows = enrichUnifiedHistoryRowsWithChallengeMetadata(
+      annotatedHistoryRows,
+      challengeMetadataById
+    )
+    const bounds = calculateHistoryRatingBounds(enrichedHistoryRows)
 
     if (bounds.minRating === null || bounds.maxRating === null) {
       return row

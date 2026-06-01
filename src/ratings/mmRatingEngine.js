@@ -45,6 +45,7 @@ const RATING_PATH_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_PATH_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 const VALID_MM_SUBMISSION_STATUSES = ['ACTIVE', 'COMPLETED_WITHOUT_WIN', 'FAILED_REVIEW']
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
+const LEGACY_MM_CANONICAL_OVERLAP_WINDOW_MS = 120 * 24 * 60 * 60 * 1000
 const DEFAULT_MM_SCORING_CONFIG = Object.freeze({
   relativeScoringEnabled: true,
   scoreDirection: 'MAXIMIZE'
@@ -61,8 +62,10 @@ const READY_MM_REVIEW_SUMMATION_FILTER = `
 
 /**
  * Build the default Marathon Match scoring configuration used for historical
- * reviewSummation replay. Historical data is sourced from review-api only, and
- * aggregateScore is treated as the already-normalized higher-is-better result.
+ * reviewSummation replay. Historical data is sourced from review-api only.
+ * aggregateScore is treated as the already-normalized higher-is-better result
+ * when it is usable, with submission finalScore available as a fallback for
+ * legacy rows whose summation score is a placeholder.
  * @returns {Object} scoring configuration for MM participant normalization
  */
 function getDefaultMmScoringConfig () {
@@ -297,11 +300,55 @@ function buildSeedRatingBounds (historyRows, seedIndex) {
   }
 
   const seedRows = historyRows.slice(0, seedIndex + 1)
-  const canonicalRows = seedRows.filter(row => !isLegacyNumericChallengeId(row && row.challengeId))
-  const ratingRows = canonicalRows.length > 0 ? canonicalRows : seedRows
+  const ratingRows = selectLegacyPreferredMarathonHistoryRows(seedRows)
 
   ratingRows.forEach(row => extendRatingBounds(bounds, row && row.newRating))
   return bounds
+}
+
+/**
+ * Determine whether a canonical MM history row was written by the native rerater.
+ * @param {Object} row memberStatsHistory row
+ * @returns {boolean} true when the row is a rerated canonical UUID checkpoint
+ */
+function isReratedCanonicalHistoryRow (row) {
+  return !!(
+    row &&
+    !isLegacyNumericChallengeId(row.challengeId) &&
+    (row.createdBy === RERATE_ACTOR || row.updatedBy === RERATE_ACTOR)
+  )
+}
+
+/**
+ * Keep imported numeric MM history authoritative for migrated events.
+ * Canonical rerate rows inside the migrated overlap window are ignored for
+ * seeding and min/max bounds so old ratings do not move when a new event is
+ * rated later.
+ * @param {Array<Object>} historyRows memberStatsHistory rows ordered by event date
+ * @returns {Array<Object>} rows with duplicate historical canonical rerates removed
+ */
+function selectLegacyPreferredMarathonHistoryRows (historyRows) {
+  const rows = historyRows || []
+  const legacyTimestamps = rows
+    .filter(row => isLegacyNumericChallengeId(row && row.challengeId) && toOptionalRating(row && row.newRating) !== null)
+    .map(row => (row.eventDate ? row.eventDate.getTime() : 0))
+    .filter(timestamp => timestamp > 0)
+
+  if (legacyTimestamps.length === 0) {
+    return rows
+  }
+
+  const latestLegacyTimestamp = Math.max(...legacyTimestamps)
+  const overlapCutoff = latestLegacyTimestamp + LEGACY_MM_CANONICAL_OVERLAP_WINDOW_MS
+
+  return rows.filter((row) => {
+    if (!isReratedCanonicalHistoryRow(row)) {
+      return true
+    }
+
+    const rowTimestamp = row.eventDate ? row.eventDate.getTime() : 0
+    return !rowTimestamp || rowTimestamp > overlapCutoff
+  })
 }
 
 /**
@@ -311,6 +358,29 @@ function buildSeedRatingBounds (historyRows, seedIndex) {
  */
 function buildUserStateKey (userId) {
   return String(userId)
+}
+
+/**
+ * Compare persisted history ids that may be numbers, strings, or BigInts.
+ * @param {*} left left history id
+ * @param {*} right right history id
+ * @returns {number} negative when left sorts before right
+ */
+function compareValuesForHistoryRefresh (left, right) {
+  if (isBigIntValue(left) || isBigIntValue(right)) {
+    const leftValue = toBigIntUserId(left)
+    const rightValue = toBigIntUserId(right)
+    if (leftValue === rightValue) {
+      return 0
+    }
+    return leftValue > rightValue ? 1 : -1
+  }
+
+  if (left === right) {
+    return 0
+  }
+
+  return left > right ? 1 : -1
 }
 
 /**
@@ -619,9 +689,9 @@ function shouldUsePlacementScores (participantRows) {
 /**
  * Normalize one Marathon Match score for Qubits ordering.
  * Complete source placements are authoritative final standings. Otherwise,
- * relative-scoring aggregates are treated as higher-is-better, while
- * non-relative MINIMIZE challenges need inversion to match standings order.
- * Placement is only a fallback when the row does not have an aggregate score.
+ * relative-scoring scores are treated as higher-is-better, while non-relative
+ * MINIMIZE challenges need inversion to match standings order. Placement is
+ * only a fallback when the row does not have a usable score.
  * @param {Object} row participant result row
  * @param {Object} scoringConfig relative scoring configuration for the challenge
  * @param {Object} [options] score normalization options
@@ -634,8 +704,8 @@ function normalizeScore (row, scoringConfig, options = {}) {
     return -placement
   }
 
-  const aggregateScore = Number(row.aggregateScore)
-  if (!Number.isFinite(aggregateScore)) {
+  const score = getMmResultScore(row)
+  if (!Number.isFinite(score)) {
     return placement ? -placement : 0
   }
 
@@ -644,10 +714,10 @@ function normalizeScore (row, scoringConfig, options = {}) {
     scoringConfig.relativeScoringEnabled === false &&
     scoringConfig.scoreDirection === SCORE_DIRECTION_MINIMIZE
   ) {
-    return -aggregateScore
+    return -score
   }
 
-  return aggregateScore
+  return score
 }
 
 /**
@@ -723,6 +793,50 @@ function isEligibleMmSubmissionStatus (value) {
 }
 
 /**
+ * Resolve the best available Marathon Match score from a review result row.
+ * Positive aggregate scores keep the higher-precision summation value, while
+ * positive submission final scores recover legacy rows whose aggregateScore is
+ * a zero or -1 placeholder.
+ * @param {Object} row candidate result row
+ * @returns {number} score value, or NaN when no numeric score is available
+ */
+function getMmResultScore (row) {
+  const aggregateScore = Number(row && row.aggregateScore)
+  const finalScore = Number(row && row.finalScore)
+
+  if (Number.isFinite(aggregateScore) && aggregateScore > 0) {
+    return aggregateScore
+  }
+
+  if (Number.isFinite(finalScore) && finalScore > 0) {
+    return finalScore
+  }
+
+  return aggregateScore
+}
+
+/**
+ * Resolve whether a Marathon Match participant should enter ratings.
+ * Active placeholder submissions with no placement and non-positive scores are
+ * not final-standing rows; including them makes otherwise complete placement
+ * data look partial and can reorder rated competitors.
+ * @param {Object} row candidate result row
+ * @returns {boolean} true when the row has a usable placement or score
+ */
+function isMmParticipantEligibleForRating (row) {
+  if (!row || !isEligibleMmSubmissionStatus(row && row.submissionStatus)) {
+    return false
+  }
+
+  if (toOptionalPlacement(row.placement)) {
+    return true
+  }
+
+  const score = getMmResultScore(row)
+  return Number.isFinite(score) && score > 0
+}
+
+/**
  * Convert a date-like value into a comparable timestamp.
  * @param {*} value source date value
  * @returns {number} timestamp milliseconds, or 0 when unavailable
@@ -738,7 +852,7 @@ function toTimestampSortValue (value) {
 
 /**
  * Compare two eligible MM result rows by final-standing priority.
- * Placement rows are authoritative; otherwise higher aggregate score wins, with
+ * Placement rows are authoritative; otherwise higher usable MM score wins, with
  * review and submission recency used only as deterministic tie-breakers.
  * @param {Object} left candidate result row
  * @param {Object} right candidate result row
@@ -758,8 +872,8 @@ function compareMmResultRows (left, right) {
     return leftPlacement - rightPlacement
   }
 
-  const leftScore = Number(left && left.aggregateScore)
-  const rightScore = Number(right && right.aggregateScore)
+  const leftScore = getMmResultScore(left)
+  const rightScore = getMmResultScore(right)
   const hasLeftScore = Number.isFinite(leftScore)
   const hasRightScore = Number.isFinite(rightScore)
   if (hasLeftScore && !hasRightScore) {
@@ -798,7 +912,7 @@ function selectBestMmResultRows (rows, keySelector) {
   const candidateRows = rows || []
 
   candidateRows.forEach((row) => {
-    if (!isEligibleMmSubmissionStatus(row && row.submissionStatus)) {
+    if (!isMmParticipantEligibleForRating(row)) {
       return
     }
 
@@ -891,6 +1005,7 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
           COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
           s."legacyChallengeId",
           s."placement",
+          s."finalScore",
           s."status"::text AS "submissionStatus",
           s."createdAt" AS "submissionCreatedAt",
           rs."aggregateScore",
@@ -925,6 +1040,7 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
         "challengeId",
         "legacyChallengeId",
         "placement",
+        "finalScore",
         "submissionStatus",
         "submissionCreatedAt",
         "aggregateScore",
@@ -945,7 +1061,8 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
  * Fetch all challenge participants using the best eligible standings submission per member.
  * Historical Marathon Match data is read from review-api only; deleted submissions
  * are ignored, placement-bearing rows are preferred, and ready reviewSummation
- * aggregateScore is treated as already normalized for higher-is-better ordering.
+ * aggregateScore is treated as already normalized for higher-is-better ordering
+ * when usable. Submission finalScore backs up legacy placeholder summations.
  * Both submission.challengeId and submission.legacyChallengeId are considered.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string|Object} challengeId challenge identifier or history entry with legacy aliases
@@ -972,6 +1089,7 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
           COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
           s."legacyChallengeId",
           s."placement",
+          s."finalScore",
           s."status"::text AS "submissionStatus",
           s."createdAt" AS "submissionCreatedAt",
           rs."aggregateScore",
@@ -1013,6 +1131,7 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
         lss."challengeId",
         lss."legacyChallengeId",
         COALESCE(crp."placement", lss."placement") AS "placement",
+        lss."finalScore",
         lss."submissionStatus",
         lss."aggregateScore",
         lss."reviewedDate",
@@ -1235,7 +1354,9 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       newRating: true,
       oldVolatility: true,
       newVolatility: true,
-      eventDate: true
+      eventDate: true,
+      createdBy: true,
+      updatedBy: true
     }
   })
 
@@ -1260,13 +1381,18 @@ async function loadParticipantHistoryCache (membersClient, participantIds, histo
       newRating: row.newRating,
       oldVolatility: row.oldVolatility,
       newVolatility: row.newVolatility,
-      eventDate
+      eventDate,
+      createdBy: row.createdBy,
+      updatedBy: row.updatedBy
     })
     groupedRows.set(stateKey, cachedRows)
   })
 
   groupedRows.forEach((rows, stateKey) => {
-    historyByUserId.set(stateKey, backfillHistoryRatingsFromNextOldRating(rows))
+    historyByUserId.set(
+      stateKey,
+      selectLegacyPreferredMarathonHistoryRows(backfillHistoryRatingsFromNextOldRating(rows))
+    )
   })
 }
 
@@ -1407,11 +1533,42 @@ async function updateMaxRating (tx, userId, dimensionIds) {
  * @returns {Promise<void>} resolves when history flags are refreshed
  */
 async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
+  const historyWhere = {
+    userId,
+    trackId: dimensionIds.trackId,
+    typeId: dimensionIds.typeId
+  }
+  const historyRows = await tx.memberStatsHistory.findMany({
+    where: historyWhere,
+    orderBy: [{ eventDate: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      challengeId: true,
+      newRating: true,
+      newVolatility: true,
+      eventDate: true,
+      createdBy: true,
+      updatedBy: true
+    }
+  })
+  const visibleHistoryRows = selectLegacyPreferredMarathonHistoryRows(
+    historyRows.map((row) => ({
+      ...row,
+      eventDate: normalizeDate(row.eventDate, row.eventDate)
+    }))
+  ).sort((left, right) => {
+    const leftEventDate = left.eventDate ? left.eventDate.getTime() : 0
+    const rightEventDate = right.eventDate ? right.eventDate.getTime() : 0
+    if (leftEventDate !== rightEventDate) {
+      return rightEventDate - leftEventDate
+    }
+
+    return compareValuesForHistoryRefresh(right.id, left.id)
+  })
+
   await tx.memberStatsHistory.updateMany({
     where: {
-      userId,
-      trackId: dimensionIds.trackId,
-      typeId: dimensionIds.typeId,
+      ...historyWhere,
       mostRecent: true
     },
     data: {
@@ -1420,17 +1577,7 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
     }
   })
 
-  const latestHistory = await tx.memberStatsHistory.findFirst({
-    where: {
-      userId,
-      trackId: dimensionIds.trackId,
-      typeId: dimensionIds.typeId
-    },
-    orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
-    select: {
-      id: true
-    }
-  })
+  const latestHistory = visibleHistoryRows[0]
 
   if (!latestHistory) {
     return
@@ -1448,19 +1595,7 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
     }
   })
 
-  const previousHistory = await tx.memberStatsHistory.findFirst({
-    where: {
-      userId,
-      trackId: dimensionIds.trackId,
-      typeId: dimensionIds.typeId
-    },
-    orderBy: [{ eventDate: 'desc' }, { id: 'desc' }],
-    skip: 1,
-    select: {
-      newRating: true,
-      newVolatility: true
-    }
-  })
+  const previousHistory = visibleHistoryRows[1]
 
   const latestUpdate = {
     mostRecent: true,
@@ -1469,10 +1604,10 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
     updatedBy: RERATE_ACTOR
   }
 
-  if (currentStats && currentStats.rating !== null) {
+  if (!isLegacyNumericChallengeId(latestHistory.challengeId) && currentStats && currentStats.rating !== null) {
     latestUpdate.newRating = currentStats.rating
   }
-  if (currentStats && currentStats.volatility !== null) {
+  if (!isLegacyNumericChallengeId(latestHistory.challengeId) && currentStats && currentStats.volatility !== null) {
     latestUpdate.newVolatility = currentStats.volatility
   }
 
