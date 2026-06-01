@@ -69,7 +69,6 @@ const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
 const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
 const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
 const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
-const LEGACY_MARATHON_CANONICAL_OVERLAP_WINDOW_MS = 120 * 24 * 60 * 60 * 1000
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -2418,9 +2417,25 @@ function getMarathonHistoryMatchNumber (row) {
 }
 
 /**
+ * Build a conservative title alias for MM rows that do not expose a round number.
+ * Some legacy MM history names are truncated, so a normalized prefix is used
+ * only for longer names where accidental matches are unlikely.
+ * @param {*} value challenge display name
+ * @returns {string|null} normalized title prefix alias, or null when unavailable
+ */
+function getMarathonHistoryTitleAlias (value) {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+  return normalized.length >= 20 ? `title:${normalized.slice(0, 24)}` : null
+}
+
+/**
  * Build stable aliases used to identify duplicated migrated/canonical MM rows.
  * Imported legacy history uses numeric ids that do not always match challenge-api
- * legacy ids, so the MM round number is retained as a narrow fallback.
+ * legacy ids, so MM round numbers and longer normalized title prefixes are
+ * retained as narrow fallbacks.
  * @param {Object} row unified history row
  * @returns {Array<string>} aliases for duplicate detection
  */
@@ -2441,7 +2456,24 @@ function getMarathonHistoryAliasKeys (row) {
     keys.push(`match:${matchNumber}`)
   }
 
+  const titleAlias = getMarathonHistoryTitleAlias(row && row.challengeName)
+  if (titleAlias) {
+    keys.push(titleAlias)
+  }
+
   return keys
+}
+
+/**
+ * Build aliases that let a rerated canonical row replace a stale legacy row.
+ * Explicit id aliases intentionally stay out of this set because imported
+ * legacy rating rows still win when challenge-api maps the same legacy id.
+ * @param {Object} row unified history row
+ * @returns {Array<string>} canonical replacement aliases
+ */
+function getMarathonHistoryCanonicalReplacementAliasKeys (row) {
+  const titleAlias = getMarathonHistoryTitleAlias(row && row.challengeName)
+  return titleAlias ? [titleAlias] : []
 }
 
 /**
@@ -2454,6 +2486,18 @@ function isAuthoritativeLegacyMarathonHistoryRow (row) {
   return isLegacyNumericMarathonHistoryRow(row) &&
     !!row.challengeName &&
     !_.isNil(row.newRating)
+}
+
+/**
+ * Determine whether a canonical MM row has enough rerated data to replace an
+ * imported numeric legacy row.
+ * @param {Object} row unified history row
+ * @returns {boolean} true when the canonical row should win over legacy duplicates
+ */
+function isAuthoritativeCanonicalMarathonHistoryRow (row) {
+  return !isLegacyNumericMarathonHistoryRow(row) &&
+    isReratedCanonicalMarathonHistoryRow(row) &&
+    !_.isNil(toVisiblePlacement(row.placement))
 }
 
 /**
@@ -2476,18 +2520,22 @@ function buildAuthoritativeLegacyMarathonAliasSet (rows) {
 }
 
 /**
- * Resolve the latest imported MM rating timestamp.
- * Canonical rerate rows shortly after this timestamp are usually alternate ids
- * for the same migrated history window, not new post-migration events.
+ * Build the set of aliases covered by authoritative canonical MM rerate rows.
  * @param {Array<Object>} rows unified history rows
- * @returns {number} latest authoritative legacy timestamp, or 0 when absent
+ * @returns {Set<string>} duplicate-detection aliases
  */
-function getLatestAuthoritativeLegacyMarathonTimestamp (rows) {
-  return _.max(
-    _.map(_.filter(rows || [], isAuthoritativeLegacyMarathonHistoryRow), row =>
-      row.eventDate ? row.eventDate.getTime() : 0
-    )
-  ) || 0
+function buildAuthoritativeCanonicalMarathonAliasSet (rows) {
+  const aliases = new Set()
+
+  _.forEach(rows || [], (row) => {
+    if (!isAuthoritativeCanonicalMarathonHistoryRow(row)) {
+      return
+    }
+
+    _.forEach(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => aliases.add(key))
+  })
+
+  return aliases
 }
 
 /**
@@ -2495,10 +2543,9 @@ function getLatestAuthoritativeLegacyMarathonTimestamp (rows) {
  * legacy row remains the authoritative historical rating point.
  * @param {Object} row candidate canonical history row
  * @param {Set<string>} legacyAliases aliases covered by imported legacy rows
- * @param {number} latestLegacyTimestamp latest imported MM rating timestamp
  * @returns {boolean} true when the row is a duplicate historical rerate
  */
-function isLegacyCoveredCanonicalMarathonRow (row, legacyAliases, latestLegacyTimestamp) {
+function isLegacyCoveredCanonicalMarathonRow (row, legacyAliases) {
   if (!row ||
     row.trackName !== TRACK_NAMES.DATA_SCIENCE ||
     row.typeName !== TYPE_NAMES.MARATHON_MATCH ||
@@ -2506,18 +2553,13 @@ function isLegacyCoveredCanonicalMarathonRow (row, legacyAliases, latestLegacyTi
     return false
   }
 
-  const rowAliases = getMarathonHistoryAliasKeys(row)
-  if (_.some(rowAliases, key => legacyAliases.has(key))) {
-    return true
-  }
-
-  if (!latestLegacyTimestamp || !isReratedCanonicalMarathonHistoryRow(row)) {
+  const matchingLegacyAliases = _.filter(getMarathonHistoryAliasKeys(row), key => legacyAliases.has(key))
+  if (matchingLegacyAliases.length === 0) {
     return false
   }
 
-  const rowTimestamp = row.eventDate ? row.eventDate.getTime() : 0
-  return !!rowTimestamp &&
-    rowTimestamp <= latestLegacyTimestamp + LEGACY_MARATHON_CANONICAL_OVERLAP_WINDOW_MS
+  return !isAuthoritativeCanonicalMarathonHistoryRow(row) ||
+    _.some(matchingLegacyAliases, key => key.indexOf('id:') === 0)
 }
 
 /**
@@ -2569,7 +2611,7 @@ function backfillCanonicalMarathonRatingsFromNextOldRating (rows) {
  */
 function selectVisibleMarathonHistoryRows (rows) {
   const legacyAliases = buildAuthoritativeLegacyMarathonAliasSet(rows)
-  const latestLegacyTimestamp = getLatestAuthoritativeLegacyMarathonTimestamp(rows)
+  const canonicalAliases = buildAuthoritativeCanonicalMarathonAliasSet(rows)
 
   return _.filter(rows || [], (row) => {
     if (!row ||
@@ -2579,10 +2621,11 @@ function selectVisibleMarathonHistoryRows (rows) {
     }
 
     if (isLegacyNumericMarathonHistoryRow(row)) {
-      return !!row.challengeName
+      return !!row.challengeName &&
+        !_.some(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => canonicalAliases.has(key))
     }
 
-    return !isLegacyCoveredCanonicalMarathonRow(row, legacyAliases, latestLegacyTimestamp)
+    return !isLegacyCoveredCanonicalMarathonRow(row, legacyAliases)
   })
 }
 
