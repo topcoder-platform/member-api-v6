@@ -1693,6 +1693,84 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should prefer rerated SingleCell canonical history over the stale legacy numeric row', async () => {
+    const canonicalDate = new Date('2020-02-29T20:11:00.000Z')
+    const legacyDate = new Date('2019-06-07T00:00:00.000Z')
+    const challenge = {
+      id: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+      legacyId: 30092303,
+      name: 'SingleCell - Trajectory Inference Methods',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: canonicalDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null,
+      winners: []
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [{
+          challengeId: global.BigInt(17558),
+          challengeName: 'SingleCell - Trajectory Infere',
+          date: legacyDate,
+          rating: 1755,
+          placement: 57,
+          percentile: 85.6061
+        }],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '17558',
+            eventDate: legacyDate,
+            newRating: 1755,
+            placement: 57,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '74aaf772-5c1c-48bc-a50a-bccd529d7fb7',
+            eventDate: canonicalDate,
+            newRating: 1492,
+            placement: 6,
+            mostRecent: true,
+            createdBy: 'stats-migration',
+            updatedBy: 'rerate-mm-stats'
+          }]
+        }
+      },
+      challengeRows: [challenge],
+      reviewRows: [],
+      challengeWinnerRows: []
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      const history = result[0].DATA_SCIENCE.MARATHON_MATCH.history
+      history.map(row => row.challengeId).should.not.include(17558)
+      history.should.have.length(1)
+      history[0].challengeId.should.equal('74aaf772-5c1c-48bc-a50a-bccd529d7fb7')
+      history[0].challengeName.should.equal('SingleCell - Trajectory Inference Methods')
+      history[0].rating.should.equal(1492)
+      history[0].placement.should.equal(6)
+      history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should use the best duplicate passed-review Marathon Match placement', async () => {
     const ratingDate = new Date('2023-05-31T10:02:00.000Z')
     const challenge = {
