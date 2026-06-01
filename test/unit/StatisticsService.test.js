@@ -514,7 +514,7 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('getMemberStats should derive rerated Marathon Match min and max from canonical history', async () => {
+  it('getMemberStats should preserve imported Marathon Match rating bounds over historical rerates', async () => {
     const { service, restore } = loadStatisticsService({
       prismaStub: {
         $queryRaw: async () => [],
@@ -539,6 +539,15 @@ describe('statistics service unit tests', () => {
             typeId: 'type-mm-id',
             challengeId: '19708',
             newRating: 2955,
+            eventDate: new Date('2023-05-02T00:00:00.000Z'),
+            createdBy: 'stats-migration',
+            updatedBy: 'stats-migration'
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '19709',
+            newRating: 1641,
+            eventDate: new Date('2023-05-03T00:00:00.000Z'),
             createdBy: 'stats-migration',
             updatedBy: 'stats-migration'
           }, {
@@ -546,6 +555,7 @@ describe('statistics service unit tests', () => {
             typeId: 'type-mm-id',
             challengeId: 'first-mm-uuid',
             newRating: 1263,
+            eventDate: new Date('2023-05-31T10:02:00.000Z'),
             createdBy: 'stats-migration',
             updatedBy: 'rerate-mm-stats'
           }, {
@@ -553,11 +563,23 @@ describe('statistics service unit tests', () => {
             typeId: 'type-mm-id',
             challengeId: 'peak-mm-uuid',
             newRating: 2548,
+            eventDate: new Date('2023-06-01T10:02:00.000Z'),
             createdBy: 'stats-migration',
             updatedBy: 'rerate-mm-stats'
           }]
         }
-      }
+      },
+      challengeRows: [{
+        id: 'first-mm-uuid',
+        legacyId: 19708,
+        name: 'MM 148',
+        status: 'COMPLETED'
+      }, {
+        id: 'peak-mm-uuid',
+        legacyId: 19709,
+        name: 'MM 149',
+        status: 'COMPLETED'
+      }]
     })
 
     try {
@@ -565,8 +587,8 @@ describe('statistics service unit tests', () => {
 
       result.should.have.length(1)
       const rank = result[0].DATA_SCIENCE.MARATHON_MATCH.rank
-      rank.maximumRating.should.equal(2548)
-      rank.minimumRating.should.equal(1263)
+      rank.maximumRating.should.equal(2955)
+      rank.minimumRating.should.equal(1641)
     } finally {
       restore()
     }
@@ -1875,7 +1897,7 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('getHistoryStats should prefer canonical Marathon Match placements over matching legacy imports', async () => {
+  it('getHistoryStats should preserve imported Marathon Match history over matching canonical rerates', async () => {
     const mm144LegacyDate = new Date('2023-02-21T00:00:00.000Z')
     const mm144Date = new Date('2023-03-08T18:14:00.000Z')
     const mm145LegacyDate = new Date('2023-05-02T00:00:00.000Z')
@@ -2001,22 +2023,25 @@ describe('statistics service unit tests', () => {
 
       result.should.have.length(1)
       const history = result[0].DATA_SCIENCE.MARATHON_MATCH.history
-      history.map(row => row.challengeId).should.not.include(19578)
-      history.map(row => row.challengeId).should.not.include(19628)
-      const mm144 = history.find(row => row.challengeId === 'mm-144-canonical')
-      const mm145 = history.find(row => row.challengeId === 'mm-145-canonical')
+      history.map(row => row.challengeId).should.not.include('mm-144-canonical')
+      history.map(row => row.challengeId).should.not.include('mm-145-canonical')
+      const mm144 = history.find(row => row.challengeId === 19578)
+      const mm145 = history.find(row => row.challengeId === 19628)
+      const mm149 = history.find(row => row.challengeId === 'mm-149-canonical')
       should.exist(mm144)
       should.exist(mm145)
-      mm144.placement.should.equal(1)
-      mm145.placement.should.equal(1)
-      mm144.rating.should.equal(2436)
-      mm145.rating.should.equal(2531)
+      should.exist(mm149)
+      mm144.placement.should.equal(4)
+      mm145.placement.should.equal(2)
+      mm144.rating.should.equal(2779)
+      mm145.rating.should.equal(2925)
+      mm149.mostRecent.should.equal(true)
     } finally {
       restore()
     }
   })
 
-  it('getHistoryStats should prefer rerated canonical Marathon Match history over legacy imports', async () => {
+  it('getHistoryStats should append new canonical Marathon Match rows after imported history', async () => {
     const legacyDate = new Date('2023-05-02T00:00:00.000Z')
     const oldCanonicalDate = new Date('2023-03-08T18:14:00.000Z')
     const newCanonicalDate = new Date('2025-08-27T17:05:00.000Z')
@@ -2035,8 +2060,8 @@ describe('statistics service unit tests', () => {
     }
     const oldChallenge = {
       id: 'old-mm-challenge',
-      legacyId: null,
-      name: 'Marathon Match 144',
+      legacyId: 19708,
+      name: 'MM 148',
       status: 'COMPLETED',
       trackId: 'track-ds-id',
       typeId: 'type-mm-id',
@@ -2108,10 +2133,10 @@ describe('statistics service unit tests', () => {
       history[0].challengeId.should.equal('new-mm-challenge')
       history[0].rating.should.equal(2279)
       history[0].mostRecent.should.equal(true)
-      history[1].challengeId.should.equal('old-mm-challenge')
-      history[1].challengeName.should.equal('Marathon Match 144')
-      history[1].rating.should.equal(2560)
-      history[1].placement.should.equal(1)
+      history[1].challengeId.should.equal(19708)
+      history[1].challengeName.should.equal('MM 148')
+      history[1].rating.should.equal(2955)
+      history[1].placement.should.equal(3)
     } finally {
       restore()
     }
