@@ -16,7 +16,7 @@ if (!communicationSecureFields.includes('email')) {
 
 const defaultRatingPaths = [
   {
-    name: 'AI',
+    name: 'AI Engineering',
     track: 'DATA_SCIENCE',
     tags: ['AI', 'AI Exponential League']
   }

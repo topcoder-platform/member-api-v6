@@ -87,7 +87,8 @@
       "mocha"
     ],
     "ignore": [
-      "/prisma/"
+      "/prisma/",
+      "/packages/"
     ]
   }
 }
