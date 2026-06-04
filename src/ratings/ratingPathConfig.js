@@ -16,6 +16,23 @@ function normalizeRatingPathName (value) {
 }
 
 /**
+ * Build the deterministic ChallengeType id used for a configured rating path.
+ * The rating engine stores path rows with this id so memberStats can keep a
+ * valid ChallengeType foreign key while API responses can still display the
+ * configured path name.
+ * @param {Object} ratingPath normalized or raw rating path config
+ * @returns {string} deterministic custom ChallengeType id
+ */
+function buildRatingPathTypeId (ratingPath) {
+  const slug = normalizeRatingPathName(ratingPath && ratingPath.name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  return `rating-path-${slug || 'custom'}`
+}
+
+/**
  * Normalize a challenge tag or skill id for case-insensitive matching.
  * @param {*} value raw challenge tag or skill id
  * @returns {string} normalized lookup key
@@ -157,6 +174,24 @@ function getConfiguredRatingPath (entries, ratingName) {
 }
 
 /**
+ * Find a configured rating path by its deterministic ChallengeType id.
+ * This supports stats reads and filters when the challenge dimension lookup
+ * cannot resolve a newly-created custom type row yet.
+ * @param {Array<Object>} entries raw or normalized rating path config entries
+ * @param {*} typeId stored ChallengeType id
+ * @returns {Object|null} normalized rating path config or null when not configured
+ */
+function getConfiguredRatingPathByTypeId (entries, typeId) {
+  const normalizedTypeId = String(typeId || '').trim().toLowerCase()
+  if (!normalizedTypeId) {
+    return null
+  }
+
+  return normalizeRatingPathConfigs(entries)
+    .find((entry) => buildRatingPathTypeId(entry).toLowerCase() === normalizedTypeId) || null
+}
+
+/**
  * Check whether a challenge's tags and skills match a configured rating path.
  * Configured tags match when any tag is present. Configured skill ids match only
  * when every configured skill id is present on the challenge.
@@ -204,11 +239,13 @@ module.exports = {
   DEFAULT_RATING_PATH_TRACK,
   RATING_PATH_TRACK_NAMES,
   normalizeRatingPathName,
+  buildRatingPathTypeId,
   normalizeRatingPathTag,
   normalizeRatingPathSkillId,
   normalizeRatingPathTrack,
   normalizeRatingPathConfig,
   normalizeRatingPathConfigs,
   getConfiguredRatingPath,
+  getConfiguredRatingPathByTypeId,
   challengeMatchesRatingPath
 }

@@ -2,6 +2,8 @@
  * This service provides operations of members.
  */
 
+/* global BigInt */
+
 const _ = require('lodash')
 const Joi = require('joi')
 const crypto = require('crypto')
@@ -42,7 +44,8 @@ const moment = require('moment-timezone')
 const MEMBER_FIELDS = ['userId', 'handle', 'handleLower', 'firstName', 'lastName', 'tracks', 'status',
   'addresses', 'description', 'email', 'country', 'homeCountryCode', 'competitionCountryCode', 'photoURL', 'verified', 'maxRating',
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy', 'loginCount', 'lastLoginDate', 'skills', 'availableForGigs',
-  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified', 'recentActivity']
+  'skillScoreDeduction', 'namesAndHandleAppearance', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate', 'identityVerified', 'recentActivity',
+  'challengePoints']
 
 const INTERNAL_MEMBER_FIELDS = ['newEmail', 'emailVerifyToken', 'emailVerifyTokenDate', 'newEmailVerifyToken',
   'newEmailVerifyTokenDate', 'handleSuggest', 'lastProfileConfirmationDate', 'availableForGigsLastUpdateDate']
@@ -196,6 +199,40 @@ async function getMemberRecentActivity (userId) {
   }
 }
 
+/**
+ * Build the profile challenge-point summary from stored challenge point rows.
+ * @param {Array<Object>} challengePointRows Stored memberChallengePoints rows
+ * @returns {Object} Public challenge point summary with total, count, and details
+ */
+function buildChallengePointsSummary (challengePointRows) {
+  const details = _.map(challengePointRows || [], row => ({
+    challengeId: row.challengeId,
+    challengeName: row.challengeName,
+    userId: helper.bigIntToNumber(row.userId),
+    placement: row.placement,
+    points: row.points
+  }))
+
+  return {
+    total: _.sumBy(details, 'points'),
+    challenges: details.length,
+    details
+  }
+}
+
+/**
+ * Replace loaded challenge-point rows on a member response with a public summary.
+ * @param {Object} member Prisma member payload that may include challengePoints
+ * @returns {void}
+ */
+function applyChallengePointsSummary (member) {
+  if (!member || !_.has(member, 'challengePoints')) {
+    return
+  }
+
+  member.challengePoints = buildChallengePointsSummary(member.challengePoints)
+}
+
 const countryCodes = countryCallingCodes.codes || []
 
 /**
@@ -238,6 +275,14 @@ async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
   }
   if (_.includes(selectFields, 'phones')) {
     prismaFilter.include.phones = true
+  }
+  if (_.includes(selectFields, 'challengePoints')) {
+    prismaFilter.include.challengePoints = {
+      orderBy: [
+        { createdAt: 'desc' },
+        { challengeId: 'asc' }
+      ]
+    }
   }
 
   // To keep original business logic, let's use findMany
@@ -301,6 +346,7 @@ async function getMember (currentUser, handle, query) {
   // convert members data structure to response
   await annotateCurrentMaxRatingStats(member)
   prismaHelper.convertMember(member)
+  applyChallengePointsSummary(member)
 
   // Query identity verification status from finance schema if user has permission
   if (canSeeIdentityVerified) {
@@ -363,6 +409,79 @@ getMember.schema = {
   query: Joi.object().keys({
     fields: Joi.string()
   })
+}
+
+/**
+ * Normalize a challenge-point write payload into rows safe for persistence.
+ * @param {String} challengeId Challenge identifier whose rows are being replaced
+ * @param {Object} data Request body with challengeName and points entries
+ * @param {String} operatorId Audit identifier for create/update metadata
+ * @returns {Array<Object>} Normalized memberChallengePoints createMany rows
+ */
+function buildChallengePointWriteRows (challengeId, data, operatorId) {
+  const challengeName = data.challengeName.trim()
+  const rowsByUserId = new Map()
+
+  _.forEach(data.points, item => {
+    const userId = BigInt(item.userId)
+    rowsByUserId.set(userId.toString(), {
+      challengeId,
+      challengeName,
+      userId,
+      placement: Number(item.placement),
+      points: Number(item.points),
+      createdBy: operatorId,
+      updatedBy: operatorId
+    })
+  })
+
+  return Array.from(rowsByUserId.values())
+}
+
+/**
+ * Replace all challenge-point rows for one challenge.
+ * @param {Object} currentUser the user who performs operation
+ * @param {String} challengeId challenge identifier whose point rows should be stored
+ * @param {Object} data request body with challengeName and points rows
+ * @returns {Object} update summary with challenge id and row count
+ */
+async function updateChallengePoints (currentUser, challengeId, data) {
+  const operatorId = String(currentUser && (currentUser.userId || currentUser.sub) ? (currentUser.userId || currentUser.sub) : 'member-api')
+  const rows = buildChallengePointWriteRows(challengeId, data, operatorId)
+
+  await prisma.$transaction(async tx => {
+    await tx.memberChallengePoints.deleteMany({
+      where: { challengeId }
+    })
+
+    if (rows.length > 0) {
+      await tx.memberChallengePoints.createMany({
+        data: rows
+      })
+    }
+  })
+
+  return {
+    challengeId,
+    challengeName: data.challengeName.trim(),
+    updated: rows.length
+  }
+}
+
+updateChallengePoints.schema = {
+  currentUser: Joi.any(),
+  challengeId: Joi.string().trim().required(),
+  data: Joi.object().keys({
+    challengeName: Joi.string().trim().required(),
+    points: Joi.array().items(Joi.object().keys({
+      userId: Joi.alternatives().try(
+        Joi.number().integer().positive(),
+        Joi.string().regex(/^\d+$/)
+      ).required(),
+      placement: Joi.number().integer().positive().required(),
+      points: Joi.number().integer().min(0).required()
+    })).required()
+  }).required()
 }
 
 /**
@@ -2233,6 +2352,7 @@ module.exports = {
   getProfileCompleteness,
   getMemberUserIdSignature,
   getMemberSkill,
+  updateChallengePoints,
   updateMember,
   updateHandle,
   verifyEmail,

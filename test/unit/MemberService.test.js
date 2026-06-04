@@ -86,6 +86,44 @@ describe('member service unit tests', () => {
       // should.equal(result.updatedBy, member1.updatedBy)
     })
 
+    it('get member includes challenge point summary and details', async () => {
+      const updateResult = await service.updateChallengePoints({ isMachine: true, userId: 'autopilot' }, 'challenge-1', {
+        challengeName: 'AI Points Challenge',
+        points: [
+          { userId: member1.userId, placement: 1, points: 250 },
+          { userId: member2.userId, placement: 2, points: 100 }
+        ]
+      })
+
+      should.equal(updateResult.updated, 2)
+
+      const result = await service.getMember({ isMachine: true }, member1.handle, {})
+      should.equal(result.challengePoints.total, 250)
+      should.equal(result.challengePoints.challenges, 1)
+      should.equal(result.challengePoints.details.length, 1)
+      should.equal(result.challengePoints.details[0].challengeId, 'challenge-1')
+      should.equal(result.challengePoints.details[0].challengeName, 'AI Points Challenge')
+      should.equal(result.challengePoints.details[0].placement, 1)
+      should.equal(result.challengePoints.details[0].points, 250)
+    })
+
+    it('update challenge points replaces stale rows for the challenge', async () => {
+      await service.updateChallengePoints({ isMachine: true, userId: 'autopilot' }, 'challenge-1', {
+        challengeName: 'AI Points Challenge Updated',
+        points: [
+          { userId: member1.userId, placement: 1, points: 300 }
+        ]
+      })
+
+      const member1Result = await service.getMember({ isMachine: true }, member1.handle, {})
+      should.equal(member1Result.challengePoints.total, 300)
+      should.equal(member1Result.challengePoints.details[0].challengeName, 'AI Points Challenge Updated')
+
+      const member2Result = await service.getMember({ isMachine: true }, member2.handle, {})
+      should.equal(member2Result.challengePoints.total, 0)
+      should.equal(member2Result.challengePoints.challenges, 0)
+    })
+
     it('get member successfully 2', async () => {
       const result = await service.getMember({ handle: 'test', roles: ['role'] }, member1.handle, {
         fields: 'userId,firstName,lastName,email,addresses'

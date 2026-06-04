@@ -26,8 +26,10 @@ const {
   rerateMmTrack
 } = require('../ratings/mmRatingEngine')
 const {
+  buildRatingPathTypeId,
   challengeMatchesRatingPath,
   getConfiguredRatingPath,
+  getConfiguredRatingPathByTypeId,
   normalizeRatingPathConfigs
 } = require('../ratings/ratingPathConfig')
 const {
@@ -2864,8 +2866,9 @@ function annotateUnifiedDimensionRows (rows, dimensionLookup) {
 
 /**
  * Resolve a stats type filter to the stored value.
- * Known challenge types resolve to UUIDs, while custom rating path names
- * are stored directly in memberStats.typeId and must remain queryable by name.
+ * Known challenge types resolve through the dimension lookup. Configured rating
+ * path names and deterministic path ids resolve through RATING_PATHS so freshly
+ * created custom ChallengeType rows remain queryable even with a stale lookup.
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @param {*} value raw request filter value
  * @returns {string|undefined} stored filter value
@@ -2877,13 +2880,19 @@ function resolveStatsTypeFilterValue (dimensionLookup, value) {
   }
 
   const rawValue = String(value || '').trim()
+  const configuredRatingPath = getConfiguredRatingPath(config.RATING_PATHS, rawValue) ||
+    getConfiguredRatingPathByTypeId(config.RATING_PATHS, rawValue)
+  if (configuredRatingPath) {
+    return buildRatingPathTypeId(configuredRatingPath)
+  }
+
   return rawValue || undefined
 }
 
 /**
  * Resolve optional unified stats filter parameters into stored ids.
- * Track filters resolve to challenge UUIDs. Type filters also accept custom
- * rating path names that are stored directly as type ids.
+ * Track filters resolve to challenge UUIDs. Type filters also accept configured
+ * rating path names and deterministic path type ids.
  * @param {Object} query request query params
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @returns {Object} resolved filter payload

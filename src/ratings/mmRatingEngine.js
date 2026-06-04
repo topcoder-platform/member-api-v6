@@ -30,6 +30,7 @@ const {
   isChallengeRated
 } = require('./challengeRatingStatus')
 const {
+  buildRatingPathTypeId,
   challengeMatchesRatingPath,
   normalizeRatingPathName
 } = require('./ratingPathConfig')
@@ -381,22 +382,6 @@ function compareValuesForHistoryRefresh (left, right) {
   }
 
   return left > right ? 1 : -1
-}
-
-/**
- * Build the deterministic ChallengeType id for a configured rating path.
- * The unified stats tables enforce ChallengeType foreign keys, so custom rating
- * names need stable dimension rows before memberStats can reference them.
- * @param {Object} ratingPath normalized rating path config
- * @returns {string} deterministic custom ChallengeType id
- */
-function buildRatingPathTypeId (ratingPath) {
-  const slug = normalizeRatingPathName(ratingPath && ratingPath.name)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-
-  return `rating-path-${slug || 'custom'}`
 }
 
 /**

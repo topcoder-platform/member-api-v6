@@ -262,6 +262,19 @@ exports.Prisma.MemberStatsScalarFieldEnum = {
   updatedBy: 'updatedBy'
 };
 
+exports.Prisma.MemberChallengePointsScalarFieldEnum = {
+  id: 'id',
+  challengeId: 'challengeId',
+  challengeName: 'challengeName',
+  userId: 'userId',
+  placement: 'placement',
+  points: 'points',
+  createdAt: 'createdAt',
+  createdBy: 'createdBy',
+  updatedAt: 'updatedAt',
+  updatedBy: 'updatedBy'
+};
+
 exports.Prisma.MemberTraitsScalarFieldEnum = {
   id: 'id',
   userId: 'userId',
@@ -496,6 +509,7 @@ exports.Prisma.ModelName = {
   memberFinancial: 'memberFinancial',
   memberStatsHistory: 'memberStatsHistory',
   memberStats: 'memberStats',
+  memberChallengePoints: 'memberChallengePoints',
   memberTraits: 'memberTraits',
   memberTraitDevice: 'memberTraitDevice',
   memberTraitSoftware: 'memberTraitSoftware',

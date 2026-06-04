@@ -113,7 +113,7 @@ The following parameters can be set in config files or in env variables:
 - MISC_SECURE_FIELDS: Misc identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATISTICS_SECURE_FIELDS: Member Statistics identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATS_READ_SOURCE: Controls stats read backend, `unified` (default, new tables) or `legacy` (pre-refactor tables)
-- RATING_PATHS: JSON array of tag- and skill-based Development Challenge and Marathon Match rating paths. Each entry has `name`, optional `tags`, optional `skillIds`, and optional `track` (`DATA_SCIENCE`, `DEVELOP`, or `DEVELOPMENT`); at least one of `tags` or `skillIds` is required. Tags match any listed challenge tag, while skill IDs require every listed challenge skill. Defaults to `[{"name":"AI","track":"DATA_SCIENCE","tags":["AI","AI Exponential League"]}]`. Re-rate a path by passing `ratingName` to `POST /members/{handle}/stats/rerate`; rows are stored under `{track} / {name}` in unified stats.
+- RATING_PATHS: JSON array of tag- and skill-based Development Challenge and Marathon Match rating paths. Each entry has `name`, optional `tags`, optional `skillIds`, and optional `track` (`DATA_SCIENCE`, `DEVELOP`, or `DEVELOPMENT`); at least one of `tags` or `skillIds` is required. Tags match any listed challenge tag, while skill IDs require every listed challenge skill. Defaults to `[{"name":"AI Engineering","track":"DATA_SCIENCE","tags":["AI","AI Exponential League"]}]`. Re-rate a path by passing `ratingName` to `POST /members/{handle}/stats/rerate`; rows are stored under `{track} / {name}` in unified stats.
 - HEALTH_CHECK_TIMEOUT: health check timeout in milliseconds
 
 Set the following environment variables used by bus API to get TC M2M token (use 'set' insted of 'export' for Windows OS):
@@ -138,6 +138,44 @@ The following test parameters can be set in config file or in env variables:
 - M2M_UPDATE_ACCESS_TOKEN: M2M update (including 'delete') access token
 - S3_ENDPOINT: endpoint of AWS S3 API, for unit and e2e test only; default to `localhost:9000`
 
+## Challenge Point Profile Data
+
+Point-based challenge prizes are mirrored into member-api so profile pages can show totals and a per-challenge breakdown without reading tc-finance-api.
+
+Autopilot replaces the rows for one challenge with:
+
+```http
+PUT /v6/members/challenge-points/{challengeId}
+Content-Type: application/json
+
+{
+  "challengeName": "AI Points Challenge",
+  "points": [
+    { "userId": 123456, "placement": 1, "points": 500 }
+  ]
+}
+```
+
+`GET /v6/members/{handle}` includes a public `challengePoints` object by default:
+
+```json
+{
+  "challengePoints": {
+    "total": 2847,
+    "challenges": 14,
+    "details": [
+      {
+        "challengeId": "challenge-uuid",
+        "challengeName": "AI Points Challenge",
+        "userId": 123456,
+        "placement": 1,
+        "points": 500
+      }
+    ]
+  }
+}
+```
+
 ## Rating Path Operations
 
 Historical rating paths are configured with `RATING_PATHS`. The default AI path is:
@@ -145,14 +183,14 @@ Historical rating paths are configured with `RATING_PATHS`. The default AI path 
 ```json
 [
   {
-    "name": "AI",
+    "name": "AI Engineering",
     "track": "DATA_SCIENCE",
     "tags": ["AI", "AI Exponential League"]
   }
 ]
 ```
 
-The `track` value controls where the rating is stored in unified stats. Use `DATA_SCIENCE` to store rows under `DATA_SCIENCE / AI`, or `DEVELOP` / `DEVELOPMENT` to store rows under `DEVELOP / AI`. The rating engine includes both Marathon Match results and `challenge` type Development Challenge results when the challenges match the configured tags or skill IDs. When a configured rating name does not already exist as a `ChallengeType`, rerate creates a deterministic custom type row so unified `memberStats` foreign keys remain valid.
+The `track` value controls where the rating is stored in unified stats. Use `DATA_SCIENCE` to store rows under `DATA_SCIENCE / AI Engineering`, or `DEVELOP` / `DEVELOPMENT` to store rows under `DEVELOP / AI Engineering`. The rating engine includes both Marathon Match results and `challenge` type Development Challenge results when the challenges match the configured tags or skill IDs. When a configured rating name does not already exist as a `ChallengeType`, rerate creates a deterministic custom type row so unified `memberStats` foreign keys remain valid.
 
 ### Rating Calculation Details
 
@@ -170,7 +208,7 @@ Content-Type: application/json
 
 {
   "challengeId": "earliest-tagged-challenge-id-for-that-member",
-  "ratingName": "AI"
+  "ratingName": "AI Engineering"
 }
 ```
 
@@ -201,8 +239,8 @@ The script discovers completed Marathon Match challenges by `ChallengeType` id a
 To re-run a configured rating path for every member who participated in the configured challenge set, use the bulk script instead of the member-scoped API:
 
 ```bash
-pnpm rerate-rating-path -- --rating-name AI --dry-run
-pnpm rerate-rating-path -- --rating-name AI --concurrency 5
+pnpm rerate-rating-path -- --rating-name "AI Engineering" --dry-run
+pnpm rerate-rating-path -- --rating-name "AI Engineering" --concurrency 5
 ```
 
 The script discovers distinct user IDs from all rated challenges matching the configured path, then rerates each user from the start of the path so complete history is written without requiring individual handles or challenge IDs. It writes successfully processed user IDs to `rerateRatingPath.processedUserIds.json` by default. Marathon Match path events are also read from review summations and do not require `MM_DB_URL`.
@@ -210,24 +248,24 @@ The script discovers distinct user IDs from all rated challenges matching the co
 Useful script options:
 
 ```bash
-pnpm rerate-rating-path -- --rating-name AI --limit 100
-pnpm rerate-rating-path -- --rating-name AI --user-id 12345
-pnpm rerate-rating-path -- --rating-name AI --user-ids 12345,67890
-pnpm rerate-rating-path -- --rating-name AI --processed-user-ids-path /tmp/ai-rerated-users.json
+pnpm rerate-rating-path -- --rating-name "AI Engineering" --limit 100
+pnpm rerate-rating-path -- --rating-name "AI Engineering" --user-id 12345
+pnpm rerate-rating-path -- --rating-name "AI Engineering" --user-ids 12345,67890
+pnpm rerate-rating-path -- --rating-name "AI Engineering" --processed-user-ids-path /tmp/ai-rerated-users.json
 ```
 
 To view one member's rating and history for a `DATA_SCIENCE` path:
 
 ```http
-GET /v6/members/{handle}/stats?trackId=DATA_SCIENCE&typeId=AI
-GET /v6/members/{handle}/stats/history?trackId=DATA_SCIENCE&typeId=AI
+GET /v6/members/{handle}/stats?trackId=DATA_SCIENCE&typeId=AI%20Engineering
+GET /v6/members/{handle}/stats/history?trackId=DATA_SCIENCE&typeId=AI%20Engineering
 ```
 
 To view one member's rating and history for a `DEVELOPMENT` path, use the canonical unified track name:
 
 ```http
-GET /v6/members/{handle}/stats?trackId=DEVELOP&typeId=AI
-GET /v6/members/{handle}/stats/history?trackId=DEVELOP&typeId=AI
+GET /v6/members/{handle}/stats?trackId=DEVELOP&typeId=AI%20Engineering
+GET /v6/members/{handle}/stats/history?trackId=DEVELOP&typeId=AI%20Engineering
 ```
 
 To view aggregate rating distribution data:

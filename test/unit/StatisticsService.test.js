@@ -648,6 +648,53 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getMemberStats should resolve configured rating path name filters to deterministic type ids', async () => {
+    let findManyArgs
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [
+        { name: 'AI Engineering', track: 'DATA_SCIENCE', tags: ['AI', 'AI Exponential League'] }
+      ],
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findMany: async (args) => {
+            findManyArgs = args
+            return [
+              {
+                trackId: 'track-ds-id',
+                typeId: 'rating-path-ai-engineering',
+                challenges: 3,
+                wins: 0,
+                rating: 1517,
+                globalRank: 4,
+                volatility: 331,
+                mostRecentEventDate: new Date('2024-06-01T00:00:00.000Z'),
+                isPrivate: false
+              }
+            ]
+          }
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      }
+    })
+
+    try {
+      const result = await service.getMemberStats({ isMachine: true }, 'devtest1400', {
+        trackId: 'DATA_SCIENCE',
+        typeId: 'AI Engineering'
+      })
+
+      findManyArgs.where.typeId.should.equal('rating-path-ai-engineering')
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE['AI Engineering'])
+      should.not.exist(result[0].DATA_SCIENCE['rating-path-ai-engineering'])
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateMemberStats should route configured rating paths to the Marathon Match engine', async () => {
     let capturedOptions
     const { service, restore } = loadStatisticsService({
@@ -667,15 +714,15 @@ describe('statistics service unit tests', () => {
     try {
       const result = await service.rerateMemberStats({ isMachine: true }, 'devtest1400', {
         challengeId: 'ai-target-challenge',
-        ratingName: 'AI'
+        ratingName: 'AI Engineering'
       })
 
       should.exist(capturedOptions)
-      capturedOptions.ratingPath.name.should.equal('AI')
+      capturedOptions.ratingPath.name.should.equal('AI Engineering')
       capturedOptions.ratingPath.tags.should.deep.equal(['AI', 'AI Exponential League'])
       result.trackId.should.equal('DATA_SCIENCE')
-      result.typeId.should.equal('AI')
-      result.ratingName.should.equal('AI')
+      result.typeId.should.equal('AI Engineering')
+      result.ratingName.should.equal('AI Engineering')
       result.ratingTags.should.deep.equal(['AI', 'AI Exponential League'])
       result.ratingPathChallengesProcessed.should.equal(2)
       result.ratingsUpdated.should.equal(1)
@@ -797,8 +844,8 @@ describe('statistics service unit tests', () => {
         },
         {
           trackId: 'DATA_SCIENCE',
-          typeId: 'AI',
-          ratingName: 'AI',
+          typeId: 'AI Engineering',
+          ratingName: 'AI Engineering',
           ratingTags: ['AI', 'AI Exponential League'],
           ratingSkillIds: []
         }
@@ -808,8 +855,8 @@ describe('statistics service unit tests', () => {
         { userId: '102', challengeId: 'ai-target-challenge' }
       ])
       namedRerateCalls.should.deep.equal([
-        { userId: '101', challengeId: 'ai-target-challenge', ratingName: 'AI' },
-        { userId: '102', challengeId: 'ai-target-challenge', ratingName: 'AI' }
+        { userId: '101', challengeId: 'ai-target-challenge', ratingName: 'AI Engineering' },
+        { userId: '102', challengeId: 'ai-target-challenge', ratingName: 'AI Engineering' }
       ])
     } finally {
       restore()

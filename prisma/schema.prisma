@@ -74,6 +74,7 @@ model member {
   financial memberFinancial?
   memberStats memberStats[]
   memberStatsHistory memberStatsHistory[]
+  challengePoints memberChallengePoints[]
   memberTraits memberTraits?
 
   createdAt   DateTime @default(now())
@@ -244,6 +245,27 @@ model memberStats {
   @@index([countryRank])
   @@index([schoolRank])
   @@unique([userId, trackId, typeId])
+  @@schema("members")
+}
+
+model memberChallengePoints {
+  id            BigInt @id @default(autoincrement())
+  challengeId   String
+  challengeName String
+  userId        BigInt
+  placement     Int
+  points        Int
+
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  createdBy   String
+  updatedAt   DateTime? @updatedAt
+  updatedBy   String?
+
+  @@unique([challengeId, userId])
+  @@index([userId])
+  @@index([challengeId])
   @@schema("members")
 }
 

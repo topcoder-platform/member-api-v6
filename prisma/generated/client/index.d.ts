@@ -49,6 +49,11 @@ export type memberStatsHistory = $Result.DefaultSelection<Prisma.$memberStatsHis
  */
 export type memberStats = $Result.DefaultSelection<Prisma.$memberStatsPayload>
 /**
+ * Model memberChallengePoints
+ * 
+ */
+export type memberChallengePoints = $Result.DefaultSelection<Prisma.$memberChallengePointsPayload>
+/**
  * Model memberTraits
  * 
  */
@@ -394,6 +399,16 @@ export class PrismaClient<
     * ```
     */
   get memberStats(): Prisma.memberStatsDelegate<ExtArgs, ClientOptions>;
+
+  /**
+   * `prisma.memberChallengePoints`: Exposes CRUD operations for the **memberChallengePoints** model.
+    * Example usage:
+    * ```ts
+    * // Fetch zero or more MemberChallengePoints
+    * const memberChallengePoints = await prisma.memberChallengePoints.findMany()
+    * ```
+    */
+  get memberChallengePoints(): Prisma.memberChallengePointsDelegate<ExtArgs, ClientOptions>;
 
   /**
    * `prisma.memberTraits`: Exposes CRUD operations for the **memberTraits** model.
@@ -952,6 +967,7 @@ export namespace Prisma {
     memberFinancial: 'memberFinancial',
     memberStatsHistory: 'memberStatsHistory',
     memberStats: 'memberStats',
+    memberChallengePoints: 'memberChallengePoints',
     memberTraits: 'memberTraits',
     memberTraitDevice: 'memberTraitDevice',
     memberTraitSoftware: 'memberTraitSoftware',
@@ -981,7 +997,7 @@ export namespace Prisma {
       omit: GlobalOmitOptions
     }
     meta: {
-      modelProps: "member" | "memberAddress" | "memberPhone" | "memberMaxRating" | "memberFinancial" | "memberStatsHistory" | "memberStats" | "memberTraits" | "memberTraitDevice" | "memberTraitSoftware" | "memberTraitServiceProvider" | "memberTraitWork" | "memberTraitEducation" | "memberTraitBasicInfo" | "memberTraitLanguage" | "memberTraitOnboardChecklist" | "memberTraitPersonalization" | "memberTraitCommunity"
+      modelProps: "member" | "memberAddress" | "memberPhone" | "memberMaxRating" | "memberFinancial" | "memberStatsHistory" | "memberStats" | "memberChallengePoints" | "memberTraits" | "memberTraitDevice" | "memberTraitSoftware" | "memberTraitServiceProvider" | "memberTraitWork" | "memberTraitEducation" | "memberTraitBasicInfo" | "memberTraitLanguage" | "memberTraitOnboardChecklist" | "memberTraitPersonalization" | "memberTraitCommunity"
       txIsolationLevel: Prisma.TransactionIsolationLevel
     }
     model: {
@@ -1500,6 +1516,80 @@ export namespace Prisma {
           count: {
             args: Prisma.memberStatsCountArgs<ExtArgs>
             result: $Utils.Optional<MemberStatsCountAggregateOutputType> | number
+          }
+        }
+      }
+      memberChallengePoints: {
+        payload: Prisma.$memberChallengePointsPayload<ExtArgs>
+        fields: Prisma.memberChallengePointsFieldRefs
+        operations: {
+          findUnique: {
+            args: Prisma.memberChallengePointsFindUniqueArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload> | null
+          }
+          findUniqueOrThrow: {
+            args: Prisma.memberChallengePointsFindUniqueOrThrowArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>
+          }
+          findFirst: {
+            args: Prisma.memberChallengePointsFindFirstArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload> | null
+          }
+          findFirstOrThrow: {
+            args: Prisma.memberChallengePointsFindFirstOrThrowArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>
+          }
+          findMany: {
+            args: Prisma.memberChallengePointsFindManyArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>[]
+          }
+          create: {
+            args: Prisma.memberChallengePointsCreateArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>
+          }
+          createMany: {
+            args: Prisma.memberChallengePointsCreateManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          createManyAndReturn: {
+            args: Prisma.memberChallengePointsCreateManyAndReturnArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>[]
+          }
+          delete: {
+            args: Prisma.memberChallengePointsDeleteArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>
+          }
+          update: {
+            args: Prisma.memberChallengePointsUpdateArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>
+          }
+          deleteMany: {
+            args: Prisma.memberChallengePointsDeleteManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          updateMany: {
+            args: Prisma.memberChallengePointsUpdateManyArgs<ExtArgs>
+            result: BatchPayload
+          }
+          updateManyAndReturn: {
+            args: Prisma.memberChallengePointsUpdateManyAndReturnArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>[]
+          }
+          upsert: {
+            args: Prisma.memberChallengePointsUpsertArgs<ExtArgs>
+            result: $Utils.PayloadToResult<Prisma.$memberChallengePointsPayload>
+          }
+          aggregate: {
+            args: Prisma.MemberChallengePointsAggregateArgs<ExtArgs>
+            result: $Utils.Optional<AggregateMemberChallengePoints>
+          }
+          groupBy: {
+            args: Prisma.memberChallengePointsGroupByArgs<ExtArgs>
+            result: $Utils.Optional<MemberChallengePointsGroupByOutputType>[]
+          }
+          count: {
+            args: Prisma.memberChallengePointsCountArgs<ExtArgs>
+            result: $Utils.Optional<MemberChallengePointsCountAggregateOutputType> | number
           }
         }
       }
@@ -2420,6 +2510,7 @@ export namespace Prisma {
     memberFinancial?: memberFinancialOmit
     memberStatsHistory?: memberStatsHistoryOmit
     memberStats?: memberStatsOmit
+    memberChallengePoints?: memberChallengePointsOmit
     memberTraits?: memberTraitsOmit
     memberTraitDevice?: memberTraitDeviceOmit
     memberTraitSoftware?: memberTraitSoftwareOmit
@@ -2515,6 +2606,7 @@ export namespace Prisma {
     phones: number
     memberStats: number
     memberStatsHistory: number
+    challengePoints: number
   }
 
   export type MemberCountOutputTypeSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
@@ -2522,6 +2614,7 @@ export namespace Prisma {
     phones?: boolean | MemberCountOutputTypeCountPhonesArgs
     memberStats?: boolean | MemberCountOutputTypeCountMemberStatsArgs
     memberStatsHistory?: boolean | MemberCountOutputTypeCountMemberStatsHistoryArgs
+    challengePoints?: boolean | MemberCountOutputTypeCountChallengePointsArgs
   }
 
   // Custom InputTypes
@@ -2561,6 +2654,13 @@ export namespace Prisma {
    */
   export type MemberCountOutputTypeCountMemberStatsHistoryArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
     where?: memberStatsHistoryWhereInput
+  }
+
+  /**
+   * MemberCountOutputType without action
+   */
+  export type MemberCountOutputTypeCountChallengePointsArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: memberChallengePointsWhereInput
   }
 
 
@@ -3128,6 +3228,7 @@ export namespace Prisma {
     financial?: boolean | member$financialArgs<ExtArgs>
     memberStats?: boolean | member$memberStatsArgs<ExtArgs>
     memberStatsHistory?: boolean | member$memberStatsHistoryArgs<ExtArgs>
+    challengePoints?: boolean | member$challengePointsArgs<ExtArgs>
     memberTraits?: boolean | member$memberTraitsArgs<ExtArgs>
     _count?: boolean | MemberCountOutputTypeDefaultArgs<ExtArgs>
   }, ExtArgs["result"]["member"]>
@@ -3254,6 +3355,7 @@ export namespace Prisma {
     financial?: boolean | member$financialArgs<ExtArgs>
     memberStats?: boolean | member$memberStatsArgs<ExtArgs>
     memberStatsHistory?: boolean | member$memberStatsHistoryArgs<ExtArgs>
+    challengePoints?: boolean | member$challengePointsArgs<ExtArgs>
     memberTraits?: boolean | member$memberTraitsArgs<ExtArgs>
     _count?: boolean | MemberCountOutputTypeDefaultArgs<ExtArgs>
   }
@@ -3269,6 +3371,7 @@ export namespace Prisma {
       financial: Prisma.$memberFinancialPayload<ExtArgs> | null
       memberStats: Prisma.$memberStatsPayload<ExtArgs>[]
       memberStatsHistory: Prisma.$memberStatsHistoryPayload<ExtArgs>[]
+      challengePoints: Prisma.$memberChallengePointsPayload<ExtArgs>[]
       memberTraits: Prisma.$memberTraitsPayload<ExtArgs> | null
     }
     scalars: $Extensions.GetPayloadResult<{
@@ -3707,6 +3810,7 @@ export namespace Prisma {
     financial<T extends member$financialArgs<ExtArgs> = {}>(args?: Subset<T, member$financialArgs<ExtArgs>>): Prisma__memberFinancialClient<$Result.GetResult<Prisma.$memberFinancialPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     memberStats<T extends member$memberStatsArgs<ExtArgs> = {}>(args?: Subset<T, member$memberStatsArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberStatsPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     memberStatsHistory<T extends member$memberStatsHistoryArgs<ExtArgs> = {}>(args?: Subset<T, member$memberStatsHistoryArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberStatsHistoryPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
+    challengePoints<T extends member$challengePointsArgs<ExtArgs> = {}>(args?: Subset<T, member$challengePointsArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "findMany", GlobalOmitOptions> | Null>
     memberTraits<T extends member$memberTraitsArgs<ExtArgs> = {}>(args?: Subset<T, member$memberTraitsArgs<ExtArgs>>): Prisma__memberTraitsClient<$Result.GetResult<Prisma.$memberTraitsPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
     /**
      * Attaches callbacks for the resolution and/or rejection of the Promise.
@@ -4291,6 +4395,30 @@ export namespace Prisma {
     take?: number
     skip?: number
     distinct?: MemberStatsHistoryScalarFieldEnum | MemberStatsHistoryScalarFieldEnum[]
+  }
+
+  /**
+   * member.challengePoints
+   */
+  export type member$challengePointsArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    where?: memberChallengePointsWhereInput
+    orderBy?: memberChallengePointsOrderByWithRelationInput | memberChallengePointsOrderByWithRelationInput[]
+    cursor?: memberChallengePointsWhereUniqueInput
+    take?: number
+    skip?: number
+    distinct?: MemberChallengePointsScalarFieldEnum | MemberChallengePointsScalarFieldEnum[]
   }
 
   /**
@@ -11723,6 +11851,1175 @@ export namespace Prisma {
      * Choose, which related nodes to fetch as well
      */
     include?: memberStatsInclude<ExtArgs> | null
+  }
+
+
+  /**
+   * Model memberChallengePoints
+   */
+
+  export type AggregateMemberChallengePoints = {
+    _count: MemberChallengePointsCountAggregateOutputType | null
+    _avg: MemberChallengePointsAvgAggregateOutputType | null
+    _sum: MemberChallengePointsSumAggregateOutputType | null
+    _min: MemberChallengePointsMinAggregateOutputType | null
+    _max: MemberChallengePointsMaxAggregateOutputType | null
+  }
+
+  export type MemberChallengePointsAvgAggregateOutputType = {
+    id: number | null
+    userId: number | null
+    placement: number | null
+    points: number | null
+  }
+
+  export type MemberChallengePointsSumAggregateOutputType = {
+    id: bigint | null
+    userId: bigint | null
+    placement: number | null
+    points: number | null
+  }
+
+  export type MemberChallengePointsMinAggregateOutputType = {
+    id: bigint | null
+    challengeId: string | null
+    challengeName: string | null
+    userId: bigint | null
+    placement: number | null
+    points: number | null
+    createdAt: Date | null
+    createdBy: string | null
+    updatedAt: Date | null
+    updatedBy: string | null
+  }
+
+  export type MemberChallengePointsMaxAggregateOutputType = {
+    id: bigint | null
+    challengeId: string | null
+    challengeName: string | null
+    userId: bigint | null
+    placement: number | null
+    points: number | null
+    createdAt: Date | null
+    createdBy: string | null
+    updatedAt: Date | null
+    updatedBy: string | null
+  }
+
+  export type MemberChallengePointsCountAggregateOutputType = {
+    id: number
+    challengeId: number
+    challengeName: number
+    userId: number
+    placement: number
+    points: number
+    createdAt: number
+    createdBy: number
+    updatedAt: number
+    updatedBy: number
+    _all: number
+  }
+
+
+  export type MemberChallengePointsAvgAggregateInputType = {
+    id?: true
+    userId?: true
+    placement?: true
+    points?: true
+  }
+
+  export type MemberChallengePointsSumAggregateInputType = {
+    id?: true
+    userId?: true
+    placement?: true
+    points?: true
+  }
+
+  export type MemberChallengePointsMinAggregateInputType = {
+    id?: true
+    challengeId?: true
+    challengeName?: true
+    userId?: true
+    placement?: true
+    points?: true
+    createdAt?: true
+    createdBy?: true
+    updatedAt?: true
+    updatedBy?: true
+  }
+
+  export type MemberChallengePointsMaxAggregateInputType = {
+    id?: true
+    challengeId?: true
+    challengeName?: true
+    userId?: true
+    placement?: true
+    points?: true
+    createdAt?: true
+    createdBy?: true
+    updatedAt?: true
+    updatedBy?: true
+  }
+
+  export type MemberChallengePointsCountAggregateInputType = {
+    id?: true
+    challengeId?: true
+    challengeName?: true
+    userId?: true
+    placement?: true
+    points?: true
+    createdAt?: true
+    createdBy?: true
+    updatedAt?: true
+    updatedBy?: true
+    _all?: true
+  }
+
+  export type MemberChallengePointsAggregateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Filter which memberChallengePoints to aggregate.
+     */
+    where?: memberChallengePointsWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberChallengePoints to fetch.
+     */
+    orderBy?: memberChallengePointsOrderByWithRelationInput | memberChallengePointsOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the start position
+     */
+    cursor?: memberChallengePointsWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberChallengePoints from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberChallengePoints.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Count returned memberChallengePoints
+    **/
+    _count?: true | MemberChallengePointsCountAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to average
+    **/
+    _avg?: MemberChallengePointsAvgAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to sum
+    **/
+    _sum?: MemberChallengePointsSumAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to find the minimum value
+    **/
+    _min?: MemberChallengePointsMinAggregateInputType
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/aggregations Aggregation Docs}
+     * 
+     * Select which fields to find the maximum value
+    **/
+    _max?: MemberChallengePointsMaxAggregateInputType
+  }
+
+  export type GetMemberChallengePointsAggregateType<T extends MemberChallengePointsAggregateArgs> = {
+        [P in keyof T & keyof AggregateMemberChallengePoints]: P extends '_count' | 'count'
+      ? T[P] extends true
+        ? number
+        : GetScalarType<T[P], AggregateMemberChallengePoints[P]>
+      : GetScalarType<T[P], AggregateMemberChallengePoints[P]>
+  }
+
+
+
+
+  export type memberChallengePointsGroupByArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    where?: memberChallengePointsWhereInput
+    orderBy?: memberChallengePointsOrderByWithAggregationInput | memberChallengePointsOrderByWithAggregationInput[]
+    by: MemberChallengePointsScalarFieldEnum[] | MemberChallengePointsScalarFieldEnum
+    having?: memberChallengePointsScalarWhereWithAggregatesInput
+    take?: number
+    skip?: number
+    _count?: MemberChallengePointsCountAggregateInputType | true
+    _avg?: MemberChallengePointsAvgAggregateInputType
+    _sum?: MemberChallengePointsSumAggregateInputType
+    _min?: MemberChallengePointsMinAggregateInputType
+    _max?: MemberChallengePointsMaxAggregateInputType
+  }
+
+  export type MemberChallengePointsGroupByOutputType = {
+    id: bigint
+    challengeId: string
+    challengeName: string
+    userId: bigint
+    placement: number
+    points: number
+    createdAt: Date
+    createdBy: string
+    updatedAt: Date | null
+    updatedBy: string | null
+    _count: MemberChallengePointsCountAggregateOutputType | null
+    _avg: MemberChallengePointsAvgAggregateOutputType | null
+    _sum: MemberChallengePointsSumAggregateOutputType | null
+    _min: MemberChallengePointsMinAggregateOutputType | null
+    _max: MemberChallengePointsMaxAggregateOutputType | null
+  }
+
+  type GetMemberChallengePointsGroupByPayload<T extends memberChallengePointsGroupByArgs> = Prisma.PrismaPromise<
+    Array<
+      PickEnumerable<MemberChallengePointsGroupByOutputType, T['by']> &
+        {
+          [P in ((keyof T) & (keyof MemberChallengePointsGroupByOutputType))]: P extends '_count'
+            ? T[P] extends boolean
+              ? number
+              : GetScalarType<T[P], MemberChallengePointsGroupByOutputType[P]>
+            : GetScalarType<T[P], MemberChallengePointsGroupByOutputType[P]>
+        }
+      >
+    >
+
+
+  export type memberChallengePointsSelect<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    id?: boolean
+    challengeId?: boolean
+    challengeName?: boolean
+    userId?: boolean
+    placement?: boolean
+    points?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }, ExtArgs["result"]["memberChallengePoints"]>
+
+  export type memberChallengePointsSelectCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    id?: boolean
+    challengeId?: boolean
+    challengeName?: boolean
+    userId?: boolean
+    placement?: boolean
+    points?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }, ExtArgs["result"]["memberChallengePoints"]>
+
+  export type memberChallengePointsSelectUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetSelect<{
+    id?: boolean
+    challengeId?: boolean
+    challengeName?: boolean
+    userId?: boolean
+    placement?: boolean
+    points?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }, ExtArgs["result"]["memberChallengePoints"]>
+
+  export type memberChallengePointsSelectScalar = {
+    id?: boolean
+    challengeId?: boolean
+    challengeName?: boolean
+    userId?: boolean
+    placement?: boolean
+    points?: boolean
+    createdAt?: boolean
+    createdBy?: boolean
+    updatedAt?: boolean
+    updatedBy?: boolean
+  }
+
+  export type memberChallengePointsOmit<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = $Extensions.GetOmit<"id" | "challengeId" | "challengeName" | "userId" | "placement" | "points" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy", ExtArgs["result"]["memberChallengePoints"]>
+  export type memberChallengePointsInclude<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }
+  export type memberChallengePointsIncludeCreateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }
+  export type memberChallengePointsIncludeUpdateManyAndReturn<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    member?: boolean | memberDefaultArgs<ExtArgs>
+  }
+
+  export type $memberChallengePointsPayload<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    name: "memberChallengePoints"
+    objects: {
+      member: Prisma.$memberPayload<ExtArgs>
+    }
+    scalars: $Extensions.GetPayloadResult<{
+      id: bigint
+      challengeId: string
+      challengeName: string
+      userId: bigint
+      placement: number
+      points: number
+      createdAt: Date
+      createdBy: string
+      updatedAt: Date | null
+      updatedBy: string | null
+    }, ExtArgs["result"]["memberChallengePoints"]>
+    composites: {}
+  }
+
+  type memberChallengePointsGetPayload<S extends boolean | null | undefined | memberChallengePointsDefaultArgs> = $Result.GetResult<Prisma.$memberChallengePointsPayload, S>
+
+  type memberChallengePointsCountArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> =
+    Omit<memberChallengePointsFindManyArgs, 'select' | 'include' | 'distinct' | 'omit'> & {
+      select?: MemberChallengePointsCountAggregateInputType | true
+    }
+
+  export interface memberChallengePointsDelegate<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> {
+    [K: symbol]: { types: Prisma.TypeMap<ExtArgs>['model']['memberChallengePoints'], meta: { name: 'memberChallengePoints' } }
+    /**
+     * Find zero or one MemberChallengePoints that matches the filter.
+     * @param {memberChallengePointsFindUniqueArgs} args - Arguments to find a MemberChallengePoints
+     * @example
+     * // Get one MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.findUnique({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findUnique<T extends memberChallengePointsFindUniqueArgs>(args: SelectSubset<T, memberChallengePointsFindUniqueArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "findUnique", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find one MemberChallengePoints that matches the filter or throw an error with `error.code='P2025'`
+     * if no matches were found.
+     * @param {memberChallengePointsFindUniqueOrThrowArgs} args - Arguments to find a MemberChallengePoints
+     * @example
+     * // Get one MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.findUniqueOrThrow({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findUniqueOrThrow<T extends memberChallengePointsFindUniqueOrThrowArgs>(args: SelectSubset<T, memberChallengePointsFindUniqueOrThrowArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find the first MemberChallengePoints that matches the filter.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberChallengePointsFindFirstArgs} args - Arguments to find a MemberChallengePoints
+     * @example
+     * // Get one MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.findFirst({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findFirst<T extends memberChallengePointsFindFirstArgs>(args?: SelectSubset<T, memberChallengePointsFindFirstArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "findFirst", GlobalOmitOptions> | null, null, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find the first MemberChallengePoints that matches the filter or
+     * throw `PrismaKnownClientError` with `P2025` code if no matches were found.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberChallengePointsFindFirstOrThrowArgs} args - Arguments to find a MemberChallengePoints
+     * @example
+     * // Get one MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.findFirstOrThrow({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     */
+    findFirstOrThrow<T extends memberChallengePointsFindFirstOrThrowArgs>(args?: SelectSubset<T, memberChallengePointsFindFirstOrThrowArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "findFirstOrThrow", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Find zero or more MemberChallengePoints that matches the filter.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberChallengePointsFindManyArgs} args - Arguments to filter and select certain fields only.
+     * @example
+     * // Get all MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.findMany()
+     * 
+     * // Get first 10 MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.findMany({ take: 10 })
+     * 
+     * // Only select the `id`
+     * const memberChallengePointsWithIdOnly = await prisma.memberChallengePoints.findMany({ select: { id: true } })
+     * 
+     */
+    findMany<T extends memberChallengePointsFindManyArgs>(args?: SelectSubset<T, memberChallengePointsFindManyArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "findMany", GlobalOmitOptions>>
+
+    /**
+     * Create a MemberChallengePoints.
+     * @param {memberChallengePointsCreateArgs} args - Arguments to create a MemberChallengePoints.
+     * @example
+     * // Create one MemberChallengePoints
+     * const MemberChallengePoints = await prisma.memberChallengePoints.create({
+     *   data: {
+     *     // ... data to create a MemberChallengePoints
+     *   }
+     * })
+     * 
+     */
+    create<T extends memberChallengePointsCreateArgs>(args: SelectSubset<T, memberChallengePointsCreateArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "create", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Create many MemberChallengePoints.
+     * @param {memberChallengePointsCreateManyArgs} args - Arguments to create many MemberChallengePoints.
+     * @example
+     * // Create many MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.createMany({
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     *     
+     */
+    createMany<T extends memberChallengePointsCreateManyArgs>(args?: SelectSubset<T, memberChallengePointsCreateManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Create many MemberChallengePoints and returns the data saved in the database.
+     * @param {memberChallengePointsCreateManyAndReturnArgs} args - Arguments to create many MemberChallengePoints.
+     * @example
+     * // Create many MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.createManyAndReturn({
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * 
+     * // Create many MemberChallengePoints and only return the `id`
+     * const memberChallengePointsWithIdOnly = await prisma.memberChallengePoints.createManyAndReturn({
+     *   select: { id: true },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * 
+     */
+    createManyAndReturn<T extends memberChallengePointsCreateManyAndReturnArgs>(args?: SelectSubset<T, memberChallengePointsCreateManyAndReturnArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "createManyAndReturn", GlobalOmitOptions>>
+
+    /**
+     * Delete a MemberChallengePoints.
+     * @param {memberChallengePointsDeleteArgs} args - Arguments to delete one MemberChallengePoints.
+     * @example
+     * // Delete one MemberChallengePoints
+     * const MemberChallengePoints = await prisma.memberChallengePoints.delete({
+     *   where: {
+     *     // ... filter to delete one MemberChallengePoints
+     *   }
+     * })
+     * 
+     */
+    delete<T extends memberChallengePointsDeleteArgs>(args: SelectSubset<T, memberChallengePointsDeleteArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "delete", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Update one MemberChallengePoints.
+     * @param {memberChallengePointsUpdateArgs} args - Arguments to update one MemberChallengePoints.
+     * @example
+     * // Update one MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.update({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: {
+     *     // ... provide data here
+     *   }
+     * })
+     * 
+     */
+    update<T extends memberChallengePointsUpdateArgs>(args: SelectSubset<T, memberChallengePointsUpdateArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "update", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+    /**
+     * Delete zero or more MemberChallengePoints.
+     * @param {memberChallengePointsDeleteManyArgs} args - Arguments to filter MemberChallengePoints to delete.
+     * @example
+     * // Delete a few MemberChallengePoints
+     * const { count } = await prisma.memberChallengePoints.deleteMany({
+     *   where: {
+     *     // ... provide filter here
+     *   }
+     * })
+     * 
+     */
+    deleteMany<T extends memberChallengePointsDeleteManyArgs>(args?: SelectSubset<T, memberChallengePointsDeleteManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Update zero or more MemberChallengePoints.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberChallengePointsUpdateManyArgs} args - Arguments to update one or more rows.
+     * @example
+     * // Update many MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.updateMany({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: {
+     *     // ... provide data here
+     *   }
+     * })
+     * 
+     */
+    updateMany<T extends memberChallengePointsUpdateManyArgs>(args: SelectSubset<T, memberChallengePointsUpdateManyArgs<ExtArgs>>): Prisma.PrismaPromise<BatchPayload>
+
+    /**
+     * Update zero or more MemberChallengePoints and returns the data updated in the database.
+     * @param {memberChallengePointsUpdateManyAndReturnArgs} args - Arguments to update many MemberChallengePoints.
+     * @example
+     * // Update many MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.updateManyAndReturn({
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * 
+     * // Update zero or more MemberChallengePoints and only return the `id`
+     * const memberChallengePointsWithIdOnly = await prisma.memberChallengePoints.updateManyAndReturn({
+     *   select: { id: true },
+     *   where: {
+     *     // ... provide filter here
+     *   },
+     *   data: [
+     *     // ... provide data here
+     *   ]
+     * })
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * 
+     */
+    updateManyAndReturn<T extends memberChallengePointsUpdateManyAndReturnArgs>(args: SelectSubset<T, memberChallengePointsUpdateManyAndReturnArgs<ExtArgs>>): Prisma.PrismaPromise<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "updateManyAndReturn", GlobalOmitOptions>>
+
+    /**
+     * Create or update one MemberChallengePoints.
+     * @param {memberChallengePointsUpsertArgs} args - Arguments to update or create a MemberChallengePoints.
+     * @example
+     * // Update or create a MemberChallengePoints
+     * const memberChallengePoints = await prisma.memberChallengePoints.upsert({
+     *   create: {
+     *     // ... data to create a MemberChallengePoints
+     *   },
+     *   update: {
+     *     // ... in case it already exists, update
+     *   },
+     *   where: {
+     *     // ... the filter for the MemberChallengePoints we want to update
+     *   }
+     * })
+     */
+    upsert<T extends memberChallengePointsUpsertArgs>(args: SelectSubset<T, memberChallengePointsUpsertArgs<ExtArgs>>): Prisma__memberChallengePointsClient<$Result.GetResult<Prisma.$memberChallengePointsPayload<ExtArgs>, T, "upsert", GlobalOmitOptions>, never, ExtArgs, GlobalOmitOptions>
+
+
+    /**
+     * Count the number of MemberChallengePoints.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberChallengePointsCountArgs} args - Arguments to filter MemberChallengePoints to count.
+     * @example
+     * // Count the number of MemberChallengePoints
+     * const count = await prisma.memberChallengePoints.count({
+     *   where: {
+     *     // ... the filter for the MemberChallengePoints we want to count
+     *   }
+     * })
+    **/
+    count<T extends memberChallengePointsCountArgs>(
+      args?: Subset<T, memberChallengePointsCountArgs>,
+    ): Prisma.PrismaPromise<
+      T extends $Utils.Record<'select', any>
+        ? T['select'] extends true
+          ? number
+          : GetScalarType<T['select'], MemberChallengePointsCountAggregateOutputType>
+        : number
+    >
+
+    /**
+     * Allows you to perform aggregations operations on a MemberChallengePoints.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {MemberChallengePointsAggregateArgs} args - Select which aggregations you would like to apply and on what fields.
+     * @example
+     * // Ordered by age ascending
+     * // Where email contains prisma.io
+     * // Limited to the 10 users
+     * const aggregations = await prisma.user.aggregate({
+     *   _avg: {
+     *     age: true,
+     *   },
+     *   where: {
+     *     email: {
+     *       contains: "prisma.io",
+     *     },
+     *   },
+     *   orderBy: {
+     *     age: "asc",
+     *   },
+     *   take: 10,
+     * })
+    **/
+    aggregate<T extends MemberChallengePointsAggregateArgs>(args: Subset<T, MemberChallengePointsAggregateArgs>): Prisma.PrismaPromise<GetMemberChallengePointsAggregateType<T>>
+
+    /**
+     * Group by MemberChallengePoints.
+     * Note, that providing `undefined` is treated as the value not being there.
+     * Read more here: https://pris.ly/d/null-undefined
+     * @param {memberChallengePointsGroupByArgs} args - Group by arguments.
+     * @example
+     * // Group by city, order by createdAt, get count
+     * const result = await prisma.user.groupBy({
+     *   by: ['city', 'createdAt'],
+     *   orderBy: {
+     *     createdAt: true
+     *   },
+     *   _count: {
+     *     _all: true
+     *   },
+     * })
+     * 
+    **/
+    groupBy<
+      T extends memberChallengePointsGroupByArgs,
+      HasSelectOrTake extends Or<
+        Extends<'skip', Keys<T>>,
+        Extends<'take', Keys<T>>
+      >,
+      OrderByArg extends True extends HasSelectOrTake
+        ? { orderBy: memberChallengePointsGroupByArgs['orderBy'] }
+        : { orderBy?: memberChallengePointsGroupByArgs['orderBy'] },
+      OrderFields extends ExcludeUnderscoreKeys<Keys<MaybeTupleToUnion<T['orderBy']>>>,
+      ByFields extends MaybeTupleToUnion<T['by']>,
+      ByValid extends Has<ByFields, OrderFields>,
+      HavingFields extends GetHavingFields<T['having']>,
+      HavingValid extends Has<ByFields, HavingFields>,
+      ByEmpty extends T['by'] extends never[] ? True : False,
+      InputErrors extends ByEmpty extends True
+      ? `Error: "by" must not be empty.`
+      : HavingValid extends False
+      ? {
+          [P in HavingFields]: P extends ByFields
+            ? never
+            : P extends string
+            ? `Error: Field "${P}" used in "having" needs to be provided in "by".`
+            : [
+                Error,
+                'Field ',
+                P,
+                ` in "having" needs to be provided in "by"`,
+              ]
+        }[HavingFields]
+      : 'take' extends Keys<T>
+      ? 'orderBy' extends Keys<T>
+        ? ByValid extends True
+          ? {}
+          : {
+              [P in OrderFields]: P extends ByFields
+                ? never
+                : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+            }[OrderFields]
+        : 'Error: If you provide "take", you also need to provide "orderBy"'
+      : 'skip' extends Keys<T>
+      ? 'orderBy' extends Keys<T>
+        ? ByValid extends True
+          ? {}
+          : {
+              [P in OrderFields]: P extends ByFields
+                ? never
+                : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+            }[OrderFields]
+        : 'Error: If you provide "skip", you also need to provide "orderBy"'
+      : ByValid extends True
+      ? {}
+      : {
+          [P in OrderFields]: P extends ByFields
+            ? never
+            : `Error: Field "${P}" in "orderBy" needs to be provided in "by"`
+        }[OrderFields]
+    >(args: SubsetIntersection<T, memberChallengePointsGroupByArgs, OrderByArg> & InputErrors): {} extends InputErrors ? GetMemberChallengePointsGroupByPayload<T> : Prisma.PrismaPromise<InputErrors>
+  /**
+   * Fields of the memberChallengePoints model
+   */
+  readonly fields: memberChallengePointsFieldRefs;
+  }
+
+  /**
+   * The delegate class that acts as a "Promise-like" for memberChallengePoints.
+   * Why is this prefixed with `Prisma__`?
+   * Because we want to prevent naming conflicts as mentioned in
+   * https://github.com/prisma/prisma-client-js/issues/707
+   */
+  export interface Prisma__memberChallengePointsClient<T, Null = never, ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs, GlobalOmitOptions = {}> extends Prisma.PrismaPromise<T> {
+    readonly [Symbol.toStringTag]: "PrismaPromise"
+    member<T extends memberDefaultArgs<ExtArgs> = {}>(args?: Subset<T, memberDefaultArgs<ExtArgs>>): Prisma__memberClient<$Result.GetResult<Prisma.$memberPayload<ExtArgs>, T, "findUniqueOrThrow", GlobalOmitOptions> | Null, Null, ExtArgs, GlobalOmitOptions>
+    /**
+     * Attaches callbacks for the resolution and/or rejection of the Promise.
+     * @param onfulfilled The callback to execute when the Promise is resolved.
+     * @param onrejected The callback to execute when the Promise is rejected.
+     * @returns A Promise for the completion of which ever callback is executed.
+     */
+    then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): $Utils.JsPromise<TResult1 | TResult2>
+    /**
+     * Attaches a callback for only the rejection of the Promise.
+     * @param onrejected The callback to execute when the Promise is rejected.
+     * @returns A Promise for the completion of the callback.
+     */
+    catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): $Utils.JsPromise<T | TResult>
+    /**
+     * Attaches a callback that is invoked when the Promise is settled (fulfilled or rejected). The
+     * resolved value cannot be modified from the callback.
+     * @param onfinally The callback to execute when the Promise is settled (fulfilled or rejected).
+     * @returns A Promise for the completion of the callback.
+     */
+    finally(onfinally?: (() => void) | undefined | null): $Utils.JsPromise<T>
+  }
+
+
+
+
+  /**
+   * Fields of the memberChallengePoints model
+   */
+  interface memberChallengePointsFieldRefs {
+    readonly id: FieldRef<"memberChallengePoints", 'BigInt'>
+    readonly challengeId: FieldRef<"memberChallengePoints", 'String'>
+    readonly challengeName: FieldRef<"memberChallengePoints", 'String'>
+    readonly userId: FieldRef<"memberChallengePoints", 'BigInt'>
+    readonly placement: FieldRef<"memberChallengePoints", 'Int'>
+    readonly points: FieldRef<"memberChallengePoints", 'Int'>
+    readonly createdAt: FieldRef<"memberChallengePoints", 'DateTime'>
+    readonly createdBy: FieldRef<"memberChallengePoints", 'String'>
+    readonly updatedAt: FieldRef<"memberChallengePoints", 'DateTime'>
+    readonly updatedBy: FieldRef<"memberChallengePoints", 'String'>
+  }
+    
+
+  // Custom InputTypes
+  /**
+   * memberChallengePoints findUnique
+   */
+  export type memberChallengePointsFindUniqueArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * Filter, which memberChallengePoints to fetch.
+     */
+    where: memberChallengePointsWhereUniqueInput
+  }
+
+  /**
+   * memberChallengePoints findUniqueOrThrow
+   */
+  export type memberChallengePointsFindUniqueOrThrowArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * Filter, which memberChallengePoints to fetch.
+     */
+    where: memberChallengePointsWhereUniqueInput
+  }
+
+  /**
+   * memberChallengePoints findFirst
+   */
+  export type memberChallengePointsFindFirstArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * Filter, which memberChallengePoints to fetch.
+     */
+    where?: memberChallengePointsWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberChallengePoints to fetch.
+     */
+    orderBy?: memberChallengePointsOrderByWithRelationInput | memberChallengePointsOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for searching for memberChallengePoints.
+     */
+    cursor?: memberChallengePointsWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberChallengePoints from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberChallengePoints.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/distinct Distinct Docs}
+     * 
+     * Filter by unique combinations of memberChallengePoints.
+     */
+    distinct?: MemberChallengePointsScalarFieldEnum | MemberChallengePointsScalarFieldEnum[]
+  }
+
+  /**
+   * memberChallengePoints findFirstOrThrow
+   */
+  export type memberChallengePointsFindFirstOrThrowArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * Filter, which memberChallengePoints to fetch.
+     */
+    where?: memberChallengePointsWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberChallengePoints to fetch.
+     */
+    orderBy?: memberChallengePointsOrderByWithRelationInput | memberChallengePointsOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for searching for memberChallengePoints.
+     */
+    cursor?: memberChallengePointsWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberChallengePoints from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberChallengePoints.
+     */
+    skip?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/distinct Distinct Docs}
+     * 
+     * Filter by unique combinations of memberChallengePoints.
+     */
+    distinct?: MemberChallengePointsScalarFieldEnum | MemberChallengePointsScalarFieldEnum[]
+  }
+
+  /**
+   * memberChallengePoints findMany
+   */
+  export type memberChallengePointsFindManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * Filter, which memberChallengePoints to fetch.
+     */
+    where?: memberChallengePointsWhereInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/sorting Sorting Docs}
+     * 
+     * Determine the order of memberChallengePoints to fetch.
+     */
+    orderBy?: memberChallengePointsOrderByWithRelationInput | memberChallengePointsOrderByWithRelationInput[]
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination#cursor-based-pagination Cursor Docs}
+     * 
+     * Sets the position for listing memberChallengePoints.
+     */
+    cursor?: memberChallengePointsWhereUniqueInput
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Take `±n` memberChallengePoints from the position of the cursor.
+     */
+    take?: number
+    /**
+     * {@link https://www.prisma.io/docs/concepts/components/prisma-client/pagination Pagination Docs}
+     * 
+     * Skip the first `n` memberChallengePoints.
+     */
+    skip?: number
+    distinct?: MemberChallengePointsScalarFieldEnum | MemberChallengePointsScalarFieldEnum[]
+  }
+
+  /**
+   * memberChallengePoints create
+   */
+  export type memberChallengePointsCreateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * The data needed to create a memberChallengePoints.
+     */
+    data: XOR<memberChallengePointsCreateInput, memberChallengePointsUncheckedCreateInput>
+  }
+
+  /**
+   * memberChallengePoints createMany
+   */
+  export type memberChallengePointsCreateManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * The data used to create many memberChallengePoints.
+     */
+    data: memberChallengePointsCreateManyInput | memberChallengePointsCreateManyInput[]
+    skipDuplicates?: boolean
+  }
+
+  /**
+   * memberChallengePoints createManyAndReturn
+   */
+  export type memberChallengePointsCreateManyAndReturnArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelectCreateManyAndReturn<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * The data used to create many memberChallengePoints.
+     */
+    data: memberChallengePointsCreateManyInput | memberChallengePointsCreateManyInput[]
+    skipDuplicates?: boolean
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsIncludeCreateManyAndReturn<ExtArgs> | null
+  }
+
+  /**
+   * memberChallengePoints update
+   */
+  export type memberChallengePointsUpdateArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * The data needed to update a memberChallengePoints.
+     */
+    data: XOR<memberChallengePointsUpdateInput, memberChallengePointsUncheckedUpdateInput>
+    /**
+     * Choose, which memberChallengePoints to update.
+     */
+    where: memberChallengePointsWhereUniqueInput
+  }
+
+  /**
+   * memberChallengePoints updateMany
+   */
+  export type memberChallengePointsUpdateManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * The data used to update memberChallengePoints.
+     */
+    data: XOR<memberChallengePointsUpdateManyMutationInput, memberChallengePointsUncheckedUpdateManyInput>
+    /**
+     * Filter which memberChallengePoints to update
+     */
+    where?: memberChallengePointsWhereInput
+    /**
+     * Limit how many memberChallengePoints to update.
+     */
+    limit?: number
+  }
+
+  /**
+   * memberChallengePoints updateManyAndReturn
+   */
+  export type memberChallengePointsUpdateManyAndReturnArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelectUpdateManyAndReturn<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * The data used to update memberChallengePoints.
+     */
+    data: XOR<memberChallengePointsUpdateManyMutationInput, memberChallengePointsUncheckedUpdateManyInput>
+    /**
+     * Filter which memberChallengePoints to update
+     */
+    where?: memberChallengePointsWhereInput
+    /**
+     * Limit how many memberChallengePoints to update.
+     */
+    limit?: number
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsIncludeUpdateManyAndReturn<ExtArgs> | null
+  }
+
+  /**
+   * memberChallengePoints upsert
+   */
+  export type memberChallengePointsUpsertArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * The filter to search for the memberChallengePoints to update in case it exists.
+     */
+    where: memberChallengePointsWhereUniqueInput
+    /**
+     * In case the memberChallengePoints found by the `where` argument doesn't exist, create a new memberChallengePoints with this data.
+     */
+    create: XOR<memberChallengePointsCreateInput, memberChallengePointsUncheckedCreateInput>
+    /**
+     * In case the memberChallengePoints was found with the provided `where` argument, update it with this data.
+     */
+    update: XOR<memberChallengePointsUpdateInput, memberChallengePointsUncheckedUpdateInput>
+  }
+
+  /**
+   * memberChallengePoints delete
+   */
+  export type memberChallengePointsDeleteArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
+    /**
+     * Filter which memberChallengePoints to delete.
+     */
+    where: memberChallengePointsWhereUniqueInput
+  }
+
+  /**
+   * memberChallengePoints deleteMany
+   */
+  export type memberChallengePointsDeleteManyArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Filter which memberChallengePoints to delete
+     */
+    where?: memberChallengePointsWhereInput
+    /**
+     * Limit how many memberChallengePoints to delete.
+     */
+    limit?: number
+  }
+
+  /**
+   * memberChallengePoints without action
+   */
+  export type memberChallengePointsDefaultArgs<ExtArgs extends $Extensions.InternalArgs = $Extensions.DefaultArgs> = {
+    /**
+     * Select specific fields to fetch from the memberChallengePoints
+     */
+    select?: memberChallengePointsSelect<ExtArgs> | null
+    /**
+     * Omit specific fields from the memberChallengePoints
+     */
+    omit?: memberChallengePointsOmit<ExtArgs> | null
+    /**
+     * Choose, which related nodes to fetch as well
+     */
+    include?: memberChallengePointsInclude<ExtArgs> | null
   }
 
 
@@ -24969,6 +26266,22 @@ export namespace Prisma {
   export type MemberStatsScalarFieldEnum = (typeof MemberStatsScalarFieldEnum)[keyof typeof MemberStatsScalarFieldEnum]
 
 
+  export const MemberChallengePointsScalarFieldEnum: {
+    id: 'id',
+    challengeId: 'challengeId',
+    challengeName: 'challengeName',
+    userId: 'userId',
+    placement: 'placement',
+    points: 'points',
+    createdAt: 'createdAt',
+    createdBy: 'createdBy',
+    updatedAt: 'updatedAt',
+    updatedBy: 'updatedBy'
+  };
+
+  export type MemberChallengePointsScalarFieldEnum = (typeof MemberChallengePointsScalarFieldEnum)[keyof typeof MemberChallengePointsScalarFieldEnum]
+
+
   export const MemberTraitsScalarFieldEnum: {
     id: 'id',
     userId: 'userId',
@@ -25416,6 +26729,7 @@ export namespace Prisma {
     financial?: XOR<MemberFinancialNullableScalarRelationFilter, memberFinancialWhereInput> | null
     memberStats?: MemberStatsListRelationFilter
     memberStatsHistory?: MemberStatsHistoryListRelationFilter
+    challengePoints?: MemberChallengePointsListRelationFilter
     memberTraits?: XOR<MemberTraitsNullableScalarRelationFilter, memberTraitsWhereInput> | null
   }
 
@@ -25461,6 +26775,7 @@ export namespace Prisma {
     financial?: memberFinancialOrderByWithRelationInput
     memberStats?: memberStatsOrderByRelationAggregateInput
     memberStatsHistory?: memberStatsHistoryOrderByRelationAggregateInput
+    challengePoints?: memberChallengePointsOrderByRelationAggregateInput
     memberTraits?: memberTraitsOrderByWithRelationInput
   }
 
@@ -25509,6 +26824,7 @@ export namespace Prisma {
     financial?: XOR<MemberFinancialNullableScalarRelationFilter, memberFinancialWhereInput> | null
     memberStats?: MemberStatsListRelationFilter
     memberStatsHistory?: MemberStatsHistoryListRelationFilter
+    challengePoints?: MemberChallengePointsListRelationFilter
     memberTraits?: XOR<MemberTraitsNullableScalarRelationFilter, memberTraitsWhereInput> | null
   }, "userId" | "handleLower" | "email">
 
@@ -26213,6 +27529,89 @@ export namespace Prisma {
     createdBy?: StringWithAggregatesFilter<"memberStats"> | string
     updatedAt?: DateTimeNullableWithAggregatesFilter<"memberStats"> | Date | string | null
     updatedBy?: StringNullableWithAggregatesFilter<"memberStats"> | string | null
+  }
+
+  export type memberChallengePointsWhereInput = {
+    AND?: memberChallengePointsWhereInput | memberChallengePointsWhereInput[]
+    OR?: memberChallengePointsWhereInput[]
+    NOT?: memberChallengePointsWhereInput | memberChallengePointsWhereInput[]
+    id?: BigIntFilter<"memberChallengePoints"> | bigint | number
+    challengeId?: StringFilter<"memberChallengePoints"> | string
+    challengeName?: StringFilter<"memberChallengePoints"> | string
+    userId?: BigIntFilter<"memberChallengePoints"> | bigint | number
+    placement?: IntFilter<"memberChallengePoints"> | number
+    points?: IntFilter<"memberChallengePoints"> | number
+    createdAt?: DateTimeFilter<"memberChallengePoints"> | Date | string
+    createdBy?: StringFilter<"memberChallengePoints"> | string
+    updatedAt?: DateTimeNullableFilter<"memberChallengePoints"> | Date | string | null
+    updatedBy?: StringNullableFilter<"memberChallengePoints"> | string | null
+    member?: XOR<MemberScalarRelationFilter, memberWhereInput>
+  }
+
+  export type memberChallengePointsOrderByWithRelationInput = {
+    id?: SortOrder
+    challengeId?: SortOrder
+    challengeName?: SortOrder
+    userId?: SortOrder
+    placement?: SortOrder
+    points?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrderInput | SortOrder
+    updatedBy?: SortOrderInput | SortOrder
+    member?: memberOrderByWithRelationInput
+  }
+
+  export type memberChallengePointsWhereUniqueInput = Prisma.AtLeast<{
+    id?: bigint | number
+    challengeId_userId?: memberChallengePointsChallengeIdUserIdCompoundUniqueInput
+    AND?: memberChallengePointsWhereInput | memberChallengePointsWhereInput[]
+    OR?: memberChallengePointsWhereInput[]
+    NOT?: memberChallengePointsWhereInput | memberChallengePointsWhereInput[]
+    challengeId?: StringFilter<"memberChallengePoints"> | string
+    challengeName?: StringFilter<"memberChallengePoints"> | string
+    userId?: BigIntFilter<"memberChallengePoints"> | bigint | number
+    placement?: IntFilter<"memberChallengePoints"> | number
+    points?: IntFilter<"memberChallengePoints"> | number
+    createdAt?: DateTimeFilter<"memberChallengePoints"> | Date | string
+    createdBy?: StringFilter<"memberChallengePoints"> | string
+    updatedAt?: DateTimeNullableFilter<"memberChallengePoints"> | Date | string | null
+    updatedBy?: StringNullableFilter<"memberChallengePoints"> | string | null
+    member?: XOR<MemberScalarRelationFilter, memberWhereInput>
+  }, "id" | "challengeId_userId">
+
+  export type memberChallengePointsOrderByWithAggregationInput = {
+    id?: SortOrder
+    challengeId?: SortOrder
+    challengeName?: SortOrder
+    userId?: SortOrder
+    placement?: SortOrder
+    points?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrderInput | SortOrder
+    updatedBy?: SortOrderInput | SortOrder
+    _count?: memberChallengePointsCountOrderByAggregateInput
+    _avg?: memberChallengePointsAvgOrderByAggregateInput
+    _max?: memberChallengePointsMaxOrderByAggregateInput
+    _min?: memberChallengePointsMinOrderByAggregateInput
+    _sum?: memberChallengePointsSumOrderByAggregateInput
+  }
+
+  export type memberChallengePointsScalarWhereWithAggregatesInput = {
+    AND?: memberChallengePointsScalarWhereWithAggregatesInput | memberChallengePointsScalarWhereWithAggregatesInput[]
+    OR?: memberChallengePointsScalarWhereWithAggregatesInput[]
+    NOT?: memberChallengePointsScalarWhereWithAggregatesInput | memberChallengePointsScalarWhereWithAggregatesInput[]
+    id?: BigIntWithAggregatesFilter<"memberChallengePoints"> | bigint | number
+    challengeId?: StringWithAggregatesFilter<"memberChallengePoints"> | string
+    challengeName?: StringWithAggregatesFilter<"memberChallengePoints"> | string
+    userId?: BigIntWithAggregatesFilter<"memberChallengePoints"> | bigint | number
+    placement?: IntWithAggregatesFilter<"memberChallengePoints"> | number
+    points?: IntWithAggregatesFilter<"memberChallengePoints"> | number
+    createdAt?: DateTimeWithAggregatesFilter<"memberChallengePoints"> | Date | string
+    createdBy?: StringWithAggregatesFilter<"memberChallengePoints"> | string
+    updatedAt?: DateTimeNullableWithAggregatesFilter<"memberChallengePoints"> | Date | string | null
+    updatedBy?: StringNullableWithAggregatesFilter<"memberChallengePoints"> | string | null
   }
 
   export type memberTraitsWhereInput = {
@@ -27199,6 +28598,7 @@ export namespace Prisma {
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
   }
 
@@ -27244,6 +28644,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
   }
 
@@ -27289,6 +28690,7 @@ export namespace Prisma {
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
   }
 
@@ -27334,6 +28736,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
   }
 
@@ -28160,6 +29563,96 @@ export namespace Prisma {
     topFiveFinishes?: NullableIntFieldUpdateOperationsInput | number | null
     topTenFinishes?: NullableIntFieldUpdateOperationsInput | number | null
     isPrivate?: BoolFieldUpdateOperationsInput | boolean
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberChallengePointsCreateInput = {
+    id?: bigint | number
+    challengeId: string
+    challengeName: string
+    placement: number
+    points: number
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+    member: memberCreateNestedOneWithoutChallengePointsInput
+  }
+
+  export type memberChallengePointsUncheckedCreateInput = {
+    id?: bigint | number
+    challengeId: string
+    challengeName: string
+    userId: bigint | number
+    placement: number
+    points: number
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberChallengePointsUpdateInput = {
+    id?: BigIntFieldUpdateOperationsInput | bigint | number
+    challengeId?: StringFieldUpdateOperationsInput | string
+    challengeName?: StringFieldUpdateOperationsInput | string
+    placement?: IntFieldUpdateOperationsInput | number
+    points?: IntFieldUpdateOperationsInput | number
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+    member?: memberUpdateOneRequiredWithoutChallengePointsNestedInput
+  }
+
+  export type memberChallengePointsUncheckedUpdateInput = {
+    id?: BigIntFieldUpdateOperationsInput | bigint | number
+    challengeId?: StringFieldUpdateOperationsInput | string
+    challengeName?: StringFieldUpdateOperationsInput | string
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    placement?: IntFieldUpdateOperationsInput | number
+    points?: IntFieldUpdateOperationsInput | number
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberChallengePointsCreateManyInput = {
+    id?: bigint | number
+    challengeId: string
+    challengeName: string
+    userId: bigint | number
+    placement: number
+    points: number
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberChallengePointsUpdateManyMutationInput = {
+    id?: BigIntFieldUpdateOperationsInput | bigint | number
+    challengeId?: StringFieldUpdateOperationsInput | string
+    challengeName?: StringFieldUpdateOperationsInput | string
+    placement?: IntFieldUpdateOperationsInput | number
+    points?: IntFieldUpdateOperationsInput | number
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberChallengePointsUncheckedUpdateManyInput = {
+    id?: BigIntFieldUpdateOperationsInput | bigint | number
+    challengeId?: StringFieldUpdateOperationsInput | string
+    challengeName?: StringFieldUpdateOperationsInput | string
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    placement?: IntFieldUpdateOperationsInput | number
+    points?: IntFieldUpdateOperationsInput | number
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
@@ -29383,6 +30876,12 @@ export namespace Prisma {
     none?: memberStatsHistoryWhereInput
   }
 
+  export type MemberChallengePointsListRelationFilter = {
+    every?: memberChallengePointsWhereInput
+    some?: memberChallengePointsWhereInput
+    none?: memberChallengePointsWhereInput
+  }
+
   export type MemberTraitsNullableScalarRelationFilter = {
     is?: memberTraitsWhereInput | null
     isNot?: memberTraitsWhereInput | null
@@ -29406,6 +30905,10 @@ export namespace Prisma {
   }
 
   export type memberStatsHistoryOrderByRelationAggregateInput = {
+    _count?: SortOrder
+  }
+
+  export type memberChallengePointsOrderByRelationAggregateInput = {
     _count?: SortOrder
   }
 
@@ -30226,6 +31729,64 @@ export namespace Prisma {
     topTenFinishes?: SortOrder
   }
 
+  export type memberChallengePointsChallengeIdUserIdCompoundUniqueInput = {
+    challengeId: string
+    userId: bigint | number
+  }
+
+  export type memberChallengePointsCountOrderByAggregateInput = {
+    id?: SortOrder
+    challengeId?: SortOrder
+    challengeName?: SortOrder
+    userId?: SortOrder
+    placement?: SortOrder
+    points?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrder
+    updatedBy?: SortOrder
+  }
+
+  export type memberChallengePointsAvgOrderByAggregateInput = {
+    id?: SortOrder
+    userId?: SortOrder
+    placement?: SortOrder
+    points?: SortOrder
+  }
+
+  export type memberChallengePointsMaxOrderByAggregateInput = {
+    id?: SortOrder
+    challengeId?: SortOrder
+    challengeName?: SortOrder
+    userId?: SortOrder
+    placement?: SortOrder
+    points?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrder
+    updatedBy?: SortOrder
+  }
+
+  export type memberChallengePointsMinOrderByAggregateInput = {
+    id?: SortOrder
+    challengeId?: SortOrder
+    challengeName?: SortOrder
+    userId?: SortOrder
+    placement?: SortOrder
+    points?: SortOrder
+    createdAt?: SortOrder
+    createdBy?: SortOrder
+    updatedAt?: SortOrder
+    updatedBy?: SortOrder
+  }
+
+  export type memberChallengePointsSumOrderByAggregateInput = {
+    id?: SortOrder
+    userId?: SortOrder
+    placement?: SortOrder
+    points?: SortOrder
+  }
+
   export type MemberTraitDeviceListRelationFilter = {
     every?: memberTraitDeviceWhereInput
     some?: memberTraitDeviceWhereInput
@@ -30982,6 +32543,13 @@ export namespace Prisma {
     connect?: memberStatsHistoryWhereUniqueInput | memberStatsHistoryWhereUniqueInput[]
   }
 
+  export type memberChallengePointsCreateNestedManyWithoutMemberInput = {
+    create?: XOR<memberChallengePointsCreateWithoutMemberInput, memberChallengePointsUncheckedCreateWithoutMemberInput> | memberChallengePointsCreateWithoutMemberInput[] | memberChallengePointsUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberChallengePointsCreateOrConnectWithoutMemberInput | memberChallengePointsCreateOrConnectWithoutMemberInput[]
+    createMany?: memberChallengePointsCreateManyMemberInputEnvelope
+    connect?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+  }
+
   export type memberTraitsCreateNestedOneWithoutMemberInput = {
     create?: XOR<memberTraitsCreateWithoutMemberInput, memberTraitsUncheckedCreateWithoutMemberInput>
     connectOrCreate?: memberTraitsCreateOrConnectWithoutMemberInput
@@ -31026,6 +32594,13 @@ export namespace Prisma {
     connectOrCreate?: memberStatsHistoryCreateOrConnectWithoutMemberInput | memberStatsHistoryCreateOrConnectWithoutMemberInput[]
     createMany?: memberStatsHistoryCreateManyMemberInputEnvelope
     connect?: memberStatsHistoryWhereUniqueInput | memberStatsHistoryWhereUniqueInput[]
+  }
+
+  export type memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput = {
+    create?: XOR<memberChallengePointsCreateWithoutMemberInput, memberChallengePointsUncheckedCreateWithoutMemberInput> | memberChallengePointsCreateWithoutMemberInput[] | memberChallengePointsUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberChallengePointsCreateOrConnectWithoutMemberInput | memberChallengePointsCreateOrConnectWithoutMemberInput[]
+    createMany?: memberChallengePointsCreateManyMemberInputEnvelope
+    connect?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
   }
 
   export type memberTraitsUncheckedCreateNestedOneWithoutMemberInput = {
@@ -31171,6 +32746,20 @@ export namespace Prisma {
     deleteMany?: memberStatsHistoryScalarWhereInput | memberStatsHistoryScalarWhereInput[]
   }
 
+  export type memberChallengePointsUpdateManyWithoutMemberNestedInput = {
+    create?: XOR<memberChallengePointsCreateWithoutMemberInput, memberChallengePointsUncheckedCreateWithoutMemberInput> | memberChallengePointsCreateWithoutMemberInput[] | memberChallengePointsUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberChallengePointsCreateOrConnectWithoutMemberInput | memberChallengePointsCreateOrConnectWithoutMemberInput[]
+    upsert?: memberChallengePointsUpsertWithWhereUniqueWithoutMemberInput | memberChallengePointsUpsertWithWhereUniqueWithoutMemberInput[]
+    createMany?: memberChallengePointsCreateManyMemberInputEnvelope
+    set?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    disconnect?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    delete?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    connect?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    update?: memberChallengePointsUpdateWithWhereUniqueWithoutMemberInput | memberChallengePointsUpdateWithWhereUniqueWithoutMemberInput[]
+    updateMany?: memberChallengePointsUpdateManyWithWhereWithoutMemberInput | memberChallengePointsUpdateManyWithWhereWithoutMemberInput[]
+    deleteMany?: memberChallengePointsScalarWhereInput | memberChallengePointsScalarWhereInput[]
+  }
+
   export type memberTraitsUpdateOneWithoutMemberNestedInput = {
     create?: XOR<memberTraitsCreateWithoutMemberInput, memberTraitsUncheckedCreateWithoutMemberInput>
     connectOrCreate?: memberTraitsCreateOrConnectWithoutMemberInput
@@ -31255,6 +32844,20 @@ export namespace Prisma {
     update?: memberStatsHistoryUpdateWithWhereUniqueWithoutMemberInput | memberStatsHistoryUpdateWithWhereUniqueWithoutMemberInput[]
     updateMany?: memberStatsHistoryUpdateManyWithWhereWithoutMemberInput | memberStatsHistoryUpdateManyWithWhereWithoutMemberInput[]
     deleteMany?: memberStatsHistoryScalarWhereInput | memberStatsHistoryScalarWhereInput[]
+  }
+
+  export type memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput = {
+    create?: XOR<memberChallengePointsCreateWithoutMemberInput, memberChallengePointsUncheckedCreateWithoutMemberInput> | memberChallengePointsCreateWithoutMemberInput[] | memberChallengePointsUncheckedCreateWithoutMemberInput[]
+    connectOrCreate?: memberChallengePointsCreateOrConnectWithoutMemberInput | memberChallengePointsCreateOrConnectWithoutMemberInput[]
+    upsert?: memberChallengePointsUpsertWithWhereUniqueWithoutMemberInput | memberChallengePointsUpsertWithWhereUniqueWithoutMemberInput[]
+    createMany?: memberChallengePointsCreateManyMemberInputEnvelope
+    set?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    disconnect?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    delete?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    connect?: memberChallengePointsWhereUniqueInput | memberChallengePointsWhereUniqueInput[]
+    update?: memberChallengePointsUpdateWithWhereUniqueWithoutMemberInput | memberChallengePointsUpdateWithWhereUniqueWithoutMemberInput[]
+    updateMany?: memberChallengePointsUpdateManyWithWhereWithoutMemberInput | memberChallengePointsUpdateManyWithWhereWithoutMemberInput[]
+    deleteMany?: memberChallengePointsScalarWhereInput | memberChallengePointsScalarWhereInput[]
   }
 
   export type memberTraitsUncheckedUpdateOneWithoutMemberNestedInput = {
@@ -31373,6 +32976,20 @@ export namespace Prisma {
     upsert?: memberUpsertWithoutMemberStatsInput
     connect?: memberWhereUniqueInput
     update?: XOR<XOR<memberUpdateToOneWithWhereWithoutMemberStatsInput, memberUpdateWithoutMemberStatsInput>, memberUncheckedUpdateWithoutMemberStatsInput>
+  }
+
+  export type memberCreateNestedOneWithoutChallengePointsInput = {
+    create?: XOR<memberCreateWithoutChallengePointsInput, memberUncheckedCreateWithoutChallengePointsInput>
+    connectOrCreate?: memberCreateOrConnectWithoutChallengePointsInput
+    connect?: memberWhereUniqueInput
+  }
+
+  export type memberUpdateOneRequiredWithoutChallengePointsNestedInput = {
+    create?: XOR<memberCreateWithoutChallengePointsInput, memberUncheckedCreateWithoutChallengePointsInput>
+    connectOrCreate?: memberCreateOrConnectWithoutChallengePointsInput
+    upsert?: memberUpsertWithoutChallengePointsInput
+    connect?: memberWhereUniqueInput
+    update?: XOR<XOR<memberUpdateToOneWithWhereWithoutChallengePointsInput, memberUpdateWithoutChallengePointsInput>, memberUncheckedUpdateWithoutChallengePointsInput>
   }
 
   export type memberTraitsCreatesubscriptionsInput = {
@@ -32661,6 +34278,40 @@ export namespace Prisma {
     skipDuplicates?: boolean
   }
 
+  export type memberChallengePointsCreateWithoutMemberInput = {
+    id?: bigint | number
+    challengeId: string
+    challengeName: string
+    placement: number
+    points: number
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberChallengePointsUncheckedCreateWithoutMemberInput = {
+    id?: bigint | number
+    challengeId: string
+    challengeName: string
+    placement: number
+    points: number
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
+  export type memberChallengePointsCreateOrConnectWithoutMemberInput = {
+    where: memberChallengePointsWhereUniqueInput
+    create: XOR<memberChallengePointsCreateWithoutMemberInput, memberChallengePointsUncheckedCreateWithoutMemberInput>
+  }
+
+  export type memberChallengePointsCreateManyMemberInputEnvelope = {
+    data: memberChallengePointsCreateManyMemberInput | memberChallengePointsCreateManyMemberInput[]
+    skipDuplicates?: boolean
+  }
+
   export type memberTraitsCreateWithoutMemberInput = {
     id?: bigint | number
     subscriptions?: memberTraitsCreatesubscriptionsInput | string[]
@@ -32926,6 +34577,38 @@ export namespace Prisma {
     updatedBy?: StringNullableFilter<"memberStatsHistory"> | string | null
   }
 
+  export type memberChallengePointsUpsertWithWhereUniqueWithoutMemberInput = {
+    where: memberChallengePointsWhereUniqueInput
+    update: XOR<memberChallengePointsUpdateWithoutMemberInput, memberChallengePointsUncheckedUpdateWithoutMemberInput>
+    create: XOR<memberChallengePointsCreateWithoutMemberInput, memberChallengePointsUncheckedCreateWithoutMemberInput>
+  }
+
+  export type memberChallengePointsUpdateWithWhereUniqueWithoutMemberInput = {
+    where: memberChallengePointsWhereUniqueInput
+    data: XOR<memberChallengePointsUpdateWithoutMemberInput, memberChallengePointsUncheckedUpdateWithoutMemberInput>
+  }
+
+  export type memberChallengePointsUpdateManyWithWhereWithoutMemberInput = {
+    where: memberChallengePointsScalarWhereInput
+    data: XOR<memberChallengePointsUpdateManyMutationInput, memberChallengePointsUncheckedUpdateManyWithoutMemberInput>
+  }
+
+  export type memberChallengePointsScalarWhereInput = {
+    AND?: memberChallengePointsScalarWhereInput | memberChallengePointsScalarWhereInput[]
+    OR?: memberChallengePointsScalarWhereInput[]
+    NOT?: memberChallengePointsScalarWhereInput | memberChallengePointsScalarWhereInput[]
+    id?: BigIntFilter<"memberChallengePoints"> | bigint | number
+    challengeId?: StringFilter<"memberChallengePoints"> | string
+    challengeName?: StringFilter<"memberChallengePoints"> | string
+    userId?: BigIntFilter<"memberChallengePoints"> | bigint | number
+    placement?: IntFilter<"memberChallengePoints"> | number
+    points?: IntFilter<"memberChallengePoints"> | number
+    createdAt?: DateTimeFilter<"memberChallengePoints"> | Date | string
+    createdBy?: StringFilter<"memberChallengePoints"> | string
+    updatedAt?: DateTimeNullableFilter<"memberChallengePoints"> | Date | string | null
+    updatedBy?: StringNullableFilter<"memberChallengePoints"> | string | null
+  }
+
   export type memberTraitsUpsertWithoutMemberInput = {
     update: XOR<memberTraitsUpdateWithoutMemberInput, memberTraitsUncheckedUpdateWithoutMemberInput>
     create: XOR<memberTraitsCreateWithoutMemberInput, memberTraitsUncheckedCreateWithoutMemberInput>
@@ -33018,6 +34701,7 @@ export namespace Prisma {
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
   }
 
@@ -33062,6 +34746,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
   }
 
@@ -33122,6 +34807,7 @@ export namespace Prisma {
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
   }
 
@@ -33166,6 +34852,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
   }
 
@@ -33210,6 +34897,7 @@ export namespace Prisma {
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
   }
 
@@ -33254,6 +34942,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
   }
 
@@ -33314,6 +35003,7 @@ export namespace Prisma {
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
   }
 
@@ -33358,6 +35048,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
   }
 
@@ -33402,6 +35093,7 @@ export namespace Prisma {
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
   }
 
@@ -33446,6 +35138,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
   }
 
@@ -33506,6 +35199,7 @@ export namespace Prisma {
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
   }
 
@@ -33550,6 +35244,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
   }
 
@@ -33594,6 +35289,7 @@ export namespace Prisma {
     phones?: memberPhoneCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
   }
 
@@ -33638,6 +35334,7 @@ export namespace Prisma {
     phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
   }
 
@@ -33698,6 +35395,7 @@ export namespace Prisma {
     phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
   }
 
@@ -33742,6 +35440,7 @@ export namespace Prisma {
     phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
   }
 
@@ -33786,6 +35485,7 @@ export namespace Prisma {
     phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
   }
 
@@ -33830,6 +35530,7 @@ export namespace Prisma {
     phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
   }
 
@@ -33890,6 +35591,7 @@ export namespace Prisma {
     phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
   }
 
@@ -33934,6 +35636,7 @@ export namespace Prisma {
     phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
   }
 
@@ -33978,6 +35681,7 @@ export namespace Prisma {
     phones?: memberPhoneCreateNestedManyWithoutMemberInput
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
   }
 
@@ -34022,6 +35726,7 @@ export namespace Prisma {
     phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
     memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
   }
 
@@ -34082,6 +35787,7 @@ export namespace Prisma {
     phones?: memberPhoneUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
   }
 
@@ -34125,6 +35831,203 @@ export namespace Prisma {
     addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
     phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
+    memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
+    memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
+  }
+
+  export type memberCreateWithoutChallengePointsInput = {
+    userId: bigint | number
+    handle: string
+    handleLower: string
+    email: string
+    verified?: boolean | null
+    skillScore?: number | null
+    memberRatingId?: bigint | number | null
+    firstName?: string | null
+    lastName?: string | null
+    description?: string | null
+    otherLangName?: string | null
+    status?: $Enums.MemberStatus | null
+    newEmail?: string | null
+    emailVerifyToken?: string | null
+    emailVerifyTokenDate?: Date | string | null
+    newEmailVerifyToken?: string | null
+    newEmailVerifyTokenDate?: Date | string | null
+    country?: string | null
+    homeCountryCode?: string | null
+    competitionCountryCode?: string | null
+    photoURL?: string | null
+    tracks?: memberCreatetracksInput | string[]
+    loginCount?: number | null
+    lastLoginDate?: Date | string | null
+    availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
+    skillScoreDeduction?: number | null
+    namesAndHandleAppearance?: string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+    maxRating?: memberMaxRatingCreateNestedOneWithoutMemberInput
+    addresses?: memberAddressCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneCreateNestedManyWithoutMemberInput
+    financial?: memberFinancialCreateNestedOneWithoutMemberInput
+    memberStats?: memberStatsCreateNestedManyWithoutMemberInput
+    memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    memberTraits?: memberTraitsCreateNestedOneWithoutMemberInput
+  }
+
+  export type memberUncheckedCreateWithoutChallengePointsInput = {
+    userId: bigint | number
+    handle: string
+    handleLower: string
+    email: string
+    verified?: boolean | null
+    skillScore?: number | null
+    memberRatingId?: bigint | number | null
+    firstName?: string | null
+    lastName?: string | null
+    description?: string | null
+    otherLangName?: string | null
+    status?: $Enums.MemberStatus | null
+    newEmail?: string | null
+    emailVerifyToken?: string | null
+    emailVerifyTokenDate?: Date | string | null
+    newEmailVerifyToken?: string | null
+    newEmailVerifyTokenDate?: Date | string | null
+    country?: string | null
+    homeCountryCode?: string | null
+    competitionCountryCode?: string | null
+    photoURL?: string | null
+    tracks?: memberCreatetracksInput | string[]
+    loginCount?: number | null
+    lastLoginDate?: Date | string | null
+    availableForGigs?: boolean | null
+    availableForGigsLastUpdateDate?: Date | string | null
+    lastProfileConfirmationDate?: Date | string | null
+    skillScoreDeduction?: number | null
+    namesAndHandleAppearance?: string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+    maxRating?: memberMaxRatingUncheckedCreateNestedOneWithoutMemberInput
+    addresses?: memberAddressUncheckedCreateNestedManyWithoutMemberInput
+    phones?: memberPhoneUncheckedCreateNestedManyWithoutMemberInput
+    financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
+    memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
+    memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    memberTraits?: memberTraitsUncheckedCreateNestedOneWithoutMemberInput
+  }
+
+  export type memberCreateOrConnectWithoutChallengePointsInput = {
+    where: memberWhereUniqueInput
+    create: XOR<memberCreateWithoutChallengePointsInput, memberUncheckedCreateWithoutChallengePointsInput>
+  }
+
+  export type memberUpsertWithoutChallengePointsInput = {
+    update: XOR<memberUpdateWithoutChallengePointsInput, memberUncheckedUpdateWithoutChallengePointsInput>
+    create: XOR<memberCreateWithoutChallengePointsInput, memberUncheckedCreateWithoutChallengePointsInput>
+    where?: memberWhereInput
+  }
+
+  export type memberUpdateToOneWithWhereWithoutChallengePointsInput = {
+    where?: memberWhereInput
+    data: XOR<memberUpdateWithoutChallengePointsInput, memberUncheckedUpdateWithoutChallengePointsInput>
+  }
+
+  export type memberUpdateWithoutChallengePointsInput = {
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    handle?: StringFieldUpdateOperationsInput | string
+    handleLower?: StringFieldUpdateOperationsInput | string
+    email?: StringFieldUpdateOperationsInput | string
+    verified?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    skillScore?: NullableFloatFieldUpdateOperationsInput | number | null
+    memberRatingId?: NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+    firstName?: NullableStringFieldUpdateOperationsInput | string | null
+    lastName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    otherLangName?: NullableStringFieldUpdateOperationsInput | string | null
+    status?: NullableEnumMemberStatusFieldUpdateOperationsInput | $Enums.MemberStatus | null
+    newEmail?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    newEmailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    newEmailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    country?: NullableStringFieldUpdateOperationsInput | string | null
+    homeCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    competitionCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    photoURL?: NullableStringFieldUpdateOperationsInput | string | null
+    tracks?: memberUpdatetracksInput | string[]
+    loginCount?: NullableIntFieldUpdateOperationsInput | number | null
+    lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
+    namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+    maxRating?: memberMaxRatingUpdateOneWithoutMemberNestedInput
+    addresses?: memberAddressUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUpdateManyWithoutMemberNestedInput
+    financial?: memberFinancialUpdateOneWithoutMemberNestedInput
+    memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
+    memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    memberTraits?: memberTraitsUpdateOneWithoutMemberNestedInput
+  }
+
+  export type memberUncheckedUpdateWithoutChallengePointsInput = {
+    userId?: BigIntFieldUpdateOperationsInput | bigint | number
+    handle?: StringFieldUpdateOperationsInput | string
+    handleLower?: StringFieldUpdateOperationsInput | string
+    email?: StringFieldUpdateOperationsInput | string
+    verified?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    skillScore?: NullableFloatFieldUpdateOperationsInput | number | null
+    memberRatingId?: NullableBigIntFieldUpdateOperationsInput | bigint | number | null
+    firstName?: NullableStringFieldUpdateOperationsInput | string | null
+    lastName?: NullableStringFieldUpdateOperationsInput | string | null
+    description?: NullableStringFieldUpdateOperationsInput | string | null
+    otherLangName?: NullableStringFieldUpdateOperationsInput | string | null
+    status?: NullableEnumMemberStatusFieldUpdateOperationsInput | $Enums.MemberStatus | null
+    newEmail?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    emailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    newEmailVerifyToken?: NullableStringFieldUpdateOperationsInput | string | null
+    newEmailVerifyTokenDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    country?: NullableStringFieldUpdateOperationsInput | string | null
+    homeCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    competitionCountryCode?: NullableStringFieldUpdateOperationsInput | string | null
+    photoURL?: NullableStringFieldUpdateOperationsInput | string | null
+    tracks?: memberUpdatetracksInput | string[]
+    loginCount?: NullableIntFieldUpdateOperationsInput | number | null
+    lastLoginDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    availableForGigs?: NullableBoolFieldUpdateOperationsInput | boolean | null
+    availableForGigsLastUpdateDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    lastProfileConfirmationDate?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    skillScoreDeduction?: NullableFloatFieldUpdateOperationsInput | number | null
+    namesAndHandleAppearance?: NullableStringFieldUpdateOperationsInput | string | null
+    aggregatedSkills?: NullableJsonNullValueInput | InputJsonValue
+    enteredSkills?: NullableJsonNullValueInput | InputJsonValue
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+    maxRating?: memberMaxRatingUncheckedUpdateOneWithoutMemberNestedInput
+    addresses?: memberAddressUncheckedUpdateManyWithoutMemberNestedInput
+    phones?: memberPhoneUncheckedUpdateManyWithoutMemberNestedInput
+    financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
+    memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
     memberTraits?: memberTraitsUncheckedUpdateOneWithoutMemberNestedInput
   }
@@ -34519,6 +36422,7 @@ export namespace Prisma {
     financial?: memberFinancialCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsCreateNestedManyWithoutMemberInput
   }
 
   export type memberUncheckedCreateWithoutMemberTraitsInput = {
@@ -34563,6 +36467,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedCreateNestedOneWithoutMemberInput
     memberStats?: memberStatsUncheckedCreateNestedManyWithoutMemberInput
     memberStatsHistory?: memberStatsHistoryUncheckedCreateNestedManyWithoutMemberInput
+    challengePoints?: memberChallengePointsUncheckedCreateNestedManyWithoutMemberInput
   }
 
   export type memberCreateOrConnectWithoutMemberTraitsInput = {
@@ -34947,6 +36852,7 @@ export namespace Prisma {
     financial?: memberFinancialUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUpdateManyWithoutMemberNestedInput
   }
 
   export type memberUncheckedUpdateWithoutMemberTraitsInput = {
@@ -34991,6 +36897,7 @@ export namespace Prisma {
     financial?: memberFinancialUncheckedUpdateOneWithoutMemberNestedInput
     memberStats?: memberStatsUncheckedUpdateManyWithoutMemberNestedInput
     memberStatsHistory?: memberStatsHistoryUncheckedUpdateManyWithoutMemberNestedInput
+    challengePoints?: memberChallengePointsUncheckedUpdateManyWithoutMemberNestedInput
   }
 
   export type memberTraitsCreateWithoutDeviceInput = {
@@ -36029,6 +37936,18 @@ export namespace Prisma {
     updatedBy?: string | null
   }
 
+  export type memberChallengePointsCreateManyMemberInput = {
+    id?: bigint | number
+    challengeId: string
+    challengeName: string
+    placement: number
+    points: number
+    createdAt?: Date | string
+    createdBy: string
+    updatedAt?: Date | string | null
+    updatedBy?: string | null
+  }
+
   export type memberAddressUpdateWithoutMemberInput = {
     id?: BigIntFieldUpdateOperationsInput | bigint | number
     streetAddr1?: NullableStringFieldUpdateOperationsInput | string | null
@@ -36251,6 +38170,42 @@ export namespace Prisma {
     oldSchoolRank?: NullableIntFieldUpdateOperationsInput | number | null
     newSchoolRank?: NullableIntFieldUpdateOperationsInput | number | null
     eventDate?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberChallengePointsUpdateWithoutMemberInput = {
+    id?: BigIntFieldUpdateOperationsInput | bigint | number
+    challengeId?: StringFieldUpdateOperationsInput | string
+    challengeName?: StringFieldUpdateOperationsInput | string
+    placement?: IntFieldUpdateOperationsInput | number
+    points?: IntFieldUpdateOperationsInput | number
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberChallengePointsUncheckedUpdateWithoutMemberInput = {
+    id?: BigIntFieldUpdateOperationsInput | bigint | number
+    challengeId?: StringFieldUpdateOperationsInput | string
+    challengeName?: StringFieldUpdateOperationsInput | string
+    placement?: IntFieldUpdateOperationsInput | number
+    points?: IntFieldUpdateOperationsInput | number
+    createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
+    createdBy?: StringFieldUpdateOperationsInput | string
+    updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null
+    updatedBy?: NullableStringFieldUpdateOperationsInput | string | null
+  }
+
+  export type memberChallengePointsUncheckedUpdateManyWithoutMemberInput = {
+    id?: BigIntFieldUpdateOperationsInput | bigint | number
+    challengeId?: StringFieldUpdateOperationsInput | string
+    challengeName?: StringFieldUpdateOperationsInput | string
+    placement?: IntFieldUpdateOperationsInput | number
+    points?: IntFieldUpdateOperationsInput | number
     createdAt?: DateTimeFieldUpdateOperationsInput | Date | string
     createdBy?: StringFieldUpdateOperationsInput | string
     updatedAt?: NullableDateTimeFieldUpdateOperationsInput | Date | string | null

@@ -68,6 +68,14 @@ module.exports = {
       scopes: [MEMBERS.READ, MEMBERS.ALL]
     }
   },
+  '/members/challenge-points/:challengeId': {
+    put: {
+      controller: 'MemberController',
+      method: 'updateChallengePoints',
+      auth: 'jwt',
+      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+    }
+  },
   '/members/:handle': {
     get: {
       controller: 'MemberController',

@@ -170,6 +170,49 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/challenge-points/{challengeId}':
+    put:
+      tags:
+        - Basic
+      description: |-
+        Replace the stored point awards for one challenge. This endpoint mirrors point-based challenge prize payouts into member-api so member profiles can return challenge point totals and per-challenge details.
+
+        Authorization:
+          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+      security:
+        - bearer: []
+      parameters:
+        - in: path
+          name: challengeId
+          required: true
+          type: string
+          description: Challenge identifier whose point rows should be replaced.
+        - in: body
+          name: body
+          required: true
+          schema:
+            $ref: '#/definitions/ChallengePointsUpdateRequest'
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/ChallengePointsUpdateResult'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '401':
+          description: Miss or wrong authentication credentials
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '403':
+          description: No permission
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}':
     get:
       tags:
@@ -1857,7 +1900,7 @@ paths:
                 description: UUID or legacy numeric challenge identifier that starts the rerate request.
               ratingName:
                 type: string
-                description: Optional configured rating path name, for example `AI` or `Java MySQL`.
+                description: Optional configured rating path name, for example `AI Engineering` or `Java MySQL`.
               trackId:
                 type: string
                 enum:
@@ -2232,6 +2275,68 @@ definitions:
         description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
       updatedBy:
         type: string
+      challengePoints:
+        $ref: '#/definitions/MemberChallengePointsSummary'
+  MemberChallengePointsSummary:
+    type: object
+    properties:
+      total:
+        type: integer
+        description: Total challenge points earned by the member.
+      challenges:
+        type: integer
+        description: Number of challenge point award rows returned for the member.
+      details:
+        type: array
+        items:
+          $ref: '#/definitions/MemberChallengePointsDetail'
+  MemberChallengePointsDetail:
+    type: object
+    properties:
+      challengeId:
+        type: string
+      challengeName:
+        type: string
+      userId:
+        type: integer
+      placement:
+        type: integer
+      points:
+        type: integer
+  ChallengePointsUpdateRequest:
+    type: object
+    required:
+      - challengeName
+      - points
+    properties:
+      challengeName:
+        type: string
+      points:
+        type: array
+        items:
+          $ref: '#/definitions/ChallengePointAward'
+  ChallengePointAward:
+    type: object
+    required:
+      - userId
+      - placement
+      - points
+    properties:
+      userId:
+        type: integer
+      placement:
+        type: integer
+      points:
+        type: integer
+  ChallengePointsUpdateResult:
+    type: object
+    properties:
+      challengeId:
+        type: string
+      challengeName:
+        type: string
+      updated:
+        type: integer
   MemberHandleUpdate:
     type: object
     required:
