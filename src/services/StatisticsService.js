@@ -2474,8 +2474,18 @@ function getMarathonHistoryAliasKeys (row) {
  * @returns {Array<string>} canonical replacement aliases
  */
 function getMarathonHistoryCanonicalReplacementAliasKeys (row) {
+  const keys = []
+  const matchNumber = getMarathonHistoryMatchNumber(row)
+  if (matchNumber) {
+    keys.push(`match:${matchNumber}`)
+  }
+
   const titleAlias = getMarathonHistoryTitleAlias(row && row.challengeName)
-  return titleAlias ? [titleAlias] : []
+  if (titleAlias) {
+    keys.push(titleAlias)
+  }
+
+  return keys
 }
 
 /**
