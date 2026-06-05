@@ -424,6 +424,8 @@ async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
 
 /**
  * Resolve the rating source supported by the engines for a challenge.
+ * Marathon Match challenges are type-driven because some Challenge API rows
+ * carry the Development track while still belonging to the MM rating stream.
  * @param {Object} challenge challenge metadata row
  * @returns {string|null} source identifier or null when unsupported
  */
@@ -435,7 +437,7 @@ function resolveChallengeRatingSource (challenge) {
     return RATING_SOURCE_DEVELOPMENT
   }
 
-  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.MARATHON_MATCH) {
+  if (typeName === TYPE_NAMES.MARATHON_MATCH) {
     return RATING_SOURCE_MARATHON_MATCH
   }
 
