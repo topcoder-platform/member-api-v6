@@ -31,6 +31,7 @@ const CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
 const CHALLENGE_TYPE_NAMES = [TYPE_NAMES.CHALLENGE, TYPE_NAMES.CODE]
 const RERATE_ACTOR = 'rerate-member-stats'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
+const CHALLENGE_WINNER_RATING_TYPES = ['PLACEMENT']
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
@@ -351,9 +352,11 @@ function findHistorySeedIndexForChallenge (historyRows, challengeEntry) {
 }
 
 function normalizeScore (row) {
-  const finalScore = Number(row.finalScore)
-  if (Number.isFinite(finalScore)) {
-    return finalScore
+  if (row.finalScore !== null && row.finalScore !== undefined) {
+    const finalScore = Number(row.finalScore)
+    if (Number.isFinite(finalScore)) {
+      return finalScore
+    }
   }
 
   const placement = Number(row.placement)
@@ -391,6 +394,145 @@ function isParticipantEligibleForRating (row) {
   return false
 }
 
+/**
+ * Convert a member user id into the numeric shape stored on ChallengeWinner.
+ * @param {BigInt|string|number} userId member identifier
+ * @returns {number|string} numeric user id when safe, otherwise the string form
+ */
+function toChallengeWinnerUserId (userId) {
+  const numericUserId = Number(userId)
+  return Number.isSafeInteger(numericUserId) ? numericUserId : String(userId)
+}
+
+/**
+ * Convert one ChallengeWinner row into the challengeResult-like row consumed by
+ * the Development rating replay. Winner rows only provide placement, so the
+ * existing placement score fallback drives the rating calculation.
+ * @param {Object} row ChallengeWinner row
+ * @returns {Object|null} review-row-compatible participant data
+ */
+function toChallengeWinnerParticipantRow (row) {
+  if (!row || row.userId === null || row.userId === undefined || !row.challengeId) {
+    return null
+  }
+
+  return {
+    challengeId: String(row.challengeId),
+    userId: String(row.userId),
+    placement: row.placement,
+    passedReview: true,
+    validSubmission: true,
+    createdAt: row.createdAt
+  }
+}
+
+/**
+ * Build the duplicate key used when merging challengeResult and ChallengeWinner
+ * participant rows for the same member and challenge.
+ * @param {Object} row participant row
+ * @returns {string} duplicate key
+ */
+function buildParticipantRowKey (row) {
+  return `${String(row && row.challengeId)}::${String(row && row.userId)}`
+}
+
+/**
+ * Merge review-api participant rows with ChallengeWinner placement rows. Review
+ * rows are kept when both sources exist because they may carry final score and
+ * source rating fields that are more precise than placement-only winners.
+ * @param {Array<Object>} reviewRows challengeResult rows
+ * @param {Array<Object>} winnerRows ChallengeWinner rows
+ * @returns {Array<Object>} merged participant rows
+ */
+function mergeChallengeWinnerParticipantRows (reviewRows, winnerRows) {
+  const mergedRows = (reviewRows || []).slice()
+  const existingKeys = new Set(mergedRows.map(buildParticipantRowKey))
+
+  ;(winnerRows || []).forEach((winnerRow) => {
+    const participantRow = toChallengeWinnerParticipantRow(winnerRow)
+    if (!participantRow) {
+      return
+    }
+
+    const key = buildParticipantRowKey(participantRow)
+    if (existingKeys.has(key)) {
+      return
+    }
+
+    existingKeys.add(key)
+    mergedRows.push(participantRow)
+  })
+
+  return mergedRows
+}
+
+/**
+ * Load ChallengeWinner rows for a target member. These rows let winner-only
+ * members enter the Development rating timeline even when review-api never
+ * wrote a challengeResult row for the completed challenge.
+ * @param {Object} challengeClient challenge Prisma client
+ * @param {BigInt|string|number} userId member identifier
+ * @returns {Promise<Array<Object>>} ChallengeWinner rows for rating replay
+ */
+async function fetchChallengeWinnerRowsForUser (challengeClient, userId) {
+  if (!challengeClient || !challengeClient.ChallengeWinner ||
+    typeof challengeClient.ChallengeWinner.findMany !== 'function') {
+    return []
+  }
+
+  return challengeClient.ChallengeWinner.findMany({
+    where: {
+      userId: toChallengeWinnerUserId(userId),
+      type: {
+        in: CHALLENGE_WINNER_RATING_TYPES
+      }
+    },
+    select: {
+      challengeId: true,
+      userId: true,
+      placement: true,
+      createdAt: true
+    }
+  })
+}
+
+/**
+ * Load ChallengeWinner participant rows for one challenge. The rows are merged
+ * with review-api participants so placement winners without challengeResult
+ * records still affect and receive Development rating updates.
+ * @param {Object} challengeClient challenge Prisma client
+ * @param {Object|string|number} challengeRef challenge id or history entry
+ * @returns {Promise<Array<Object>>} ChallengeWinner rows for the challenge
+ */
+async function fetchChallengeWinnerRowsForChallenge (challengeClient, challengeRef) {
+  if (!challengeClient || !challengeClient.ChallengeWinner ||
+    typeof challengeClient.ChallengeWinner.findMany !== 'function') {
+    return []
+  }
+
+  const challengeIds = buildChallengeIdCandidates(challengeRef)
+  if (challengeIds.length === 0) {
+    return []
+  }
+
+  return challengeClient.ChallengeWinner.findMany({
+    where: {
+      challengeId: {
+        in: challengeIds
+      },
+      type: {
+        in: CHALLENGE_WINNER_RATING_TYPES
+      }
+    },
+    select: {
+      challengeId: true,
+      userId: true,
+      placement: true,
+      createdAt: true
+    }
+  })
+}
+
 async function fetchReviewResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
@@ -406,7 +548,7 @@ async function fetchReviewResultsForUser (reviewDbClient, userId) {
   return result.rows
 }
 
-async function fetchParticipantsForChallenge (reviewDbClient, challengeRef) {
+async function fetchParticipantsForChallenge (reviewDbClient, challengeRef, challengeClient) {
   const challengeIds = buildChallengeIdCandidates(challengeRef)
   if (challengeIds.length === 0) {
     return []
@@ -424,7 +566,8 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeRef) {
     challengeIds
   )
 
-  return result.rows
+  const winnerRows = await fetchChallengeWinnerRowsForChallenge(challengeClient, challengeRef)
+  return mergeChallengeWinnerParticipantRows(result.rows, winnerRows)
 }
 
 /**
@@ -951,8 +1094,12 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
   }
 
   const normalizedUserId = toBigIntUserId(userId)
-  const reviewRows = await fetchReviewResultsForUser(reviewDbClient, normalizedUserId)
-  if (reviewRows.length === 0) {
+  const [reviewRows, winnerRows] = await Promise.all([
+    fetchReviewResultsForUser(reviewDbClient, normalizedUserId),
+    fetchChallengeWinnerRowsForUser(challengeClient, normalizedUserId)
+  ])
+  const participantRowsForUser = mergeChallengeWinnerParticipantRows(reviewRows, winnerRows)
+  if (participantRowsForUser.length === 0) {
     return {
       challengesProcessed: 0,
       ratingsUpdated: 0
@@ -961,10 +1108,10 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   const challengeMetadataById = await fetchChallengeMetadataMap(
     challengeClient,
-    Array.from(new Set(reviewRows.map((row) => String(row.challengeId))))
+    Array.from(new Set(participantRowsForUser.map((row) => String(row.challengeId))))
   )
 
-  const targetHistory = buildTargetHistory(reviewRows, challengeMetadataById, {
+  const targetHistory = buildTargetHistory(participantRowsForUser, challengeMetadataById, {
     skipLegacyReviewIds: options.skipLegacyReviewIds === true,
     useLegacySourceRatings: options.useLegacySourceRatings === true
   })
@@ -1062,7 +1209,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
       continue
     }
 
-    const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry))
+    const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry, challengeClient))
       .filter((row) => isParticipantEligibleForRating(row))
     if (participantRows.length === 0) {
       continue

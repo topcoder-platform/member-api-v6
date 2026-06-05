@@ -71,6 +71,7 @@ const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
 const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
 const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
 const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
+const CHALLENGE_WINNER_RATING_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE]
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -537,6 +538,35 @@ async function fetchChallengeResultParticipantIds (reviewDbClient, challengeId) 
 }
 
 /**
+ * Fetch placement winner participants from challenge-api for completed
+ * Development rating rerates. This covers QA-created challenges where winners
+ * can be assigned without a review-api challengeResult row for the same member.
+ * @param {Object} challengeClient challenge Prisma client
+ * @param {string|number} challengeId challenge identifier
+ * @returns {Promise<Array<BigInt>>} winner user ids
+ */
+async function fetchChallengeWinnerParticipantIds (challengeClient, challengeId) {
+  if (!challengeClient || !challengeClient.ChallengeWinner ||
+    typeof challengeClient.ChallengeWinner.findMany !== 'function') {
+    return []
+  }
+
+  const winnerRows = await challengeClient.ChallengeWinner.findMany({
+    where: {
+      challengeId: String(challengeId),
+      type: {
+        in: CHALLENGE_WINNER_RATING_TYPES
+      }
+    },
+    select: {
+      userId: true
+    }
+  })
+
+  return winnerRows.map((row) => toBigIntUserId(row.userId))
+}
+
+/**
  * Fetch Marathon Match participants from review summations when challengeResult
  * rows are not available yet.
  * @param {Object} reviewDbClient raw pg review database client
@@ -561,12 +591,20 @@ async function fetchMarathonMatchParticipantIds (reviewDbClient, challengeId) {
  * review summations so partially synced result rows cannot omit lower-placed
  * participants from rerating.
  * @param {Object} reviewDbClient raw pg review database client
+ * @param {Object} challengeClient challenge Prisma client
  * @param {string|number} challengeId challenge identifier
  * @param {string} source rating source identifier
  * @returns {Promise<Array<BigInt>>} unique participant user ids
  */
-async function fetchRatingParticipantIds (reviewDbClient, challengeId, source) {
+async function fetchRatingParticipantIds (reviewDbClient, challengeClient, challengeId, source) {
   const challengeResultUserIds = await fetchChallengeResultParticipantIds(reviewDbClient, challengeId)
+  if (source === RATING_SOURCE_DEVELOPMENT) {
+    return _.uniqBy(
+      challengeResultUserIds.concat(await fetchChallengeWinnerParticipantIds(challengeClient, challengeId)),
+      stringifyUserId
+    )
+  }
+
   if (source !== RATING_SOURCE_MARATHON_MATCH) {
     return _.uniqBy(challengeResultUserIds, stringifyUserId)
   }
@@ -4199,7 +4237,7 @@ async function rerateChallengeSubmitterRatings (currentUser, data) {
 
     participantIdsBySource.set(
       job.source,
-      await fetchRatingParticipantIds(reviewDbClient, challengeId, job.source)
+      await fetchRatingParticipantIds(reviewDbClient, challengeClient, challengeId, job.source)
     )
   }
 
