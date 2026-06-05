@@ -422,6 +422,96 @@ function findHistoryRow (historyRows, userId, challengeId) {
 }
 
 describe('develop rating engine unit tests', () => {
+  it('rerateDevTrack should support Data Science Challenge rating dimensions', async () => {
+    const targetUserId = toBigInt(1001)
+    const opponentUserId = toBigInt(2002)
+    const challengeId = 'ds-challenge-1'
+    const eventDate = new Date('2026-06-02T05:30:04.536Z')
+    const members = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createReviewDbClient([
+      {
+        challengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        createdAt: new Date('2026-06-02T04:49:42.752Z')
+      },
+      {
+        challengeId,
+        userId: opponentUserId,
+        finalScore: 88.89,
+        placement: 2,
+        rated: true,
+        createdAt: new Date('2026-06-02T04:46:08.538Z')
+      }
+    ])
+    const challengeClient = createChallengeClient({
+      [challengeId]: {
+        id: challengeId,
+        endDate: eventDate,
+        track: { name: 'Data Science' },
+        type: { name: 'Challenge' }
+      }
+    })
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 88.89)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      members.client,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      challengeId,
+      {
+        targetTrackName: 'DATA_SCIENCE',
+        targetTypeName: 'Challenge',
+        challengeTrackNames: ['DATA_SCIENCE'],
+        challengeTypeNames: ['Challenge']
+      }
+    )
+
+    result.challengesProcessed.should.equal(1)
+    result.ratingsUpdated.should.equal(1)
+
+    const statsRow = members.state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === CHALLENGE_TYPE_ID
+    )
+    should.exist(statsRow)
+    statsRow.rating.should.equal(expectedTarget.rating)
+    statsRow.volatility.should.equal(expectedTarget.volatility)
+    statsRow.challenges.should.equal(1)
+    statsRow.mostRecentEventDate.should.deep.equal(eventDate)
+
+    const historyRow = findHistoryRow(members.state.historyRows, targetUserId, challengeId)
+    should.exist(historyRow)
+    historyRow.trackId.should.equal(DATA_SCIENCE_TRACK_ID)
+    historyRow.typeId.should.equal(CHALLENGE_TYPE_ID)
+    historyRow.newRating.should.equal(expectedTarget.rating)
+    historyRow.mostRecent.should.equal(true)
+
+    const maxRatingRow = members.state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
+    should.exist(maxRatingRow)
+    maxRatingRow.rating.should.equal(expectedTarget.rating)
+    maxRatingRow.track.should.equal('DATA_SCIENCE')
+    maxRatingRow.subTrack.should.equal('Challenge')
+    maxRatingRow.ratingColor.should.equal(getRatingColor(expectedTarget.rating))
+
+    members.state.rankRecalculationCalls.should.have.length(1)
+    members.state.rankRecalculationCalls[0].trackId.should.equal(DATA_SCIENCE_TRACK_ID)
+    members.state.rankRecalculationCalls[0].typeId.should.equal(CHALLENGE_TYPE_ID)
+  })
+
   it('rerateDevTrack should seed rerates from prior history instead of current snapshots', async () => {
     const targetUserId = toBigInt(1001)
     const opponentUserId = toBigInt(2002)

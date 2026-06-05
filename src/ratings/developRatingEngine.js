@@ -69,6 +69,52 @@ function normalizeChallengeDimension (value) {
 }
 
 /**
+ * Normalize one or more rating-context values into an array.
+ * @param {*} value scalar or array option value
+ * @returns {Array<*>} option values as an array
+ */
+function toRatingContextArray (value) {
+  if (Array.isArray(value)) {
+    return value
+  }
+
+  return value ? [value] : []
+}
+
+/**
+ * Build source challenge filters and target unified dimensions for this rating run.
+ * Defaults preserve the historical DEVELOPMENT / Challenge stream.
+ * @param {Object} [options] rerate options
+ * @param {string} [options.targetTrackName] unified stats track to update
+ * @param {string} [options.targetTypeName] unified stats type to update
+ * @param {Array<string>|string} [options.challengeTrackNames] source challenge tracks to replay
+ * @param {Array<string>|string} [options.challengeTypeNames] source challenge types to replay
+ * @returns {Object} normalized rating context
+ */
+function buildRatingContext (options = {}) {
+  const challengeTrackNames = toRatingContextArray(options.challengeTrackNames || options.challengeTrackName)
+  const challengeTypeNames = toRatingContextArray(options.challengeTypeNames || options.challengeTypeName)
+
+  return {
+    targetTrackName: String(options.targetTrackName || TRACK_NAME).trim() || TRACK_NAME,
+    targetTypeName: String(options.targetTypeName || TYPE_NAME).trim() || TYPE_NAME,
+    challengeTrackNames: (challengeTrackNames.length > 0 ? challengeTrackNames : [CHALLENGE_TRACK_NAME])
+      .map(normalizeChallengeDimension),
+    challengeTypeNames: (challengeTypeNames.length > 0 ? challengeTypeNames : CHALLENGE_TYPE_NAMES)
+      .map(normalizeChallengeDimension)
+  }
+}
+
+/**
+ * Build the human-readable label for rerate errors.
+ * @param {Object} ratingContext normalized rating context
+ * @returns {string} target track/type label
+ */
+function getRatingContextLabel (ratingContext) {
+  return `${ratingContext.targetTrackName}/${ratingContext.targetTypeName}`
+}
+
+/**
  * Add one non-empty challenge id candidate to the supplied set.
  * @param {Set<string>} candidates mutable challenge id candidate set
  * @param {*} value raw challenge id candidate
@@ -150,22 +196,23 @@ function historyEntryMatchesChallengeId (historyEntry, challengeId) {
 }
 
 /**
- * Resolve whether challenge metadata belongs to the Development Challenge rating stream.
- * Development CODE challenge rows are rated into the same DEVELOP / Challenge
- * stream as standard Development Challenge rows.
+ * Resolve whether challenge metadata belongs to the configured Challenge rating stream.
+ * By default, Development CODE challenge rows are rated into the same
+ * DEVELOP / Challenge stream as standard Development Challenge rows.
  * @param {Object} challenge challenge metadata record
+ * @param {Object} [ratingContext] normalized rating context
  * @returns {boolean} true when the challenge should be replayed by this engine
  */
-function isDevelopmentRatingChallenge (challenge) {
+function isDevelopmentRatingChallenge (challenge, ratingContext = buildRatingContext()) {
   if (!challenge || !challenge.track || !challenge.type) {
     return false
   }
 
   const normalizedTrackName = normalizeChallengeDimension(challenge.track.name)
   const normalizedTypeName = normalizeChallengeDimension(challenge.type.name)
-  const supportedTypeNames = CHALLENGE_TYPE_NAMES.map(normalizeChallengeDimension)
 
-  return normalizedTrackName === CHALLENGE_TRACK_NAME && supportedTypeNames.includes(normalizedTypeName)
+  return ratingContext.challengeTrackNames.includes(normalizedTrackName) &&
+    ratingContext.challengeTypeNames.includes(normalizedTypeName)
 }
 
 function isCompletedChallenge (challenge) {
@@ -246,24 +293,25 @@ function buildUserStateKey (userId) {
 }
 
 /**
- * Resolve the unified track/type UUIDs used for DEVELOPMENT / Challenge rows.
+ * Resolve the unified track/type UUIDs used for this challenge-result rating stream.
  * @param {Object} challengeClient prisma challenge client
+ * @param {Object} [ratingContext] normalized rating context
  * @returns {Promise<{trackId: string, typeId: string, trackName: string, typeName: string, dimensionLookup: Object}>} resolved unified ids
  */
-async function resolveUnifiedDimensionIds (challengeClient) {
+async function resolveUnifiedDimensionIds (challengeClient, ratingContext = buildRatingContext()) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
-  const trackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAME)
-  const typeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAME)
+  const trackId = resolveTrackIdFromLookup(dimensionLookup, ratingContext.targetTrackName)
+  const typeId = resolveTypeIdFromLookup(dimensionLookup, ratingContext.targetTypeName)
 
   if (!trackId || !typeId) {
-    throw new Error(`Unable to resolve unified dimension ids for ${TRACK_NAME}/${TYPE_NAME}`)
+    throw new Error(`Unable to resolve unified dimension ids for ${getRatingContextLabel(ratingContext)}`)
   }
 
   return {
     trackId,
     typeId,
-    trackName: TRACK_NAME,
-    typeName: TYPE_NAME,
+    trackName: ratingContext.targetTrackName,
+    typeName: ratingContext.targetTypeName,
     dimensionLookup
   }
 }
@@ -548,10 +596,12 @@ function isCanonicalReviewChallengeRow (row, challenge) {
  * @param {Object} [options] history filtering options
  * @param {boolean} [options.skipLegacyReviewIds=false] ignore legacy numeric review ids that are already represented by legacy subtrack history
  * @param {boolean} [options.useLegacySourceRatings=false] preserve challengeResult oldRating/newRating for legacy-backed rows
+ * @param {Object} [options.ratingContext] source and target dimension config
  * @returns {Array<Object>} ordered challenge history entries for rerating
  */
 function buildTargetHistory (reviewRows, challengeMetadataById, options = {}) {
   const historyByChallengeId = new Map()
+  const ratingContext = options.ratingContext || buildRatingContext()
 
   reviewRows.forEach((row) => {
     if (!isParticipantEligibleForRating(row)) {
@@ -575,7 +625,7 @@ function buildTargetHistory (reviewRows, challengeMetadataById, options = {}) {
       return
     }
 
-    if (!isDevelopmentRatingChallenge(challenge)) {
+    if (!isDevelopmentRatingChallenge(challenge, ratingContext)) {
       return
     }
 
@@ -942,6 +992,10 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
  * @param {boolean} [options.recalculateRanks=true] recompute Develop Challenge ranks after this member rerate
  * @param {boolean} [options.skipLegacyReviewIds=false] skip legacy numeric challengeResult aliases during full migration rerates
  * @param {boolean} [options.useLegacySourceRatings=false] preserve challengeResult oldRating/newRating for legacy-backed rows
+ * @param {string} [options.targetTrackName=DEVELOP] unified stats track to update
+ * @param {string} [options.targetTypeName=Challenge] unified stats type to update
+ * @param {Array<string>|string} [options.challengeTrackNames=DEVELOPMENT] source challenge tracks to replay
+ * @param {Array<string>|string} [options.challengeTypeNames=[Challenge,CODE]] source challenge types to replay
  * @returns {Promise<{challengesProcessed: number, ratingsUpdated: number}>} rerate counters
  * @throws {Error} when required review DB or dimension data is unavailable
  */
@@ -951,6 +1005,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
   }
 
   const normalizedUserId = toBigIntUserId(userId)
+  const ratingContext = buildRatingContext(options)
   const reviewRows = await fetchReviewResultsForUser(reviewDbClient, normalizedUserId)
   if (reviewRows.length === 0) {
     return {
@@ -966,7 +1021,8 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   const targetHistory = buildTargetHistory(reviewRows, challengeMetadataById, {
     skipLegacyReviewIds: options.skipLegacyReviewIds === true,
-    useLegacySourceRatings: options.useLegacySourceRatings === true
+    useLegacySourceRatings: options.useLegacySourceRatings === true,
+    ratingContext
   })
   if (targetHistory.length === 0) {
     return {
@@ -975,13 +1031,14 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     }
   }
 
-  const dimensionIds = await resolveUnifiedDimensionIds(challengeClient)
+  const dimensionIds = await resolveUnifiedDimensionIds(challengeClient, ratingContext)
+  const ratingLabel = getRatingContextLabel(ratingContext)
 
   let startIndex = 0
   if (fromChallengeId) {
     startIndex = targetHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
     if (startIndex < 0) {
-      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${TYPE_NAME} event for this member`)
+      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${ratingLabel} event for this member`)
     }
   }
 
