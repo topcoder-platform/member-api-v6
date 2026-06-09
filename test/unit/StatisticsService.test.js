@@ -1009,6 +1009,90 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('rerateChallengeSubmitterRatings should rerate Development track Marathon Match challenges as MM', async () => {
+    const devRerateCalls = []
+    const mmRerateCalls = []
+    const { service, restore } = loadStatisticsService({
+      challengeRow: {
+        id: 'dev-mm-target-challenge',
+        status: 'COMPLETED',
+        endDate: new Date('2026-01-15T00:00:00.000Z'),
+        trackId: 'track-dev-id',
+        typeId: 'type-mm-id',
+        track: { name: 'Development' },
+        type: { name: 'MARATHON_MATCH' },
+        tags: [],
+        skills: [],
+        metadata: []
+      },
+      reviewDbStub: {
+        query: async () => ({
+          rows: [
+            { challengeId: 'dev-mm-target-challenge', userId: '101', finalScore: 98, placement: 1 }
+          ]
+        })
+      },
+      fetchRatingPathParticipantsForChallenge: async () => ({
+        participantRows: [
+          { memberId: '101' },
+          { memberId: '102' }
+        ]
+      }),
+      resolveRatingPathParticipantId: row => global.BigInt(row.memberId),
+      prismaStub: {
+        member: {
+          findMany: async ({ where }) => where.userId.in.map((userId) => ({ userId }))
+        }
+      },
+      rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, challengeId) => {
+        devRerateCalls.push({
+          userId: String(userId),
+          challengeId
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      },
+      rerateMmTrack: async (membersClient, challengeClient, mmClient, reviewDbClient, userId, challengeId) => {
+        should.equal(mmClient, null)
+        mmRerateCalls.push({
+          userId: String(userId),
+          challengeId
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateChallengeSubmitterRatings({ isMachine: true }, {
+        challengeId: 'dev-mm-target-challenge'
+      })
+
+      result.rerated.should.equal(true)
+      result.membersProcessed.should.equal(2)
+      result.ratingsAttempted.should.equal(2)
+      result.ratingsUpdated.should.equal(2)
+      result.participantIds.should.deep.equal(['101', '102'])
+      result.ratings.should.deep.equal([
+        {
+          trackId: 'DATA_SCIENCE',
+          typeId: 'MARATHON_MATCH'
+        }
+      ])
+      devRerateCalls.should.deep.equal([])
+      mmRerateCalls.should.deep.equal([
+        { userId: '101', challengeId: 'dev-mm-target-challenge' },
+        { userId: '102', challengeId: 'dev-mm-target-challenge' }
+      ])
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should synthesize missing review history for visible develop subtracks', async () => {
     const ratingDate = new Date('2025-11-27T05:48:36.899Z')
     const { service, restore } = loadStatisticsService({
