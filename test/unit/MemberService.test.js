@@ -19,6 +19,7 @@ process.env.RESOURCES_DB_URL = process.env.RESOURCES_DB_URL || placeholderDbUrl
 process.env.ENGAGEMENTS_DB_URL = process.env.ENGAGEMENTS_DB_URL || placeholderDbUrl
 
 const service = require('../../src/services/MemberService')
+const prisma = require('../../src/common/prisma').getClient()
 const testHelper = require('../testHelper')
 
 const should = chai.should()
@@ -190,6 +191,50 @@ describe('member service unit tests', () => {
         return
       }
       throw new Error('should not reach here')
+    })
+  })
+
+  describe('get profile completeness tests', () => {
+    it('counts open-to-work availability complete without legacy preferred roles', async () => {
+      const memberTraits = await prisma.memberTraits.findUnique({
+        where: { userId: member1.userId }
+      })
+
+      try {
+        await prisma.member.update({
+          where: { userId: member1.userId },
+          data: { availableForGigs: true }
+        })
+
+        await prisma.memberTraitPersonalization.create({
+          data: {
+            memberTraitId: memberTraits.id,
+            key: 'openToWork',
+            value: { availability: 'FULL_TIME' },
+            private: true,
+            createdBy: 'test'
+          }
+        })
+
+        const result = await service.getProfileCompleteness({ isMachine: true }, member1.handle, {})
+
+        should.equal(result.data.engagementAvailability, true)
+        should.equal(result.data.percentComplete, 0.5)
+      } finally {
+        if (memberTraits) {
+          await prisma.memberTraitPersonalization.deleteMany({
+            where: {
+              memberTraitId: memberTraits.id,
+              key: 'openToWork'
+            }
+          })
+        }
+
+        await prisma.member.update({
+          where: { userId: member1.userId },
+          data: { availableForGigs: null }
+        })
+      }
     })
   })
 
