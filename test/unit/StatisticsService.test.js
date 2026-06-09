@@ -863,6 +863,86 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('rerateChallengeSubmitterRatings should rerate Data Science Challenge submitters', async () => {
+    const dsRerateCalls = []
+    const { service, restore } = loadStatisticsService({
+      challengeRow: {
+        id: 'ds-target-challenge',
+        status: 'COMPLETED',
+        endDate: new Date('2026-06-02T05:30:04.536Z'),
+        trackId: 'track-ds-id',
+        typeId: 'type-challenge-id',
+        track: { name: 'Data Science' },
+        type: { name: 'Challenge' },
+        tags: [],
+        skills: [],
+        metadata: []
+      },
+      reviewRows: [
+        { challengeId: 'ds-target-challenge', userId: '101', finalScore: 100, placement: 1 },
+        { challengeId: 'ds-target-challenge', userId: '102', finalScore: 88.89, placement: 2 }
+      ],
+      prismaStub: {
+        member: {
+          findMany: async ({ where }) => where.userId.in.map((userId) => ({ userId }))
+        }
+      },
+      rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, challengeId, options) => {
+        dsRerateCalls.push({
+          userId: String(userId),
+          challengeId,
+          options
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateChallengeSubmitterRatings({ isMachine: true }, {
+        challengeId: 'ds-target-challenge'
+      })
+
+      result.rerated.should.equal(true)
+      result.membersProcessed.should.equal(2)
+      result.ratingsAttempted.should.equal(2)
+      result.ratingsUpdated.should.equal(2)
+      result.participantIds.should.deep.equal(['101', '102'])
+      result.ratings.should.deep.equal([
+        {
+          trackId: 'DATA_SCIENCE',
+          typeId: 'Challenge'
+        }
+      ])
+      dsRerateCalls.should.deep.equal([
+        {
+          userId: '101',
+          challengeId: 'ds-target-challenge',
+          options: {
+            targetTrackName: 'DATA_SCIENCE',
+            targetTypeName: 'Challenge',
+            challengeTrackNames: ['DATA_SCIENCE'],
+            challengeTypeNames: ['Challenge']
+          }
+        },
+        {
+          userId: '102',
+          challengeId: 'ds-target-challenge',
+          options: {
+            targetTrackName: 'DATA_SCIENCE',
+            targetTypeName: 'Challenge',
+            challengeTrackNames: ['DATA_SCIENCE'],
+            challengeTypeNames: ['Challenge']
+          }
+        }
+      ])
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateChallengeSubmitterRatings should include Marathon Match final summation submitters when result rows are partial', async () => {
     const mmRerateCalls = []
     const { service, restore } = loadStatisticsService({
