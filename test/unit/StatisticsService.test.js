@@ -1009,6 +1009,62 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('rerateChallengeSubmitterRatings should include challenge winners when result rows are absent', async () => {
+    const devRerateCalls = []
+    const { service, restore } = loadStatisticsService({
+      challengeRow: {
+        id: 'qa-target-challenge',
+        status: 'COMPLETED',
+        endDate: new Date('2026-01-15T00:00:00.000Z'),
+        trackId: 'track-dev-id',
+        typeId: 'type-challenge-id',
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        tags: ['QA'],
+        skills: [],
+        metadata: []
+      },
+      reviewRows: [],
+      challengeWinnerRows: [
+        { challengeId: 'qa-target-challenge', userId: 201, type: 'PLACEMENT', placement: 1 },
+        { challengeId: 'qa-target-challenge', userId: 202, type: 'PLACEMENT', placement: 2 }
+      ],
+      prismaStub: {
+        member: {
+          findMany: async ({ where }) => where.userId.in.map((userId) => ({ userId }))
+        }
+      },
+      rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, challengeId) => {
+        devRerateCalls.push({
+          userId: String(userId),
+          challengeId
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateChallengeSubmitterRatings({ isMachine: true }, {
+        challengeId: 'qa-target-challenge'
+      })
+
+      result.rerated.should.equal(true)
+      result.membersProcessed.should.equal(2)
+      result.ratingsAttempted.should.equal(2)
+      result.ratingsUpdated.should.equal(2)
+      result.participantIds.should.deep.equal(['201', '202'])
+      devRerateCalls.should.deep.equal([
+        { userId: '201', challengeId: 'qa-target-challenge' },
+        { userId: '202', challengeId: 'qa-target-challenge' }
+      ])
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateChallengeSubmitterRatings should rerate Development track Marathon Match challenges as MM', async () => {
     const devRerateCalls = []
     const mmRerateCalls = []

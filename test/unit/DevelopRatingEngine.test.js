@@ -353,7 +353,9 @@ function createReviewDbClient (rows) {
   }
 }
 
-function createChallengeClient (metadataById) {
+function createChallengeClient (metadataById, winnerRows = []) {
+  const challengeWinnerRows = winnerRows.map(cloneRow)
+
   return {
     async $queryRaw (strings) {
       const sql = Array.isArray(strings) ? strings.join('') : String(strings)
@@ -403,6 +405,13 @@ function createChallengeClient (metadataById) {
           .filter(Boolean)
           .map(cloneRow)
       }
+    },
+    ChallengeWinner: {
+      async findMany (args = {}) {
+        return challengeWinnerRows
+          .filter((row) => matchesWhere(row, args.where))
+          .map((row) => selectRow(row, args.select))
+      }
     }
   }
 }
@@ -422,6 +431,83 @@ function findHistoryRow (historyRows, userId, challengeId) {
 }
 
 describe('develop rating engine unit tests', () => {
+  it('rerateDevTrack should rate ChallengeWinner placements when challengeResult is missing', async () => {
+    const targetUserId = toBigInt(9011)
+    const opponentUserId = toBigInt(9022)
+    const challengeId = 'winner-only-dev'
+    const winnerCreatedAt = new Date('2026-01-15T11:00:00.000Z')
+
+    const members = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createReviewDbClient([])
+    const challengeClient = createChallengeClient({
+      [challengeId]: {
+        id: challengeId,
+        status: 'COMPLETED',
+        endDate: new Date('2026-01-15T00:00:00.000Z'),
+        track: { name: 'DEVELOPMENT' },
+        type: { name: 'Challenge' },
+        metadata: []
+      }
+    }, [
+      {
+        challengeId,
+        userId: Number(targetUserId),
+        type: 'PLACEMENT',
+        placement: 1,
+        createdAt: winnerCreatedAt
+      },
+      {
+        challengeId,
+        userId: Number(opponentUserId),
+        type: 'PLACEMENT',
+        placement: 2,
+        createdAt: winnerCreatedAt
+      }
+    ])
+
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, -1),
+      createParticipant(opponentUserId, 0, 0, 0, -2)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const result = await rerateDevTrack(
+      members.client,
+      challengeClient,
+      reviewDbClient,
+      targetUserId,
+      challengeId
+    )
+
+    result.challengesProcessed.should.equal(1)
+    result.ratingsUpdated.should.equal(1)
+
+    const statsRow = members.state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === CHALLENGE_TYPE_ID
+    )
+    const historyRow = findHistoryRow(members.state.historyRows, targetUserId, challengeId)
+    const maxRatingRow = members.state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
+
+    should.exist(statsRow)
+    should.exist(historyRow)
+    should.exist(maxRatingRow)
+    statsRow.rating.should.equal(expectedTarget.rating)
+    statsRow.volatility.should.equal(expectedTarget.volatility)
+    statsRow.challenges.should.equal(1)
+    should.equal(historyRow.oldRating, null)
+    historyRow.newRating.should.equal(expectedTarget.rating)
+    maxRatingRow.rating.should.equal(expectedTarget.rating)
+    maxRatingRow.track.should.equal('DEVELOP')
+    maxRatingRow.subTrack.should.equal('Challenge')
+  })
+
   it('rerateDevTrack should support Data Science Challenge rating dimensions', async () => {
     const targetUserId = toBigInt(1001)
     const opponentUserId = toBigInt(2002)
