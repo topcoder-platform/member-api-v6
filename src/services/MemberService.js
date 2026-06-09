@@ -55,6 +55,33 @@ const SENDGRID_EMAIL_ACTIVITY_LOOKBACK_DAYS = 30
 const SENDGRID_EMAIL_ACTIVITY_RESULT_LIMIT = 20
 
 /**
+ * Determine whether the member has completed engagement availability.
+ * A member completes this section by either choosing not to be open to work,
+ * or by choosing to be open to work with an availability value. Legacy data
+ * with nested preferred roles is still accepted as complete.
+ * @param {Object} member the member profile data
+ * @param {Object} openToWorkData the personalization open-to-work trait value
+ * @returns {Boolean} true when engagement availability is complete
+ */
+function isEngagementAvailabilityComplete (member, openToWorkData) {
+  if (!openToWorkData) {
+    return false
+  }
+
+  const hasAvailability = !!openToWorkData.availability
+  const hasLegacyPreferredRoles = !!(
+    openToWorkData.preferredRoles &&
+    openToWorkData.preferredRoles.length
+  )
+
+  if (member.availableForGigs === false) {
+    return true
+  }
+
+  return hasAvailability || hasLegacyPreferredRoles
+}
+
+/**
  * Resolve compact memberStats track/type UUIDs before deriving current
  * maxRating labels for member profile responses.
  * @param {Object} member member payload that may include compact memberStats rows
@@ -568,7 +595,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   const memberTraits = await memberTraitService.getTraits(currentUser, handle, {})
   // Avoid getting the member stats, since we don't need them here, and performance is
   // better without them
-  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,lastProfileConfirmationDate,updatedAt,addresses' }
+  const memberFields = { 'fields': 'userId,handle,handleLower,photoURL,description,skills,verified,lastProfileConfirmationDate,updatedAt,availableForGigs,addresses' }
   const member = await getMemberData(handle, memberFields)
 
   // Used for calculating the percentComplete
@@ -620,10 +647,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
       const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork')) || {}
       const openToWorkData = openToWorkTrait.openToWork
 
-      if (openToWorkData && (
-        !openToWorkData.availability ||
-        (openToWorkData.preferredRoles && openToWorkData.preferredRoles.length)
-      )) {
+      if (isEngagementAvailabilityComplete(member, openToWorkData)) {
         completeItems += 1
         data.engagementAvailability = true
         data.engagementAvailabilityLastUpdateDate = new Date(item.updatedAt).toISOString()
