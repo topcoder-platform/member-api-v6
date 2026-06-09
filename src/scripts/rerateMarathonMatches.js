@@ -110,8 +110,42 @@ function buildReviewChallengeIds (challenge) {
 }
 
 /**
- * Merge ordered Marathon Match history sources while preserving every known
- * challenge id alias for review-api lookups.
+ * Extract a Marathon Match round number from a challenge display name.
+ * @param {*} value challenge name
+ * @returns {string|null} Marathon Match number, or null when unavailable
+ */
+function extractMarathonMatchNumber (value) {
+  const name = String(value || '').trim()
+  if (!name) {
+    return null
+  }
+
+  const match = name.match(/\b(?:MM|MARATHON\s+MATCH)\s*#?\s*(\d+)\b/i)
+  return match ? match[1] : null
+}
+
+/**
+ * Build aliases used to merge Challenge API and migrated MM history entries.
+ * @param {Object} historyEntry challenge history entry
+ * @returns {Array<string>} duplicate-detection aliases
+ */
+function buildMarathonHistoryAliasKeys (historyEntry) {
+  const aliases = new Set()
+  addChallengeIdCandidate(aliases, historyEntry && historyEntry.challengeId)
+  ;((historyEntry && historyEntry.reviewChallengeIds) || []).forEach((alias) => addChallengeIdCandidate(aliases, alias))
+
+  const matchNumber = extractMarathonMatchNumber(historyEntry && historyEntry.challengeName)
+  if (matchNumber) {
+    aliases.add(`match:${matchNumber}`)
+  }
+
+  return Array.from(aliases)
+}
+
+/**
+ * Merge ordered Marathon Match history sources while preserving every real
+ * challenge id alias for review-api lookups. Non-id aliases such as MM round
+ * numbers are used only for duplicate detection and are not sent to review-api.
  * @param {...Array<Object>} historySources ordered history arrays
  * @returns {Array<Object>} merged and sorted challenge history
  */
@@ -124,12 +158,13 @@ function mergeMarathonHistories (...historySources) {
       return
     }
 
-    const aliases = new Set()
-    addChallengeIdCandidate(aliases, historyEntry.challengeId)
-    ;(historyEntry.reviewChallengeIds || []).forEach((alias) => addChallengeIdCandidate(aliases, alias))
+    const reviewChallengeIds = new Set()
+    addChallengeIdCandidate(reviewChallengeIds, historyEntry.challengeId)
+    ;(historyEntry.reviewChallengeIds || []).forEach((alias) => addChallengeIdCandidate(reviewChallengeIds, alias))
+    const mergeAliases = new Set(buildMarathonHistoryAliasKeys(historyEntry))
 
     let key
-    for (const alias of aliases) {
+    for (const alias of mergeAliases) {
       if (aliasToKey.has(alias)) {
         key = aliasToKey.get(alias)
         break
@@ -141,23 +176,25 @@ function mergeMarathonHistories (...historySources) {
 
     const existing = historyByKey.get(key)
     if (existing) {
-      const reviewChallengeIds = new Set(existing.reviewChallengeIds || [existing.challengeId])
-      aliases.forEach((alias) => reviewChallengeIds.add(alias))
-      existing.reviewChallengeIds = Array.from(reviewChallengeIds)
+      const existingReviewChallengeIds = new Set(existing.reviewChallengeIds || [existing.challengeId])
+      reviewChallengeIds.forEach((alias) => existingReviewChallengeIds.add(alias))
+      existing.reviewChallengeIds = Array.from(existingReviewChallengeIds)
       if (historyEntry.eventDate.getTime() < existing.eventDate.getTime()) {
         existing.eventDate = historyEntry.eventDate
       }
       existing.typeId = existing.typeId || historyEntry.typeId || null
       existing.trackId = existing.trackId || historyEntry.trackId || null
+      existing.challengeName = existing.challengeName || historyEntry.challengeName
     } else {
       historyByKey.set(key, {
         ...historyEntry,
         challengeId: String(historyEntry.challengeId),
-        reviewChallengeIds: Array.from(aliases)
+        challengeName: historyEntry.challengeName || null,
+        reviewChallengeIds: Array.from(reviewChallengeIds)
       })
     }
 
-    aliases.forEach((alias) => aliasToKey.set(alias, key))
+    mergeAliases.forEach((alias) => aliasToKey.set(alias, key))
   })
 
   const history = Array.from(historyByKey.values())
@@ -502,6 +539,7 @@ async function fetchMarathonMatchHistory (challengeClient) {
     },
     select: {
       id: true,
+      name: true,
       legacyId: true,
       endDate: true,
       status: true,
@@ -543,6 +581,7 @@ async function fetchMarathonMatchHistory (challengeClient) {
 
     history.push({
       challengeId: String(challenge.id),
+      challengeName: challenge.name || null,
       reviewChallengeIds: buildReviewChallengeIds(challenge),
       eventDate,
       typeId: String(challenge.typeId),
@@ -594,8 +633,8 @@ function resolveMarathonMatchRankDimensionIds (marathonHistoryResult, persistedH
 
 /**
  * Load distinct Marathon Match challenge IDs already present in unified member
- * history. This catches migrated legacy MM rows that are visible in member stats
- * history but are not classified as ChallengeType MARATHON_MATCH in challenge-api.
+ * history. Migrated legacy challenge names are included when available so those
+ * rows can be merged with canonical Challenge API rows by MM round number.
  * @param {Object} membersClient Prisma members client
  * @param {Object} challengeClient Prisma challenge client for dimension lookup
  * @returns {Promise<Object>} resolved dimension ids and ordered persisted history
@@ -616,18 +655,30 @@ async function fetchPersistedMarathonMatchHistory (membersClient, challengeClien
   const trackIds = Array.from(new Set([dataScienceTrackId, TRACK_NAMES.DATA_SCIENCE].filter(Boolean)))
   const typeIds = Array.from(new Set([marathonMatchTypeId, TYPE_NAMES.MARATHON_MATCH].filter(Boolean)))
   const rows = await membersClient.$queryRaw`
-    SELECT "challengeId", MIN("eventDate") AS "eventDate"
-    FROM "members"."memberStatsHistory"
-    WHERE "trackId" IN (${Prisma.join(trackIds)})
-      AND "typeId" IN (${Prisma.join(typeIds)})
-      AND "challengeId" IS NOT NULL
-      AND "eventDate" IS NOT NULL
-    GROUP BY "challengeId"
+    WITH "historyChallenge" AS (
+      SELECT "challengeId", MIN("eventDate") AS "eventDate"
+      FROM "members"."memberStatsHistory"
+      WHERE "trackId" IN (${Prisma.join(trackIds)})
+        AND "typeId" IN (${Prisma.join(typeIds)})
+        AND "challengeId" IS NOT NULL
+        AND "eventDate" IS NOT NULL
+      GROUP BY "challengeId"
+    )
+    SELECT
+      hc."challengeId",
+      hc."eventDate",
+      MIN(dsh."challengeName") AS "challengeName"
+    FROM "historyChallenge" hc
+    LEFT JOIN "members"."memberDataScienceHistoryStats" dsh
+      ON dsh."challengeId"::text = hc."challengeId"
+     AND dsh."subTrack" = 'MARATHON_MATCH'
+    GROUP BY hc."challengeId", hc."eventDate"
   `
 
   const history = rows
     .map((row) => ({
       challengeId: String(row.challengeId),
+      challengeName: row.challengeName || null,
       reviewChallengeIds: [String(row.challengeId)],
       eventDate: toDateOrNull(row.eventDate),
       typeId: marathonMatchTypeId,

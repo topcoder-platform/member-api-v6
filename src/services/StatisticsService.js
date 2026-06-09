@@ -66,6 +66,7 @@ if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
 }
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
 const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
+const RATING_SOURCE_DATA_SCIENCE_CHALLENGE = 'DATA_SCIENCE_CHALLENGE'
 const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
 const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
@@ -425,6 +426,8 @@ async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
 
 /**
  * Resolve the rating source supported by the engines for a challenge.
+ * Marathon Match challenges are type-driven because some Challenge API rows
+ * carry the Development track while still belonging to the MM rating stream.
  * @param {Object} challenge challenge metadata row
  * @returns {string|null} source identifier or null when unsupported
  */
@@ -436,7 +439,11 @@ function resolveChallengeRatingSource (challenge) {
     return RATING_SOURCE_DEVELOPMENT
   }
 
-  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.MARATHON_MATCH) {
+  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.CHALLENGE) {
+    return RATING_SOURCE_DATA_SCIENCE_CHALLENGE
+  }
+
+  if (typeName === TYPE_NAMES.MARATHON_MATCH) {
     return RATING_SOURCE_MARATHON_MATCH
   }
 
@@ -458,6 +465,14 @@ function buildBaseRatingJob (challenge, source) {
     return {
       source,
       trackId: TRACK_NAMES.DEVELOP,
+      typeId: TYPE_NAMES.CHALLENGE
+    }
+  }
+
+  if (source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
+    return {
+      source,
+      trackId: TRACK_NAMES.DATA_SCIENCE,
       typeId: TYPE_NAMES.CHALLENGE
     }
   }
@@ -673,13 +688,24 @@ async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClien
     )
   }
 
-  if (job.source === RATING_SOURCE_DEVELOPMENT) {
+  if (job.source === RATING_SOURCE_DEVELOPMENT ||
+    job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
+    const rerateOptions = job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE
+      ? {
+        targetTrackName: TRACK_NAMES.DATA_SCIENCE,
+        targetTypeName: TYPE_NAMES.CHALLENGE,
+        challengeTrackNames: [TRACK_NAMES.DATA_SCIENCE],
+        challengeTypeNames: [TYPE_NAMES.CHALLENGE]
+      }
+      : undefined
+
     return rerateDevTrack(
       prisma,
       challengeClient,
       reviewDbClient,
       userId,
-      challengeId
+      challengeId,
+      rerateOptions
     )
   }
 
@@ -2512,8 +2538,18 @@ function getMarathonHistoryAliasKeys (row) {
  * @returns {Array<string>} canonical replacement aliases
  */
 function getMarathonHistoryCanonicalReplacementAliasKeys (row) {
+  const keys = []
+  const matchNumber = getMarathonHistoryMatchNumber(row)
+  if (matchNumber) {
+    keys.push(`match:${matchNumber}`)
+  }
+
   const titleAlias = getMarathonHistoryTitleAlias(row && row.challengeName)
-  return titleAlias ? [titleAlias] : []
+  if (titleAlias) {
+    keys.push(titleAlias)
+  }
+
+  return keys
 }
 
 /**
@@ -4327,8 +4363,9 @@ rerateChallengeSubmitterRatings.schema = {
 }
 
 /**
- * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / MARATHON_MATCH, or configured
- * tag- or skill-based rating path re-rating pass beginning with the supplied challenge.
+ * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / Challenge,
+ * DATA_SCIENCE / MARATHON_MATCH, or configured tag- or skill-based rating path
+ * re-rating pass beginning with the supplied challenge.
  * The relevant review-api results are reprocessed in chronological order and
  * persisted into the existing unified rating tables for the member.
  * @param {Object} currentUser the user who performs operation
@@ -4371,6 +4408,20 @@ async function rerateMemberStats (currentUser, handle, data) {
       member.userId,
       payload.challengeId
     )
+  } else if (trackId === TRACK_NAMES.DATA_SCIENCE && typeId === TYPE_NAMES.CHALLENGE) {
+    result = await rerateDevTrack(
+      prisma,
+      challengeClient,
+      reviewDbClient,
+      member.userId,
+      payload.challengeId,
+      {
+        targetTrackName: TRACK_NAMES.DATA_SCIENCE,
+        targetTypeName: TYPE_NAMES.CHALLENGE,
+        challengeTrackNames: [TRACK_NAMES.DATA_SCIENCE],
+        challengeTypeNames: [TYPE_NAMES.CHALLENGE]
+      }
+    )
   } else if (trackId === TRACK_NAMES.DATA_SCIENCE && typeId === TYPE_NAMES.MARATHON_MATCH) {
     result = await rerateMmTrack(
       prisma,
@@ -4381,7 +4432,7 @@ async function rerateMemberStats (currentUser, handle, data) {
       payload.challengeId
     )
   } else {
-    throw new errors.BadRequestError('Only DEVELOP / Challenge and DATA_SCIENCE / MARATHON_MATCH rerates are currently supported.')
+    throw new errors.BadRequestError('Only DEVELOP / Challenge, DATA_SCIENCE / Challenge, and DATA_SCIENCE / MARATHON_MATCH rerates are currently supported.')
   }
 
   return {
