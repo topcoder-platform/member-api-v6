@@ -1882,6 +1882,74 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(historyRow.placement, 1)
   })
 
+  it('rerateMmTrack should use challengeResult score when a Development-track MM summation score is a placeholder', async () => {
+    const developmentTrackMmMetadata = {
+      [challengeId]: {
+        id: challengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'Development' },
+        type: { name: 'Marathon Match' },
+        metadata: []
+      }
+    }
+    const placeholderScoreRows = [
+      {
+        submissionId: 'submission-target-placeholder-score',
+        memberId: targetUserId,
+        challengeId,
+        placement: 1,
+        aggregateScore: -1,
+        finalScore: 0,
+        challengeResultFinalScore: 100,
+        reviewedDate: new Date('2024-06-01T10:00:00.000Z'),
+        createdAt: new Date('2024-06-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-opponent-scored',
+        memberId: opponentUserId,
+        challengeId,
+        aggregateScore: 80,
+        reviewedDate: new Date('2024-06-01T10:05:00.000Z'),
+        createdAt: new Date('2024-06-01T10:05:00.000Z'),
+        submissionCreatedAt: new Date('2024-06-01T09:05:00.000Z')
+      }
+    ]
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTargetState = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient(developmentTrackMmMetadata),
+      null,
+      createMmReviewDbClient(placeholderScoreRows),
+      targetUserId,
+      challengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+
+    should.equal(statsRow.rating, expectedTargetState.rating)
+    should.equal(historyRow.newRating, expectedTargetState.rating)
+    should.equal(historyRow.placement, 1)
+  })
+
   it('rerateMmTrack should replay tagged Development Challenge and MM events under the configured destination track', async () => {
     const priorChallengeId = 'ai-prior-development-challenge'
     const targetChallengeId = 'ai-target-challenge'

@@ -880,14 +880,15 @@ function isEligibleMmSubmissionStatus (value) {
 /**
  * Resolve the best available Marathon Match score from a review result row.
  * Positive aggregate scores keep the higher-precision summation value, while
- * positive submission final scores recover legacy rows whose aggregateScore is
- * a zero or -1 placeholder.
+ * positive submission or challengeResult final scores recover rows whose
+ * aggregateScore is a zero or -1 placeholder.
  * @param {Object} row candidate result row
  * @returns {number} score value, or NaN when no numeric score is available
  */
 function getMmResultScore (row) {
   const aggregateScore = Number(row && row.aggregateScore)
   const finalScore = Number(row && row.finalScore)
+  const challengeResultFinalScore = Number(row && row.challengeResultFinalScore)
 
   if (Number.isFinite(aggregateScore) && aggregateScore > 0) {
     return aggregateScore
@@ -895,6 +896,10 @@ function getMmResultScore (row) {
 
   if (Number.isFinite(finalScore) && finalScore > 0) {
     return finalScore
+  }
+
+  if (Number.isFinite(challengeResultFinalScore) && challengeResultFinalScore > 0) {
+    return challengeResultFinalScore
   }
 
   return aggregateScore
@@ -1081,6 +1086,7 @@ function buildHistoryResultFields (participants, targetUserKey, sourceRow) {
 async function fetchMmResultsForUser (reviewDbClient, userId) {
   const reviewSummationRelation = await resolveReviewDbRelation(reviewDbClient, 'reviewSummation')
   const submissionRelation = await resolveReviewDbRelation(reviewDbClient, 'submission')
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
       WITH "latestSubmissionSummation" AS (
@@ -1118,23 +1124,41 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
           AND (s."challengeId" IS NOT NULL OR s."legacyChallengeId" IS NOT NULL)
           AND rs."isFinal" IS NOT FALSE
           ${READY_MM_REVIEW_SUMMATION_FILTER}
+      ),
+      "challengeResultScore" AS (
+        SELECT DISTINCT ON ("challengeId")
+          "challengeId",
+          "placement",
+          "finalScore"
+        FROM ${challengeResultRelation}
+        WHERE "userId" IS NOT NULL
+          AND "userId"::text = $1
+          AND "validSubmission" IS DISTINCT FROM FALSE
+          AND (
+            "finalScore" IS NOT NULL OR
+            ("placement" IS NOT NULL AND "placement" > 0)
+          )
+        ORDER BY "challengeId", "placement" ASC NULLS LAST, "finalScore" DESC NULLS LAST, "createdAt" DESC
       )
       SELECT
-        "submissionId",
-        "memberId",
-        "challengeId",
-        "legacyChallengeId",
-        "placement",
-        "finalScore",
-        "submissionStatus",
-        "submissionCreatedAt",
-        "aggregateScore",
-        "reviewedDate",
-        "createdAt",
-        "rated"
-      FROM "latestSubmissionSummation"
-      WHERE "summationRank" = 1
-      ORDER BY COALESCE("reviewedDate", "createdAt") ASC, "submissionId" ASC
+        lss."submissionId",
+        lss."memberId",
+        lss."challengeId",
+        lss."legacyChallengeId",
+        COALESCE(crs."placement", lss."placement") AS "placement",
+        lss."finalScore",
+        crs."finalScore" AS "challengeResultFinalScore",
+        lss."submissionStatus",
+        lss."submissionCreatedAt",
+        lss."aggregateScore",
+        lss."reviewedDate",
+        lss."createdAt",
+        lss."rated"
+      FROM "latestSubmissionSummation" lss
+      LEFT JOIN "challengeResultScore" crs
+        ON crs."challengeId" = lss."challengeId"
+      WHERE lss."summationRank" = 1
+      ORDER BY COALESCE(lss."reviewedDate", lss."createdAt") ASC, lss."submissionId" ASC
     `,
     [String(userId), VALID_MM_SUBMISSION_STATUSES]
   )
@@ -1199,32 +1223,37 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
           AND rs."isFinal" IS NOT FALSE
           ${READY_MM_REVIEW_SUMMATION_FILTER}
       ),
-      "challengeResultPlacement" AS (
+      "challengeResultScore" AS (
         SELECT DISTINCT ON ("userId")
           "userId",
-          "placement"
+          "placement",
+          "finalScore"
         FROM ${challengeResultRelation}
         WHERE "challengeId" = ANY($1::text[])
           AND "userId" IS NOT NULL
-          AND "placement" IS NOT NULL
-          AND "placement" > 0
-        ORDER BY "userId", "createdAt" DESC
+          AND "validSubmission" IS DISTINCT FROM FALSE
+          AND (
+            "finalScore" IS NOT NULL OR
+            ("placement" IS NOT NULL AND "placement" > 0)
+          )
+        ORDER BY "userId", "placement" ASC NULLS LAST, "finalScore" DESC NULLS LAST, "createdAt" DESC
       )
       SELECT
         lss."submissionId",
         lss."memberId",
         lss."challengeId",
         lss."legacyChallengeId",
-        COALESCE(crp."placement", lss."placement") AS "placement",
+        COALESCE(crs."placement", lss."placement") AS "placement",
         lss."finalScore",
+        crs."finalScore" AS "challengeResultFinalScore",
         lss."submissionStatus",
         lss."aggregateScore",
         lss."reviewedDate",
         lss."createdAt",
         lss."submissionCreatedAt"
       FROM "latestSubmissionSummation" lss
-      LEFT JOIN "challengeResultPlacement" crp
-        ON crp."userId"::text = lss."memberId"::text
+      LEFT JOIN "challengeResultScore" crs
+        ON crs."userId"::text = lss."memberId"::text
       WHERE lss."summationRank" = 1
       ORDER BY lss."submissionCreatedAt" ASC, lss."submissionId" ASC
     `,
