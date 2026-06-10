@@ -1523,6 +1523,107 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(historyRow.placement, 2)
   })
 
+  it('rerateMmTrack should ignore placement-only MM history rows when seeding ratings', async () => {
+    const placementOnlyChallengeId = 'mm-placement-only-seed'
+    const newChallengeId = 'mm-one-person-new'
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [
+        {
+          id: toBigInt(1051),
+          userId: targetUserId,
+          trackId: DATA_SCIENCE_TRACK_ID,
+          typeId: MARATHON_MATCH_TYPE_ID,
+          challengeId: placementOnlyChallengeId,
+          mostRecent: false,
+          oldRating: null,
+          newRating: null,
+          oldVolatility: null,
+          newVolatility: null,
+          placement: 2,
+          eventDate: new Date('2024-01-01T00:00:00.000Z'),
+          createdBy: 'stats-migration',
+          updatedBy: 'stats-migration'
+        }
+      ],
+      statsRows: [],
+      maxRatingRows: []
+    })
+
+    const reviewRows = [
+      {
+        submissionId: 'submission-placement-only-seed',
+        memberId: targetUserId,
+        challengeId: placementOnlyChallengeId,
+        placement: 2,
+        aggregateScore: 20,
+        reviewedDate: new Date('2024-01-01T10:00:00.000Z'),
+        createdAt: new Date('2024-01-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-01-01T09:00:00.000Z')
+      },
+      {
+        submissionId: 'submission-one-person-new',
+        memberId: targetUserId,
+        challengeId: newChallengeId,
+        placement: 1,
+        aggregateScore: 100,
+        reviewedDate: new Date('2024-02-01T10:00:00.000Z'),
+        createdAt: new Date('2024-02-01T10:00:00.000Z'),
+        submissionCreatedAt: new Date('2024-02-01T09:00:00.000Z')
+      }
+    ]
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants[0]
+
+    const result = await rerateMmTrack(
+      membersClient,
+      createChallengeClient({
+        [placementOnlyChallengeId]: {
+          id: placementOnlyChallengeId,
+          endDate: new Date('2024-01-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        },
+        [newChallengeId]: {
+          id: newChallengeId,
+          endDate: new Date('2024-02-01T00:00:00.000Z'),
+          track: { name: 'DATA_SCIENCE' },
+          type: { name: 'MARATHON_MATCH' },
+          metadata: []
+        }
+      }),
+      null,
+      createMmReviewDbClient(reviewRows),
+      targetUserId,
+      newChallengeId
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === MARATHON_MATCH_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, newChallengeId)
+
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.oldVolatility, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+    should.equal(historyRow.newVolatility, expectedTarget.volatility)
+    should.equal(historyRow.placement, 1)
+    should.equal(statsRow.rating, expectedTarget.rating)
+    should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(statsRow.maxRating, expectedTarget.rating)
+    should.equal(statsRow.minRating, expectedTarget.rating)
+    should.equal(statsRow.challenges, 2)
+  })
+
   it('rerateMmTrack should seed new MM rerates from imported legacy ratings over incomplete canonical duplicates', async () => {
     const legacyChallengeId = '19578'
     const oldCanonicalChallengeId = 'mm-old-canonical'

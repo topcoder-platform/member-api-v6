@@ -244,17 +244,27 @@ function cloneState (state) {
 }
 
 /**
- * Normalize a rating value for rating-bound calculations.
- * @param {*} value candidate rating value
- * @returns {number|null} integer rating, or null when unavailable
+ * Normalize a nullable integer value from persisted rating checkpoints.
+ * Empty values such as null must stay unavailable instead of becoming zero.
+ * @param {*} value candidate integer value
+ * @returns {number|null} integer value, or null when unavailable
  */
-function toOptionalRating (value) {
+function toOptionalInteger (value) {
   if (value === null || value === undefined || value === '') {
     return null
   }
 
   const rating = Number(value)
   return Number.isFinite(rating) ? Math.trunc(rating) : null
+}
+
+/**
+ * Normalize a rating value for rating-bound calculations.
+ * @param {*} value candidate rating value
+ * @returns {number|null} integer rating, or null when unavailable
+ */
+function toOptionalRating (value) {
+  return toOptionalInteger(value)
 }
 
 /**
@@ -600,7 +610,8 @@ async function resolveUnifiedDimensionIds (challengeClient, ratingPath) {
 /**
  * Build a rerate seed state from the latest authoritative history row before a challenge.
  * Historical volatility is used when available. Older history rows that predate
- * volatility checkpoints fall back to the default Qubits volatility.
+ * volatility checkpoints fall back to the default Qubits volatility. Placement-only
+ * history rows without a stored rating do not count as prior rated contests.
  * @param {Array<Object>} historyRows participant history rows sorted by event date and id
  * @param {number} seedIndex index of the last history row before the target challenge
  * @returns {Object} seeded rating state
@@ -610,14 +621,29 @@ function createHistorySeedState (historyRows, seedIndex) {
     return createDefaultState()
   }
 
+  let seedRating = null
+  let seedVolatility = null
+  let ratedHistoryCount = 0
+
+  for (let index = 0; index <= seedIndex; index += 1) {
+    const rating = toOptionalRating(historyRows[index] && historyRows[index].newRating)
+    if (rating === null) {
+      continue
+    }
+
+    ratedHistoryCount += 1
+    seedRating = rating
+    seedVolatility = toOptionalInteger(historyRows[index] && historyRows[index].newVolatility)
+  }
+
+  if (seedRating === null) {
+    return createDefaultState()
+  }
+
   return {
-    rating: Number.isFinite(Number(historyRows[seedIndex].newRating))
-      ? Number(historyRows[seedIndex].newRating)
-      : 0,
-    volatility: Number.isFinite(Number(historyRows[seedIndex].newVolatility))
-      ? Number(historyRows[seedIndex].newVolatility)
-      : DEFAULT_VOLATILITY,
-    numRatings: seedIndex + 1
+    rating: seedRating,
+    volatility: seedVolatility === null ? DEFAULT_VOLATILITY : seedVolatility,
+    numRatings: ratedHistoryCount
   }
 }
 
