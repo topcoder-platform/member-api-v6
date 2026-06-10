@@ -18,6 +18,7 @@
     "migrate-dynamo-data": "node src/scripts/migrate-dynamo-data.js",
     "recalculate-member-stats": "node src/scripts/recalculateMemberStats.js",
     "backfill-challenge-results": "node src/scripts/backfillChallengeResults.js",
+    "dedupe-marathon-match-history": "node src/scripts/dedupeMarathonMatchHistory.js",
     "rerate-rating-path": "node src/scripts/rerateRatingPath.js",
     "rerate-marathon-matches": "node src/scripts/rerateMarathonMatches.js",
     "rerate-development-challenge": "node src/scripts/rerateDevelopmentChallenge.js"

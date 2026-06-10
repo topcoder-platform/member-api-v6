@@ -236,6 +236,15 @@ pnpm rerate-marathon-matches -- --concurrency 5
 
 The script discovers completed Marathon Match challenges by `ChallengeType` id and also merges distinct challenge IDs already present in `DATA_SCIENCE / MARATHON_MATCH` `memberStatsHistory`, so migrated legacy MM rows that predate ChallengeType classification are scanned too. Migrated numeric rows such as `MM 145` are merged with canonical Challenge API rows such as `Marathon Match 145` by MM round number before participant discovery, and rerate seeding prefers complete canonical UUID checkpoints over duplicate legacy rows. The script discovers competitors from final review summations using both canonical challenge UUIDs and legacy numeric challenge IDs, filters out user IDs that do not exist in member storage, and calls the native MM rerate engine with no starting challenge so each member is replayed from their first MM event. Current MM ranks are recalculated once after the batch rather than once per member. Historical MM replay does not require `MM_DB_URL` or the marathon-match-api schema.
 
+After a rerate, migrated numeric history rows can still exist beside the canonical UUID rows until they are physically cleaned from `memberStatsHistory`. When the members and challenges schemas are available in the same Postgres database, preview and apply the cleanup with:
+
+```bash
+pnpm dedupe-marathon-match-history -- --dry-run --user-id 40562752
+pnpm dedupe-marathon-match-history -- --apply --user-id 40562752
+```
+
+The cleanup deletes only migrated numeric `DATA_SCIENCE / MARATHON_MATCH` history rows that match a complete official Challenge API Marathon Match UUID row for the same member and MM round number. It leaves Challenge API helper challenges such as writer, tester, task, and placement award records intact because those are separate challenge records, not native Marathon Match rating history.
+
 To re-run a configured rating path for every member who participated in the configured challenge set, use the bulk script instead of the member-scoped API:
 
 ```bash
