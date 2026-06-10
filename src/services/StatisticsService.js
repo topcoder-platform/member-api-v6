@@ -2451,6 +2451,22 @@ function isReratedCanonicalMarathonHistoryRow (row) {
 }
 
 /**
+ * Determine whether a Marathon Match history row uses a canonical UUID
+ * challenge id instead of an imported numeric legacy challenge id.
+ * @param {Object} row unified history row annotated with track/type names
+ * @returns {boolean} true when the row is a canonical Marathon Match row
+ */
+function isCanonicalMarathonHistoryRow (row) {
+  const challengeId = normalizeChallengeLookupKey(row && row.challengeId)
+
+  return !!challengeId &&
+    !/^\d+$/.test(challengeId) &&
+    row &&
+    row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+    row.typeName === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
  * Extract a Marathon Match round number from canonical or legacy challenge names.
  * This lets migrated numeric legacy rows be reconciled with canonical Challenge
  * rows even when their challenge ids are unrelated.
@@ -2615,6 +2631,54 @@ function buildAuthoritativeCanonicalMarathonAliasSet (rows) {
 }
 
 /**
+ * Build aliases covered by any canonical Marathon Match row, including rows
+ * that are incomplete rerate placeholders. This lets imported numeric rows
+ * remain visible only when they are UUID-backed or are filling a known
+ * canonical gap, while orphan numeric rows are hidden after native rerates.
+ * @param {Array<Object>} rows unified history rows
+ * @returns {Set<string>} aliases covered by canonical MM rows
+ */
+function buildAnyCanonicalMarathonAliasSet (rows) {
+  const aliases = new Set()
+
+  _.forEach(rows || [], (row) => {
+    if (!isCanonicalMarathonHistoryRow(row)) {
+      return
+    }
+
+    _.forEach(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => aliases.add(key))
+  })
+
+  return aliases
+}
+
+/**
+ * Determine whether a numeric legacy Marathon Match row should remain visible.
+ * Legacy-only environments keep hydrated numeric rows, but once a member has
+ * canonical MM history, numeric rows must either resolve to a Challenge API UUID
+ * or fill a known canonical MM-number/title gap.
+ * @param {Object} row candidate legacy numeric MM row
+ * @param {boolean} hasCanonicalRows true when the response includes canonical MM history
+ * @param {Set<string>} anyCanonicalAliases aliases covered by canonical MM rows
+ * @returns {boolean} true when the numeric row should be shown
+ */
+function shouldKeepLegacyNumericMarathonHistoryRow (row, hasCanonicalRows, anyCanonicalAliases) {
+  if (!row || !row.challengeName) {
+    return false
+  }
+
+  if (!hasCanonicalRows) {
+    return true
+  }
+
+  if (normalizeChallengeLookupKey(row.canonicalChallengeId)) {
+    return true
+  }
+
+  return _.some(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => anyCanonicalAliases.has(key))
+}
+
+/**
  * Determine whether a canonical MM row should be hidden because an imported
  * legacy row remains the authoritative historical rating point.
  * @param {Object} row candidate canonical history row
@@ -2688,6 +2752,8 @@ function backfillCanonicalMarathonRatingsFromNextOldRating (rows) {
 function selectVisibleMarathonHistoryRows (rows) {
   const legacyAliases = buildAuthoritativeLegacyMarathonAliasSet(rows)
   const canonicalAliases = buildAuthoritativeCanonicalMarathonAliasSet(rows)
+  const anyCanonicalAliases = buildAnyCanonicalMarathonAliasSet(rows)
+  const hasCanonicalRows = _.some(rows || [], isCanonicalMarathonHistoryRow)
 
   return _.filter(rows || [], (row) => {
     if (!row ||
@@ -2697,7 +2763,7 @@ function selectVisibleMarathonHistoryRows (rows) {
     }
 
     if (isLegacyNumericMarathonHistoryRow(row)) {
-      return !!row.challengeName &&
+      return shouldKeepLegacyNumericMarathonHistoryRow(row, hasCanonicalRows, anyCanonicalAliases) &&
         !_.some(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => canonicalAliases.has(key))
     }
 

@@ -243,7 +243,7 @@ pnpm dedupe-marathon-match-history -- --dry-run --user-id 40562752
 pnpm dedupe-marathon-match-history -- --apply --user-id 40562752
 ```
 
-The cleanup deletes only migrated numeric `DATA_SCIENCE / MARATHON_MATCH` history rows that match a complete official Challenge API Marathon Match UUID row for the same member and MM round number. It leaves Challenge API helper challenges such as writer, tester, task, and placement award records intact because those are separate challenge records, not native Marathon Match rating history.
+The cleanup deletes only migrated numeric `DATA_SCIENCE / MARATHON_MATCH` history rows that match a complete official Challenge API Marathon Match UUID row for the same member and MM round number. It leaves Challenge API helper challenges such as writer, tester, task, and placement award records intact because those are separate challenge records, not native Marathon Match rating history. After native MM rerates exist for a member, profile history also hides remaining orphan numeric MM rows that cannot be resolved to a Challenge API UUID or matched to a canonical MM round for that member.
 
 To re-run a configured rating path for every member who participated in the configured challenge set, use the bulk script instead of the member-scoped API:
 

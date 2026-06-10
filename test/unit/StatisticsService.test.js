@@ -2242,6 +2242,82 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should hide hydrated orphan legacy Marathon Match rows after native rerate', async () => {
+    const legacyDate = new Date('2023-05-02T00:00:00.000Z')
+    const canonicalDate = new Date('2025-08-27T17:05:00.000Z')
+    const canonicalChallenge = {
+      id: 'mm-163-canonical',
+      legacyId: null,
+      name: 'Marathon Match 163',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      endDate: canonicalDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Marathon Match' },
+      metadata: [],
+      legacyRecord: null
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [{
+          challengeId: global.BigInt(19708),
+          challengeName: 'MM 148',
+          date: legacyDate,
+          rating: 2955,
+          placement: 3,
+          percentile: 97.973
+        }],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: '19708',
+            eventDate: legacyDate,
+            newRating: 2955,
+            placement: 3,
+            mostRecent: false
+          }, {
+            trackId: 'track-ds-id',
+            typeId: 'type-mm-id',
+            challengeId: 'mm-163-canonical',
+            challengeName: 'Marathon Match 163',
+            eventDate: canonicalDate,
+            newRating: 2279,
+            placement: 5,
+            updatedBy: 'rerate-mm-stats',
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [canonicalChallenge],
+      reviewRows: [],
+      challengeWinnerRows: []
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      const history = result[0].DATA_SCIENCE.MARATHON_MATCH.history
+      history.map(row => row.challengeId).should.not.include(19708)
+      history.should.have.length(1)
+      history[0].challengeId.should.equal('mm-163-canonical')
+      history[0].challengeName.should.equal('Marathon Match 163')
+      history[0].rating.should.equal(2279)
+      history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
   it('getHistoryStats should preserve imported Marathon Match history over matching canonical rerates', async () => {
     const mm144LegacyDate = new Date('2023-02-21T00:00:00.000Z')
     const mm144Date = new Date('2023-03-08T18:14:00.000Z')
