@@ -943,6 +943,76 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('rerateChallengeSubmitterRatings should include Data Science Challenge winners when result rows are absent', async () => {
+    const dsRerateCalls = []
+    const { service, restore } = loadStatisticsService({
+      challengeRow: {
+        id: 'ds-winner-only-challenge',
+        status: 'COMPLETED',
+        endDate: new Date('2026-06-09T08:45:00.000Z'),
+        trackId: 'track-ds-id',
+        typeId: 'type-challenge-id',
+        track: { name: 'Data Science' },
+        type: { name: 'Challenge' },
+        tags: [],
+        skills: [],
+        metadata: []
+      },
+      reviewRows: [],
+      challengeWinnerRows: [
+        { challengeId: 'ds-winner-only-challenge', userId: 301, type: 'PLACEMENT', placement: 1 }
+      ],
+      prismaStub: {
+        member: {
+          findMany: async ({ where }) => where.userId.in.map((userId) => ({ userId }))
+        }
+      },
+      rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, challengeId, options) => {
+        dsRerateCalls.push({
+          userId: String(userId),
+          challengeId,
+          options
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateChallengeSubmitterRatings({ isMachine: true }, {
+        challengeId: 'ds-winner-only-challenge'
+      })
+
+      result.rerated.should.equal(true)
+      result.membersProcessed.should.equal(1)
+      result.ratingsAttempted.should.equal(1)
+      result.ratingsUpdated.should.equal(1)
+      result.participantIds.should.deep.equal(['301'])
+      result.ratings.should.deep.equal([
+        {
+          trackId: 'DATA_SCIENCE',
+          typeId: 'Challenge'
+        }
+      ])
+      dsRerateCalls.should.deep.equal([
+        {
+          userId: '301',
+          challengeId: 'ds-winner-only-challenge',
+          options: {
+            targetTrackName: 'DATA_SCIENCE',
+            targetTypeName: 'Challenge',
+            challengeTrackNames: ['DATA_SCIENCE'],
+            challengeTypeNames: ['Challenge']
+          }
+        }
+      ])
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateChallengeSubmitterRatings should include Marathon Match final summation submitters when result rows are partial', async () => {
     const mmRerateCalls = []
     const { service, restore } = loadStatisticsService({
