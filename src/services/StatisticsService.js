@@ -69,6 +69,7 @@ const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_SOURCE_DATA_SCIENCE_CHALLENGE = 'DATA_SCIENCE_CHALLENGE'
 const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
+const CHALLENGE_TRACK_QUALITY_ASSURANCE = 'QUALITY_ASSURANCE'
 const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
 const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
 const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
@@ -365,6 +366,38 @@ function isChallengeRatingEnabled (challenge) {
 }
 
 /**
+ * Normalize challenge track labels for source-routing checks.
+ * @param {*} value raw challenge track label, enum value, or abbreviation
+ * @returns {string} uppercase source track key
+ */
+function normalizeChallengeSourceTrack (value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+}
+
+/**
+ * Check whether a challenge source track is Quality Assurance.
+ * QA Challenge results are rated in the public Data Science Challenge bucket.
+ * @param {*} value raw challenge track label, enum value, or abbreviation
+ * @returns {boolean} true when the source track is QA
+ */
+function isQualityAssuranceChallengeSourceTrack (value) {
+  const normalizedTrack = normalizeChallengeSourceTrack(value)
+  return normalizedTrack === CHALLENGE_TRACK_QUALITY_ASSURANCE || normalizedTrack === 'QA'
+}
+
+/**
+ * Build the source tracks replayed for Data Science Challenge ratings.
+ * QA Challenges share the public Data Science Challenge rating bucket.
+ * @returns {Array<string>} challenge source track labels
+ */
+function getDataScienceChallengeSourceTrackNames () {
+  return [TRACK_NAMES.DATA_SCIENCE, CHALLENGE_TRACK_QUALITY_ASSURANCE]
+}
+
+/**
  * Load challenge metadata needed to decide which ratings apply.
  * @param {Object} challengeClient prisma challenge client
  * @param {string|number} challengeId challenge UUID or legacy numeric id
@@ -405,7 +438,8 @@ async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
       typeId: true,
       track: {
         select: {
-          name: true
+          name: true,
+          track: true
         }
       },
       type: {
@@ -432,14 +466,16 @@ async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
  * @returns {string|null} source identifier or null when unsupported
  */
 function resolveChallengeRatingSource (challenge) {
-  const trackName = getCanonicalTrackName(_.get(challenge, 'track.name') || _.get(challenge, 'trackId'))
+  const rawTrackName = _.get(challenge, 'track.track') || _.get(challenge, 'track.name') || _.get(challenge, 'trackId')
+  const trackName = getCanonicalTrackName(rawTrackName)
   const typeName = getCanonicalTypeName(_.get(challenge, 'type.name') || _.get(challenge, 'typeId'))
 
   if (trackName === TRACK_NAMES.DEVELOP && typeName === TYPE_NAMES.CHALLENGE) {
     return RATING_SOURCE_DEVELOPMENT
   }
 
-  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.CHALLENGE) {
+  if ((trackName === TRACK_NAMES.DATA_SCIENCE || isQualityAssuranceChallengeSourceTrack(rawTrackName)) &&
+    typeName === TYPE_NAMES.CHALLENGE) {
     return RATING_SOURCE_DATA_SCIENCE_CHALLENGE
   }
 
@@ -554,7 +590,7 @@ async function fetchChallengeResultParticipantIds (reviewDbClient, challengeId) 
 
 /**
  * Fetch placement winner participants from challenge-api for completed
- * Development rating rerates. This covers QA-created challenges where winners
+ * Development/Data Science rating rerates. This covers challenges where winners
  * can be assigned without a review-api challengeResult row for the same member.
  * @param {Object} challengeClient challenge Prisma client
  * @param {string|number} challengeId challenge identifier
@@ -695,7 +731,7 @@ async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClien
       ? {
         targetTrackName: TRACK_NAMES.DATA_SCIENCE,
         targetTypeName: TYPE_NAMES.CHALLENGE,
-        challengeTrackNames: [TRACK_NAMES.DATA_SCIENCE],
+        challengeTrackNames: getDataScienceChallengeSourceTrackNames(),
         challengeTypeNames: [TYPE_NAMES.CHALLENGE]
       }
       : undefined
@@ -4270,7 +4306,8 @@ refreshMemberStats.schema = {
  * Re-rate every existing submitter on a completed challenge for all applicable
  * rating dimensions. This includes the native challenge track/type rating when
  * supported and any configured named rating paths whose tags/skills match the
- * challenge, such as the default AI path.
+ * challenge, such as the default AI path. Quality Assurance Challenge rows are
+ * replayed into the public DATA_SCIENCE / Challenge rating bucket.
  * @param {Object} currentUser the user who performs operation
  * @param {Object} data rerate payload containing the completed challenge id
  * @returns {Object} summary of participants, rating jobs, updates, and per-member failures
@@ -4433,6 +4470,8 @@ rerateChallengeSubmitterRatings.schema = {
  * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / Challenge,
  * DATA_SCIENCE / MARATHON_MATCH, or configured tag- or skill-based rating path
  * re-rating pass beginning with the supplied challenge.
+ * DATA_SCIENCE / Challenge rerates also replay Quality Assurance Challenge
+ * source rows because QA history is surfaced in that public rating bucket.
  * The relevant review-api results are reprocessed in chronological order and
  * persisted into the existing unified rating tables for the member.
  * @param {Object} currentUser the user who performs operation
@@ -4485,7 +4524,7 @@ async function rerateMemberStats (currentUser, handle, data) {
       {
         targetTrackName: TRACK_NAMES.DATA_SCIENCE,
         targetTypeName: TYPE_NAMES.CHALLENGE,
-        challengeTrackNames: [TRACK_NAMES.DATA_SCIENCE],
+        challengeTrackNames: getDataScienceChallengeSourceTrackNames(),
         challengeTypeNames: [TYPE_NAMES.CHALLENGE]
       }
     )

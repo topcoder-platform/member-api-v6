@@ -923,7 +923,7 @@ describe('statistics service unit tests', () => {
           options: {
             targetTrackName: 'DATA_SCIENCE',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE'],
+            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
             challengeTypeNames: ['Challenge']
           }
         },
@@ -933,7 +933,7 @@ describe('statistics service unit tests', () => {
           options: {
             targetTrackName: 'DATA_SCIENCE',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE'],
+            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
             challengeTypeNames: ['Challenge']
           }
         }
@@ -1003,7 +1003,88 @@ describe('statistics service unit tests', () => {
           options: {
             targetTrackName: 'DATA_SCIENCE',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE'],
+            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+            challengeTypeNames: ['Challenge']
+          }
+        }
+      ])
+    } finally {
+      restore()
+    }
+  })
+
+  it('rerateChallengeSubmitterRatings should rate QA Challenge winners in the Data Science Challenge bucket', async () => {
+    const qaRerateCalls = []
+    const { service, restore } = loadStatisticsService({
+      challengeRow: {
+        id: 'qa-winner-only-challenge',
+        status: 'COMPLETED',
+        endDate: new Date('2026-06-10T05:41:34.931Z'),
+        trackId: 'track-qa-id',
+        typeId: 'type-challenge-id',
+        track: { name: 'Quality Assurance', track: 'QUALITY_ASSURANCE' },
+        type: { name: 'Challenge' },
+        tags: [],
+        skills: [],
+        metadata: []
+      },
+      reviewRows: [],
+      challengeWinnerRows: [
+        { challengeId: 'qa-winner-only-challenge', userId: 89770374, type: 'PLACEMENT', placement: 1 },
+        { challengeId: 'qa-winner-only-challenge', userId: 100000039, type: 'PLACEMENT', placement: 2 }
+      ],
+      prismaStub: {
+        member: {
+          findMany: async ({ where }) => where.userId.in.map((userId) => ({ userId }))
+        }
+      },
+      rerateDevTrack: async (membersClient, challengeClient, reviewDbClient, userId, challengeId, options) => {
+        qaRerateCalls.push({
+          userId: String(userId),
+          challengeId,
+          options
+        })
+        return {
+          challengesProcessed: 1,
+          ratingsUpdated: 1
+        }
+      }
+    })
+
+    try {
+      const result = await service.rerateChallengeSubmitterRatings({ isMachine: true }, {
+        challengeId: 'qa-winner-only-challenge'
+      })
+
+      result.rerated.should.equal(true)
+      result.membersProcessed.should.equal(2)
+      result.ratingsAttempted.should.equal(2)
+      result.ratingsUpdated.should.equal(2)
+      result.participantIds.should.deep.equal(['89770374', '100000039'])
+      result.ratings.should.deep.equal([
+        {
+          trackId: 'DATA_SCIENCE',
+          typeId: 'Challenge'
+        }
+      ])
+      qaRerateCalls.should.deep.equal([
+        {
+          userId: '89770374',
+          challengeId: 'qa-winner-only-challenge',
+          options: {
+            targetTrackName: 'DATA_SCIENCE',
+            targetTypeName: 'Challenge',
+            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+            challengeTypeNames: ['Challenge']
+          }
+        },
+        {
+          userId: '100000039',
+          challengeId: 'qa-winner-only-challenge',
+          options: {
+            targetTrackName: 'DATA_SCIENCE',
+            targetTypeName: 'Challenge',
+            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
             challengeTypeNames: ['Challenge']
           }
         }
