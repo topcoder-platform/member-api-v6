@@ -1,4 +1,5 @@
 const _ = require('lodash')
+const config = require('config')
 const helper = require('./helper')
 const errors = require('./errors')
 const {
@@ -7,6 +8,7 @@ const {
   resolveTrackNameFromLookup,
   resolveTypeNameFromLookup
 } = require('./statsDimensionHelper')
+const { getConfiguredRatingPathByTypeId } = require('../ratings/ratingPathConfig')
 
 const designBasicFields = [
   'name', 'numInquiries', 'submissions', 'passedScreening', 'avgPlacement',
@@ -58,7 +60,23 @@ function getUnifiedTrackName (trackId) {
   return canonical || String(trackId || '').toUpperCase().trim()
 }
 
+/**
+ * Resolve a deterministic configured rating path ChallengeType id to its
+ * configured display name for API responses.
+ * @param {*} typeId stored ChallengeType id or display value
+ * @returns {string|undefined} configured rating path name when matched
+ */
+function getConfiguredRatingPathTypeName (typeId) {
+  const ratingPath = getConfiguredRatingPathByTypeId(config.RATING_PATHS, typeId)
+  return ratingPath ? ratingPath.name : undefined
+}
+
 function getUnifiedTypeName (typeId) {
+  const ratingPathName = getConfiguredRatingPathTypeName(typeId)
+  if (ratingPathName) {
+    return ratingPathName
+  }
+
   const canonical = getCanonicalTypeName(typeId)
   return canonical || typeId
 }

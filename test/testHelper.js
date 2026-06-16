@@ -140,6 +140,7 @@ async function clearData () {
   const filter = { where: { userId: { in: memberIds } } }
 
   await prisma.memberTraits.deleteMany(filter)
+  await prisma.memberChallengePoints.deleteMany(filter)
   await prisma.memberAddress.deleteMany(filter)
   await prisma.memberMaxRating.deleteMany(filter)
   await prisma.member.deleteMany(filter)

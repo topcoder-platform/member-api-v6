@@ -33,6 +33,16 @@ async function getMemberUserIdSignature (req, res) {
 }
 
 /**
+ * Replace stored challenge-point rows for one challenge.
+ * @param {Object} req the request
+ * @param {Object} res the response
+ */
+async function updateChallengePoints (req, res) {
+  const result = await service.updateChallengePoints(req.authUser, req.params.challengeId, req.body)
+  res.send(result)
+}
+
+/**
  * Get a specific member skill by skill ID
  * @param {Object} req the request
  * @param {Object} res the response
@@ -128,6 +138,7 @@ module.exports = {
   getMember,
   getProfileCompleteness,
   getMemberUserIdSignature,
+  updateChallengePoints,
   getMemberSkill,
   updateMember,
   updateHandle,

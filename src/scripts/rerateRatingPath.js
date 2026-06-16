@@ -11,13 +11,13 @@
  *
  * Usage examples:
  * - Dry-run discovery:
- *   node src/scripts/rerateRatingPath.js --rating-name AI --dry-run
+ *   node src/scripts/rerateRatingPath.js --rating-name "AI Engineering" --dry-run
  * - Re-rate every discovered member:
- *   node src/scripts/rerateRatingPath.js --rating-name AI --concurrency 5
+ *   node src/scripts/rerateRatingPath.js --rating-name "AI Engineering" --concurrency 5
  * - Re-rate a bounded sample:
- *   node src/scripts/rerateRatingPath.js --rating-name AI --limit 100
+ *   node src/scripts/rerateRatingPath.js --rating-name "AI Engineering" --limit 100
  * - Re-rate specific users by userId:
- *   node src/scripts/rerateRatingPath.js --rating-name AI --user-id 12345 --user-ids 67890,24680
+ *   node src/scripts/rerateRatingPath.js --rating-name "AI Engineering" --user-id 12345 --user-ids 67890,24680
  *
  * Notes:
  * - Handles are not required. The script discovers participating user IDs from

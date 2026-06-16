@@ -31,6 +31,7 @@ const CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
 const CHALLENGE_TYPE_NAMES = [TYPE_NAMES.CHALLENGE, TYPE_NAMES.CODE]
 const RERATE_ACTOR = 'rerate-member-stats'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
+const CHALLENGE_WINNER_RATING_TYPES = ['PLACEMENT']
 
 function isBigIntValue (value) {
   return Object.prototype.toString.call(value) === '[object BigInt]'
@@ -66,6 +67,52 @@ function normalizeChallengeDimension (value) {
     .trim()
     .toUpperCase()
     .replace(/[\s-]+/g, '_')
+}
+
+/**
+ * Normalize one or more rating-context values into an array.
+ * @param {*} value scalar or array option value
+ * @returns {Array<*>} option values as an array
+ */
+function toRatingContextArray (value) {
+  if (Array.isArray(value)) {
+    return value
+  }
+
+  return value ? [value] : []
+}
+
+/**
+ * Build source challenge filters and target unified dimensions for this rating run.
+ * Defaults preserve the historical DEVELOPMENT / Challenge stream.
+ * @param {Object} [options] rerate options
+ * @param {string} [options.targetTrackName] unified stats track to update
+ * @param {string} [options.targetTypeName] unified stats type to update
+ * @param {Array<string>|string} [options.challengeTrackNames] source challenge tracks to replay
+ * @param {Array<string>|string} [options.challengeTypeNames] source challenge types to replay
+ * @returns {Object} normalized rating context
+ */
+function buildRatingContext (options = {}) {
+  const challengeTrackNames = toRatingContextArray(options.challengeTrackNames || options.challengeTrackName)
+  const challengeTypeNames = toRatingContextArray(options.challengeTypeNames || options.challengeTypeName)
+
+  return {
+    targetTrackName: String(options.targetTrackName || TRACK_NAME).trim() || TRACK_NAME,
+    targetTypeName: String(options.targetTypeName || TYPE_NAME).trim() || TYPE_NAME,
+    challengeTrackNames: (challengeTrackNames.length > 0 ? challengeTrackNames : [CHALLENGE_TRACK_NAME])
+      .map(normalizeChallengeDimension),
+    challengeTypeNames: (challengeTypeNames.length > 0 ? challengeTypeNames : CHALLENGE_TYPE_NAMES)
+      .map(normalizeChallengeDimension)
+  }
+}
+
+/**
+ * Build the human-readable label for rerate errors.
+ * @param {Object} ratingContext normalized rating context
+ * @returns {string} target track/type label
+ */
+function getRatingContextLabel (ratingContext) {
+  return `${ratingContext.targetTrackName}/${ratingContext.targetTypeName}`
 }
 
 /**
@@ -150,22 +197,23 @@ function historyEntryMatchesChallengeId (historyEntry, challengeId) {
 }
 
 /**
- * Resolve whether challenge metadata belongs to the Development Challenge rating stream.
- * Development CODE challenge rows are rated into the same DEVELOP / Challenge
- * stream as standard Development Challenge rows.
+ * Resolve whether challenge metadata belongs to the configured Challenge rating stream.
+ * By default, Development CODE challenge rows are rated into the same
+ * DEVELOP / Challenge stream as standard Development Challenge rows.
  * @param {Object} challenge challenge metadata record
+ * @param {Object} [ratingContext] normalized rating context
  * @returns {boolean} true when the challenge should be replayed by this engine
  */
-function isDevelopmentRatingChallenge (challenge) {
+function isDevelopmentRatingChallenge (challenge, ratingContext = buildRatingContext()) {
   if (!challenge || !challenge.track || !challenge.type) {
     return false
   }
 
   const normalizedTrackName = normalizeChallengeDimension(challenge.track.name)
   const normalizedTypeName = normalizeChallengeDimension(challenge.type.name)
-  const supportedTypeNames = CHALLENGE_TYPE_NAMES.map(normalizeChallengeDimension)
 
-  return normalizedTrackName === CHALLENGE_TRACK_NAME && supportedTypeNames.includes(normalizedTypeName)
+  return ratingContext.challengeTrackNames.includes(normalizedTrackName) &&
+    ratingContext.challengeTypeNames.includes(normalizedTypeName)
 }
 
 function isCompletedChallenge (challenge) {
@@ -246,24 +294,25 @@ function buildUserStateKey (userId) {
 }
 
 /**
- * Resolve the unified track/type UUIDs used for DEVELOPMENT / Challenge rows.
+ * Resolve the unified track/type UUIDs used for this challenge-result rating stream.
  * @param {Object} challengeClient prisma challenge client
+ * @param {Object} [ratingContext] normalized rating context
  * @returns {Promise<{trackId: string, typeId: string, trackName: string, typeName: string, dimensionLookup: Object}>} resolved unified ids
  */
-async function resolveUnifiedDimensionIds (challengeClient) {
+async function resolveUnifiedDimensionIds (challengeClient, ratingContext = buildRatingContext()) {
   const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
-  const trackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAME)
-  const typeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAME)
+  const trackId = resolveTrackIdFromLookup(dimensionLookup, ratingContext.targetTrackName)
+  const typeId = resolveTypeIdFromLookup(dimensionLookup, ratingContext.targetTypeName)
 
   if (!trackId || !typeId) {
-    throw new Error(`Unable to resolve unified dimension ids for ${TRACK_NAME}/${TYPE_NAME}`)
+    throw new Error(`Unable to resolve unified dimension ids for ${getRatingContextLabel(ratingContext)}`)
   }
 
   return {
     trackId,
     typeId,
-    trackName: TRACK_NAME,
-    typeName: TYPE_NAME,
+    trackName: ratingContext.targetTrackName,
+    typeName: ratingContext.targetTypeName,
     dimensionLookup
   }
 }
@@ -351,9 +400,11 @@ function findHistorySeedIndexForChallenge (historyRows, challengeEntry) {
 }
 
 function normalizeScore (row) {
-  const finalScore = Number(row.finalScore)
-  if (Number.isFinite(finalScore)) {
-    return finalScore
+  if (row.finalScore !== null && row.finalScore !== undefined) {
+    const finalScore = Number(row.finalScore)
+    if (Number.isFinite(finalScore)) {
+      return finalScore
+    }
   }
 
   const placement = Number(row.placement)
@@ -391,6 +442,145 @@ function isParticipantEligibleForRating (row) {
   return false
 }
 
+/**
+ * Convert a member user id into the numeric shape stored on ChallengeWinner.
+ * @param {BigInt|string|number} userId member identifier
+ * @returns {number|string} numeric user id when safe, otherwise the string form
+ */
+function toChallengeWinnerUserId (userId) {
+  const numericUserId = Number(userId)
+  return Number.isSafeInteger(numericUserId) ? numericUserId : String(userId)
+}
+
+/**
+ * Convert one ChallengeWinner row into the challengeResult-like row consumed by
+ * the Development rating replay. Winner rows only provide placement, so the
+ * existing placement score fallback drives the rating calculation.
+ * @param {Object} row ChallengeWinner row
+ * @returns {Object|null} review-row-compatible participant data
+ */
+function toChallengeWinnerParticipantRow (row) {
+  if (!row || row.userId === null || row.userId === undefined || !row.challengeId) {
+    return null
+  }
+
+  return {
+    challengeId: String(row.challengeId),
+    userId: String(row.userId),
+    placement: row.placement,
+    passedReview: true,
+    validSubmission: true,
+    createdAt: row.createdAt
+  }
+}
+
+/**
+ * Build the duplicate key used when merging challengeResult and ChallengeWinner
+ * participant rows for the same member and challenge.
+ * @param {Object} row participant row
+ * @returns {string} duplicate key
+ */
+function buildParticipantRowKey (row) {
+  return `${String(row && row.challengeId)}::${String(row && row.userId)}`
+}
+
+/**
+ * Merge review-api participant rows with ChallengeWinner placement rows. Review
+ * rows are kept when both sources exist because they may carry final score and
+ * source rating fields that are more precise than placement-only winners.
+ * @param {Array<Object>} reviewRows challengeResult rows
+ * @param {Array<Object>} winnerRows ChallengeWinner rows
+ * @returns {Array<Object>} merged participant rows
+ */
+function mergeChallengeWinnerParticipantRows (reviewRows, winnerRows) {
+  const mergedRows = (reviewRows || []).slice()
+  const existingKeys = new Set(mergedRows.map(buildParticipantRowKey))
+
+  ;(winnerRows || []).forEach((winnerRow) => {
+    const participantRow = toChallengeWinnerParticipantRow(winnerRow)
+    if (!participantRow) {
+      return
+    }
+
+    const key = buildParticipantRowKey(participantRow)
+    if (existingKeys.has(key)) {
+      return
+    }
+
+    existingKeys.add(key)
+    mergedRows.push(participantRow)
+  })
+
+  return mergedRows
+}
+
+/**
+ * Load ChallengeWinner rows for a target member. These rows let winner-only
+ * members enter the Development rating timeline even when review-api never
+ * wrote a challengeResult row for the completed challenge.
+ * @param {Object} challengeClient challenge Prisma client
+ * @param {BigInt|string|number} userId member identifier
+ * @returns {Promise<Array<Object>>} ChallengeWinner rows for rating replay
+ */
+async function fetchChallengeWinnerRowsForUser (challengeClient, userId) {
+  if (!challengeClient || !challengeClient.ChallengeWinner ||
+    typeof challengeClient.ChallengeWinner.findMany !== 'function') {
+    return []
+  }
+
+  return challengeClient.ChallengeWinner.findMany({
+    where: {
+      userId: toChallengeWinnerUserId(userId),
+      type: {
+        in: CHALLENGE_WINNER_RATING_TYPES
+      }
+    },
+    select: {
+      challengeId: true,
+      userId: true,
+      placement: true,
+      createdAt: true
+    }
+  })
+}
+
+/**
+ * Load ChallengeWinner participant rows for one challenge. The rows are merged
+ * with review-api participants so placement winners without challengeResult
+ * records still affect and receive Development rating updates.
+ * @param {Object} challengeClient challenge Prisma client
+ * @param {Object|string|number} challengeRef challenge id or history entry
+ * @returns {Promise<Array<Object>>} ChallengeWinner rows for the challenge
+ */
+async function fetchChallengeWinnerRowsForChallenge (challengeClient, challengeRef) {
+  if (!challengeClient || !challengeClient.ChallengeWinner ||
+    typeof challengeClient.ChallengeWinner.findMany !== 'function') {
+    return []
+  }
+
+  const challengeIds = buildChallengeIdCandidates(challengeRef)
+  if (challengeIds.length === 0) {
+    return []
+  }
+
+  return challengeClient.ChallengeWinner.findMany({
+    where: {
+      challengeId: {
+        in: challengeIds
+      },
+      type: {
+        in: CHALLENGE_WINNER_RATING_TYPES
+      }
+    },
+    select: {
+      challengeId: true,
+      userId: true,
+      placement: true,
+      createdAt: true
+    }
+  })
+}
+
 async function fetchReviewResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
@@ -406,7 +596,7 @@ async function fetchReviewResultsForUser (reviewDbClient, userId) {
   return result.rows
 }
 
-async function fetchParticipantsForChallenge (reviewDbClient, challengeRef) {
+async function fetchParticipantsForChallenge (reviewDbClient, challengeRef, challengeClient) {
   const challengeIds = buildChallengeIdCandidates(challengeRef)
   if (challengeIds.length === 0) {
     return []
@@ -424,7 +614,8 @@ async function fetchParticipantsForChallenge (reviewDbClient, challengeRef) {
     challengeIds
   )
 
-  return result.rows
+  const winnerRows = await fetchChallengeWinnerRowsForChallenge(challengeClient, challengeRef)
+  return mergeChallengeWinnerParticipantRows(result.rows, winnerRows)
 }
 
 /**
@@ -548,10 +739,12 @@ function isCanonicalReviewChallengeRow (row, challenge) {
  * @param {Object} [options] history filtering options
  * @param {boolean} [options.skipLegacyReviewIds=false] ignore legacy numeric review ids that are already represented by legacy subtrack history
  * @param {boolean} [options.useLegacySourceRatings=false] preserve challengeResult oldRating/newRating for legacy-backed rows
+ * @param {Object} [options.ratingContext] source and target dimension config
  * @returns {Array<Object>} ordered challenge history entries for rerating
  */
 function buildTargetHistory (reviewRows, challengeMetadataById, options = {}) {
   const historyByChallengeId = new Map()
+  const ratingContext = options.ratingContext || buildRatingContext()
 
   reviewRows.forEach((row) => {
     if (!isParticipantEligibleForRating(row)) {
@@ -575,7 +768,7 @@ function buildTargetHistory (reviewRows, challengeMetadataById, options = {}) {
       return
     }
 
-    if (!isDevelopmentRatingChallenge(challenge)) {
+    if (!isDevelopmentRatingChallenge(challenge, ratingContext)) {
       return
     }
 
@@ -942,6 +1135,10 @@ async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds) {
  * @param {boolean} [options.recalculateRanks=true] recompute Develop Challenge ranks after this member rerate
  * @param {boolean} [options.skipLegacyReviewIds=false] skip legacy numeric challengeResult aliases during full migration rerates
  * @param {boolean} [options.useLegacySourceRatings=false] preserve challengeResult oldRating/newRating for legacy-backed rows
+ * @param {string} [options.targetTrackName=DEVELOP] unified stats track to update
+ * @param {string} [options.targetTypeName=Challenge] unified stats type to update
+ * @param {Array<string>|string} [options.challengeTrackNames=DEVELOPMENT] source challenge tracks to replay
+ * @param {Array<string>|string} [options.challengeTypeNames=[Challenge,CODE]] source challenge types to replay
  * @returns {Promise<{challengesProcessed: number, ratingsUpdated: number}>} rerate counters
  * @throws {Error} when required review DB or dimension data is unavailable
  */
@@ -951,8 +1148,13 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
   }
 
   const normalizedUserId = toBigIntUserId(userId)
-  const reviewRows = await fetchReviewResultsForUser(reviewDbClient, normalizedUserId)
-  if (reviewRows.length === 0) {
+  const ratingContext = buildRatingContext(options)
+  const [reviewRows, winnerRows] = await Promise.all([
+    fetchReviewResultsForUser(reviewDbClient, normalizedUserId),
+    fetchChallengeWinnerRowsForUser(challengeClient, normalizedUserId)
+  ])
+  const participantRowsForUser = mergeChallengeWinnerParticipantRows(reviewRows, winnerRows)
+  if (participantRowsForUser.length === 0) {
     return {
       challengesProcessed: 0,
       ratingsUpdated: 0
@@ -961,12 +1163,13 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
 
   const challengeMetadataById = await fetchChallengeMetadataMap(
     challengeClient,
-    Array.from(new Set(reviewRows.map((row) => String(row.challengeId))))
+    Array.from(new Set(participantRowsForUser.map((row) => String(row.challengeId))))
   )
 
-  const targetHistory = buildTargetHistory(reviewRows, challengeMetadataById, {
+  const targetHistory = buildTargetHistory(participantRowsForUser, challengeMetadataById, {
     skipLegacyReviewIds: options.skipLegacyReviewIds === true,
-    useLegacySourceRatings: options.useLegacySourceRatings === true
+    useLegacySourceRatings: options.useLegacySourceRatings === true,
+    ratingContext
   })
   if (targetHistory.length === 0) {
     return {
@@ -975,13 +1178,14 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
     }
   }
 
-  const dimensionIds = await resolveUnifiedDimensionIds(challengeClient)
+  const dimensionIds = await resolveUnifiedDimensionIds(challengeClient, ratingContext)
+  const ratingLabel = getRatingContextLabel(ratingContext)
 
   let startIndex = 0
   if (fromChallengeId) {
     startIndex = targetHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
     if (startIndex < 0) {
-      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${TYPE_NAME} event for this member`)
+      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${ratingLabel} event for this member`)
     }
   }
 
@@ -1062,7 +1266,7 @@ async function rerateDevTrack (membersClient, challengeClient, reviewDbClient, u
       continue
     }
 
-    const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry))
+    const participantRows = (await fetchParticipantsForChallenge(reviewDbClient, historyEntry, challengeClient))
       .filter((row) => isParticipantEligibleForRating(row))
     if (participantRows.length === 0) {
       continue

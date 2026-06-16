@@ -4,16 +4,24 @@
 
 /* global BigInt */
 
-require('../../app-bootstrap')
-const chai = require('chai')
-
 const placeholderDbUrl = 'postgresql://user:pass@localhost:5432/topcoder?schema=public'
 process.env.DATABASE_URL = process.env.DATABASE_URL || placeholderDbUrl
 process.env.SKILLS_DB_URL = process.env.SKILLS_DB_URL || placeholderDbUrl
 process.env.RESOURCES_DB_URL = process.env.RESOURCES_DB_URL || placeholderDbUrl
 
+const appConfig = require('config')
+appConfig.DATABASE_URL = appConfig.DATABASE_URL || placeholderDbUrl
+appConfig.SKILLS_DB_URL = appConfig.SKILLS_DB_URL || placeholderDbUrl
+appConfig.RESOURCES_DB_URL = appConfig.RESOURCES_DB_URL || placeholderDbUrl
+
+require('../../app-bootstrap')
+const chai = require('chai')
+
+const _ = require('lodash')
+delete require.cache[require.resolve('../../src/common/prisma')]
 const prismaManager = require('../../src/common/prisma')
 const prismaHelper = require('../../src/common/prismaHelper')
+const statsDimensionHelper = require('../../src/common/statsDimensionHelper')
 const service = require('../../src/services/SearchService')
 
 const should = chai.should()
@@ -95,6 +103,82 @@ describe('search service unit tests', () => {
       prisma.member.findMany = originalMemberFindMany
       prisma.memberStats.findMany = originalMemberStatsFindMany
       skillsPrisma.userSkill.findMany = originalUserSkillFindMany
+    }
+  })
+
+  it('searchMembers should display configured rating path names for included stats', async () => {
+    const prisma = prismaManager.getClient()
+    const skillsPrisma = prismaManager.getSkillsClient()
+
+    const originalMemberCount = prisma.member.count
+    const originalMemberFindMany = prisma.member.findMany
+    const originalMemberStatsFindMany = prisma.memberStats.findMany
+    const originalUserSkillFindMany = skillsPrisma.userSkill.findMany
+    const originalGetChallengesClient = prismaManager.getChallengesClient
+
+    try {
+      statsDimensionHelper.clearChallengeDimensionLookupCache()
+      prisma.member.count = async () => 1
+      prisma.member.findMany = async () => [
+        {
+          userId: BigInt(1001),
+          handle: 'alpha',
+          handleLower: 'alpha',
+          createdAt: new Date('2026-04-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-04-02T00:00:00.000Z'),
+          verified: true
+        }
+      ]
+      prisma.memberStats.findMany = async () => [
+        {
+          userId: BigInt(1001),
+          trackId: 'track-ds-id',
+          typeId: 'rating-path-ai-engineering',
+          challenges: 3,
+          wins: 0,
+          rating: 1517,
+          globalRank: 4,
+          volatility: 331,
+          mostRecentEventDate: new Date('2024-06-01T00:00:00.000Z'),
+          isPrivate: false
+        }
+      ]
+      skillsPrisma.userSkill.findMany = async () => []
+      prismaManager.getChallengesClient = () => ({
+        $queryRaw: async (query) => {
+          const sql = _.castArray(query).join('')
+          if (sql.includes('"ChallengeTrack"')) {
+            return [
+              { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+            ]
+          }
+          return [
+            { id: 'rating-path-ai-engineering', name: 'AI Engineering', abbreviation: 'AI Engineering', legacyId: null, isTask: false }
+          ]
+        }
+      })
+
+      const response = await service.searchMembers(
+        { isMachine: true },
+        {
+          page: 1,
+          perPage: 20,
+          fields: 'userId,handle,handleLower,createdAt,updatedAt,stats,numberOfChallengesWon,numberOfChallengesPlaced'
+        }
+      )
+
+      response.result.should.have.length(1)
+      should.exist(response.result[0].stats[0].DATA_SCIENCE['AI Engineering'])
+      should.not.exist(response.result[0].stats[0].DATA_SCIENCE['rating-path-ai-engineering'])
+      response.result[0].stats[0].DATA_SCIENCE['AI Engineering'].rank.rating.should.equal(1517)
+      response.result[0].numberOfChallengesPlaced.should.equal(3)
+    } finally {
+      prisma.member.count = originalMemberCount
+      prisma.member.findMany = originalMemberFindMany
+      prisma.memberStats.findMany = originalMemberStatsFindMany
+      skillsPrisma.userSkill.findMany = originalUserSkillFindMany
+      prismaManager.getChallengesClient = originalGetChallengesClient
+      statsDimensionHelper.clearChallengeDimensionLookupCache()
     }
   })
 

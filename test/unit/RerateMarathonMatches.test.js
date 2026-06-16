@@ -167,6 +167,30 @@ describe('rerateMarathonMatches unit tests', () => {
     result[0].eventDate.toISOString().should.equal('2024-04-01T00:00:00.000Z')
   })
 
+  it('should merge Marathon Match history by round name without leaking aliases into review ids', () => {
+    const result = rerateMarathonMatches.mergeMarathonHistories([
+      {
+        challengeId: 'mm-145-canonical',
+        challengeName: 'Marathon Match 145',
+        reviewChallengeIds: ['mm-145-canonical', '30350523'],
+        eventDate: new Date('2023-05-31T10:02:00.000Z')
+      }
+    ], [
+      {
+        challengeId: '19628',
+        challengeName: 'MM 145',
+        reviewChallengeIds: ['19628'],
+        eventDate: new Date('2023-05-02T00:00:00.000Z')
+      }
+    ])
+
+    result.should.have.length(1)
+    result[0].challengeId.should.equal('mm-145-canonical')
+    result[0].challengeName.should.equal('Marathon Match 145')
+    result[0].reviewChallengeIds.should.deep.equal(['mm-145-canonical', '30350523', '19628'])
+    result[0].reviewChallengeIds.should.not.include('match:145')
+  })
+
   it('should discover distinct Marathon Match members in path order', async () => {
     const marathonHistory = [
       { challengeId: 'mm-1', reviewChallengeIds: ['mm-1', '101'], eventDate: new Date('2024-01-01T00:00:00Z') },

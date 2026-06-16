@@ -433,8 +433,13 @@ async function addStats (results) {
     where: { userId: { in: userIds } },
     include: prismaHelper.unifiedStatsIncludeParams
   })
+  let annotatedMemberStatsList = memberStatsList
+  if (memberStatsList.length > 0) {
+    const dimensionLookup = await loadChallengeDimensionLookup(prismaManager.getChallengesClient())
+    annotatedMemberStatsList = prismaHelper.annotateStatsRowsWithDimensionNames(memberStatsList, dimensionLookup)
+  }
   // merge overall members and stats
-  const mbrsSkillsStatsKeys = _.groupBy(memberStatsList, item => helper.bigIntToNumber(item.userId))
+  const mbrsSkillsStatsKeys = _.groupBy(annotatedMemberStatsList, item => helper.bigIntToNumber(item.userId))
   const resultsWithStats = _.map(results, item => {
     item.numberOfChallengesWon = 0
     item.numberOfChallengesPlaced = 0

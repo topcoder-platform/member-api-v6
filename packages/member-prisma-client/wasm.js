@@ -499,13 +499,13 @@ exports.Prisma.ModelName = {
  */
 const config = {
   "generator": {
-    "name": "client",
+    "name": "externalClient",
     "provider": {
       "fromEnvVar": null,
       "value": "prisma-client-js"
     },
     "output": {
-      "value": "/home/jmgasper/Documents/Git/v6/member-api-v6/prisma/generated/client",
+      "value": "/home/jmgasper/Documents/Git/v6/member-api-v6/packages/member-prisma-client",
       "fromEnvVar": null
     },
     "config": {
@@ -516,6 +516,10 @@ const config = {
         "fromEnvVar": null,
         "value": "debian-openssl-3.0.x",
         "native": true
+      },
+      {
+        "fromEnvVar": null,
+        "value": "debian-openssl-3.0.x"
       }
     ],
     "previewFeatures": [],
@@ -525,7 +529,7 @@ const config = {
   "relativeEnvPaths": {
     "rootEnvPath": null
   },
-  "relativePath": "../..",
+  "relativePath": "../../prisma",
   "clientVersion": "6.19.2",
   "engineVersion": "c2990dca591cba766e3b7ef5d9e8a84796e47ab7",
   "datasourceNames": [

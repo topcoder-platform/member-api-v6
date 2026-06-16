@@ -26,8 +26,10 @@ const {
   rerateMmTrack
 } = require('../ratings/mmRatingEngine')
 const {
+  buildRatingPathTypeId,
   challengeMatchesRatingPath,
   getConfiguredRatingPath,
+  getConfiguredRatingPathByTypeId,
   normalizeRatingPathConfigs
 } = require('../ratings/ratingPathConfig')
 const {
@@ -64,11 +66,14 @@ if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
 }
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
 const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
+const RATING_SOURCE_DATA_SCIENCE_CHALLENGE = 'DATA_SCIENCE_CHALLENGE'
 const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
+const CHALLENGE_TRACK_QUALITY_ASSURANCE = 'QUALITY_ASSURANCE'
 const CHALLENGE_WINNER_PLACEMENT_TYPE = 'PLACEMENT'
 const CHALLENGE_WINNER_PASSED_REVIEW_TYPE = 'PASSED_REVIEW'
 const CHALLENGE_WINNER_HISTORY_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE, CHALLENGE_WINNER_PASSED_REVIEW_TYPE]
+const CHALLENGE_WINNER_RATING_TYPES = [CHALLENGE_WINNER_PLACEMENT_TYPE]
 
 /**
  * Join Prisma SQL condition fragments with a literal AND separator.
@@ -361,6 +366,38 @@ function isChallengeRatingEnabled (challenge) {
 }
 
 /**
+ * Normalize challenge track labels for source-routing checks.
+ * @param {*} value raw challenge track label, enum value, or abbreviation
+ * @returns {string} uppercase source track key
+ */
+function normalizeChallengeSourceTrack (value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+}
+
+/**
+ * Check whether a challenge source track is Quality Assurance.
+ * QA Challenge results are rated in the public Data Science Challenge bucket.
+ * @param {*} value raw challenge track label, enum value, or abbreviation
+ * @returns {boolean} true when the source track is QA
+ */
+function isQualityAssuranceChallengeSourceTrack (value) {
+  const normalizedTrack = normalizeChallengeSourceTrack(value)
+  return normalizedTrack === CHALLENGE_TRACK_QUALITY_ASSURANCE || normalizedTrack === 'QA'
+}
+
+/**
+ * Build the source tracks replayed for Data Science Challenge ratings.
+ * QA Challenges share the public Data Science Challenge rating bucket.
+ * @returns {Array<string>} challenge source track labels
+ */
+function getDataScienceChallengeSourceTrackNames () {
+  return [TRACK_NAMES.DATA_SCIENCE, CHALLENGE_TRACK_QUALITY_ASSURANCE]
+}
+
+/**
  * Load challenge metadata needed to decide which ratings apply.
  * @param {Object} challengeClient prisma challenge client
  * @param {string|number} challengeId challenge UUID or legacy numeric id
@@ -401,7 +438,8 @@ async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
       typeId: true,
       track: {
         select: {
-          name: true
+          name: true,
+          track: true
         }
       },
       type: {
@@ -422,18 +460,26 @@ async function fetchChallengeForRatingUpdate (challengeClient, challengeId) {
 
 /**
  * Resolve the rating source supported by the engines for a challenge.
+ * Marathon Match challenges are type-driven because some Challenge API rows
+ * carry the Development track while still belonging to the MM rating stream.
  * @param {Object} challenge challenge metadata row
  * @returns {string|null} source identifier or null when unsupported
  */
 function resolveChallengeRatingSource (challenge) {
-  const trackName = getCanonicalTrackName(_.get(challenge, 'track.name') || _.get(challenge, 'trackId'))
+  const rawTrackName = _.get(challenge, 'track.track') || _.get(challenge, 'track.name') || _.get(challenge, 'trackId')
+  const trackName = getCanonicalTrackName(rawTrackName)
   const typeName = getCanonicalTypeName(_.get(challenge, 'type.name') || _.get(challenge, 'typeId'))
 
   if (trackName === TRACK_NAMES.DEVELOP && typeName === TYPE_NAMES.CHALLENGE) {
     return RATING_SOURCE_DEVELOPMENT
   }
 
-  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.MARATHON_MATCH) {
+  if ((trackName === TRACK_NAMES.DATA_SCIENCE || isQualityAssuranceChallengeSourceTrack(rawTrackName)) &&
+    typeName === TYPE_NAMES.CHALLENGE) {
+    return RATING_SOURCE_DATA_SCIENCE_CHALLENGE
+  }
+
+  if (typeName === TYPE_NAMES.MARATHON_MATCH) {
     return RATING_SOURCE_MARATHON_MATCH
   }
 
@@ -455,6 +501,14 @@ function buildBaseRatingJob (challenge, source) {
     return {
       source,
       trackId: TRACK_NAMES.DEVELOP,
+      typeId: TYPE_NAMES.CHALLENGE
+    }
+  }
+
+  if (source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
+    return {
+      source,
+      trackId: TRACK_NAMES.DATA_SCIENCE,
       typeId: TYPE_NAMES.CHALLENGE
     }
   }
@@ -535,6 +589,35 @@ async function fetchChallengeResultParticipantIds (reviewDbClient, challengeId) 
 }
 
 /**
+ * Fetch placement winner participants from challenge-api for completed
+ * Development/Data Science rating rerates. This covers challenges where winners
+ * can be assigned without a review-api challengeResult row for the same member.
+ * @param {Object} challengeClient challenge Prisma client
+ * @param {string|number} challengeId challenge identifier
+ * @returns {Promise<Array<BigInt>>} winner user ids
+ */
+async function fetchChallengeWinnerParticipantIds (challengeClient, challengeId) {
+  if (!challengeClient || !challengeClient.ChallengeWinner ||
+    typeof challengeClient.ChallengeWinner.findMany !== 'function') {
+    return []
+  }
+
+  const winnerRows = await challengeClient.ChallengeWinner.findMany({
+    where: {
+      challengeId: String(challengeId),
+      type: {
+        in: CHALLENGE_WINNER_RATING_TYPES
+      }
+    },
+    select: {
+      userId: true
+    }
+  })
+
+  return winnerRows.map((row) => toBigIntUserId(row.userId))
+}
+
+/**
  * Fetch Marathon Match participants from review summations when challengeResult
  * rows are not available yet.
  * @param {Object} reviewDbClient raw pg review database client
@@ -555,16 +638,25 @@ async function fetchMarathonMatchParticipantIds (reviewDbClient, challengeId) {
 
 /**
  * Resolve submitter ids for the challenge and rating source.
- * Marathon Match submitters are loaded from both challengeResult and final
- * review summations so partially synced result rows cannot omit lower-placed
- * participants from rerating.
+ * Challenge ratings include placement winners so completed challenges without
+ * challengeResult rows still rerate paid winners. Marathon Match submitters
+ * are loaded from both challengeResult and final review summations so partially
+ * synced result rows cannot omit lower-placed participants from rerating.
  * @param {Object} reviewDbClient raw pg review database client
+ * @param {Object} challengeClient challenge Prisma client
  * @param {string|number} challengeId challenge identifier
  * @param {string} source rating source identifier
  * @returns {Promise<Array<BigInt>>} unique participant user ids
  */
-async function fetchRatingParticipantIds (reviewDbClient, challengeId, source) {
+async function fetchRatingParticipantIds (reviewDbClient, challengeClient, challengeId, source) {
   const challengeResultUserIds = await fetchChallengeResultParticipantIds(reviewDbClient, challengeId)
+  if (source === RATING_SOURCE_DEVELOPMENT || source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
+    return _.uniqBy(
+      challengeResultUserIds.concat(await fetchChallengeWinnerParticipantIds(challengeClient, challengeId)),
+      stringifyUserId
+    )
+  }
+
   if (source !== RATING_SOURCE_MARATHON_MATCH) {
     return _.uniqBy(challengeResultUserIds, stringifyUserId)
   }
@@ -633,13 +725,24 @@ async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClien
     )
   }
 
-  if (job.source === RATING_SOURCE_DEVELOPMENT) {
+  if (job.source === RATING_SOURCE_DEVELOPMENT ||
+    job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
+    const rerateOptions = job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE
+      ? {
+        targetTrackName: TRACK_NAMES.DATA_SCIENCE,
+        targetTypeName: TYPE_NAMES.CHALLENGE,
+        challengeTrackNames: getDataScienceChallengeSourceTrackNames(),
+        challengeTypeNames: [TYPE_NAMES.CHALLENGE]
+      }
+      : undefined
+
     return rerateDevTrack(
       prisma,
       challengeClient,
       reviewDbClient,
       userId,
-      challengeId
+      challengeId,
+      rerateOptions
     )
   }
 
@@ -2385,6 +2488,22 @@ function isReratedCanonicalMarathonHistoryRow (row) {
 }
 
 /**
+ * Determine whether a Marathon Match history row uses a canonical UUID
+ * challenge id instead of an imported numeric legacy challenge id.
+ * @param {Object} row unified history row annotated with track/type names
+ * @returns {boolean} true when the row is a canonical Marathon Match row
+ */
+function isCanonicalMarathonHistoryRow (row) {
+  const challengeId = normalizeChallengeLookupKey(row && row.challengeId)
+
+  return !!challengeId &&
+    !/^\d+$/.test(challengeId) &&
+    row &&
+    row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+    row.typeName === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
  * Extract a Marathon Match round number from canonical or legacy challenge names.
  * This lets migrated numeric legacy rows be reconciled with canonical Challenge
  * rows even when their challenge ids are unrelated.
@@ -2472,8 +2591,18 @@ function getMarathonHistoryAliasKeys (row) {
  * @returns {Array<string>} canonical replacement aliases
  */
 function getMarathonHistoryCanonicalReplacementAliasKeys (row) {
+  const keys = []
+  const matchNumber = getMarathonHistoryMatchNumber(row)
+  if (matchNumber) {
+    keys.push(`match:${matchNumber}`)
+  }
+
   const titleAlias = getMarathonHistoryTitleAlias(row && row.challengeName)
-  return titleAlias ? [titleAlias] : []
+  if (titleAlias) {
+    keys.push(titleAlias)
+  }
+
+  return keys
 }
 
 /**
@@ -2536,6 +2665,54 @@ function buildAuthoritativeCanonicalMarathonAliasSet (rows) {
   })
 
   return aliases
+}
+
+/**
+ * Build aliases covered by any canonical Marathon Match row, including rows
+ * that are incomplete rerate placeholders. This lets imported numeric rows
+ * remain visible only when they are UUID-backed or are filling a known
+ * canonical gap, while orphan numeric rows are hidden after native rerates.
+ * @param {Array<Object>} rows unified history rows
+ * @returns {Set<string>} aliases covered by canonical MM rows
+ */
+function buildAnyCanonicalMarathonAliasSet (rows) {
+  const aliases = new Set()
+
+  _.forEach(rows || [], (row) => {
+    if (!isCanonicalMarathonHistoryRow(row)) {
+      return
+    }
+
+    _.forEach(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => aliases.add(key))
+  })
+
+  return aliases
+}
+
+/**
+ * Determine whether a numeric legacy Marathon Match row should remain visible.
+ * Legacy-only environments keep hydrated numeric rows, but once a member has
+ * canonical MM history, numeric rows must either resolve to a Challenge API UUID
+ * or fill a known canonical MM-number/title gap.
+ * @param {Object} row candidate legacy numeric MM row
+ * @param {boolean} hasCanonicalRows true when the response includes canonical MM history
+ * @param {Set<string>} anyCanonicalAliases aliases covered by canonical MM rows
+ * @returns {boolean} true when the numeric row should be shown
+ */
+function shouldKeepLegacyNumericMarathonHistoryRow (row, hasCanonicalRows, anyCanonicalAliases) {
+  if (!row || !row.challengeName) {
+    return false
+  }
+
+  if (!hasCanonicalRows) {
+    return true
+  }
+
+  if (normalizeChallengeLookupKey(row.canonicalChallengeId)) {
+    return true
+  }
+
+  return _.some(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => anyCanonicalAliases.has(key))
 }
 
 /**
@@ -2612,6 +2789,8 @@ function backfillCanonicalMarathonRatingsFromNextOldRating (rows) {
 function selectVisibleMarathonHistoryRows (rows) {
   const legacyAliases = buildAuthoritativeLegacyMarathonAliasSet(rows)
   const canonicalAliases = buildAuthoritativeCanonicalMarathonAliasSet(rows)
+  const anyCanonicalAliases = buildAnyCanonicalMarathonAliasSet(rows)
+  const hasCanonicalRows = _.some(rows || [], isCanonicalMarathonHistoryRow)
 
   return _.filter(rows || [], (row) => {
     if (!row ||
@@ -2621,7 +2800,7 @@ function selectVisibleMarathonHistoryRows (rows) {
     }
 
     if (isLegacyNumericMarathonHistoryRow(row)) {
-      return !!row.challengeName &&
+      return shouldKeepLegacyNumericMarathonHistoryRow(row, hasCanonicalRows, anyCanonicalAliases) &&
         !_.some(getMarathonHistoryCanonicalReplacementAliasKeys(row), key => canonicalAliases.has(key))
     }
 
@@ -2864,8 +3043,9 @@ function annotateUnifiedDimensionRows (rows, dimensionLookup) {
 
 /**
  * Resolve a stats type filter to the stored value.
- * Known challenge types resolve to UUIDs, while custom rating path names
- * are stored directly in memberStats.typeId and must remain queryable by name.
+ * Known challenge types resolve through the dimension lookup. Configured rating
+ * path names and deterministic path ids resolve through RATING_PATHS so freshly
+ * created custom ChallengeType rows remain queryable even with a stale lookup.
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @param {*} value raw request filter value
  * @returns {string|undefined} stored filter value
@@ -2877,13 +3057,19 @@ function resolveStatsTypeFilterValue (dimensionLookup, value) {
   }
 
   const rawValue = String(value || '').trim()
+  const configuredRatingPath = getConfiguredRatingPath(config.RATING_PATHS, rawValue) ||
+    getConfiguredRatingPathByTypeId(config.RATING_PATHS, rawValue)
+  if (configuredRatingPath) {
+    return buildRatingPathTypeId(configuredRatingPath)
+  }
+
   return rawValue || undefined
 }
 
 /**
  * Resolve optional unified stats filter parameters into stored ids.
- * Track filters resolve to challenge UUIDs. Type filters also accept custom
- * rating path names that are stored directly as type ids.
+ * Track filters resolve to challenge UUIDs. Type filters also accept configured
+ * rating path names and deterministic path type ids.
  * @param {Object} query request query params
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @returns {Object} resolved filter payload
@@ -4120,7 +4306,8 @@ refreshMemberStats.schema = {
  * Re-rate every existing submitter on a completed challenge for all applicable
  * rating dimensions. This includes the native challenge track/type rating when
  * supported and any configured named rating paths whose tags/skills match the
- * challenge, such as the default AI path.
+ * challenge, such as the default AI path. Quality Assurance Challenge rows are
+ * replayed into the public DATA_SCIENCE / Challenge rating bucket.
  * @param {Object} currentUser the user who performs operation
  * @param {Object} data rerate payload containing the completed challenge id
  * @returns {Object} summary of participants, rating jobs, updates, and per-member failures
@@ -4190,7 +4377,7 @@ async function rerateChallengeSubmitterRatings (currentUser, data) {
 
     participantIdsBySource.set(
       job.source,
-      await fetchRatingParticipantIds(reviewDbClient, challengeId, job.source)
+      await fetchRatingParticipantIds(reviewDbClient, challengeClient, challengeId, job.source)
     )
   }
 
@@ -4280,8 +4467,11 @@ rerateChallengeSubmitterRatings.schema = {
 }
 
 /**
- * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / MARATHON_MATCH, or configured
- * tag- or skill-based rating path re-rating pass beginning with the supplied challenge.
+ * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / Challenge,
+ * DATA_SCIENCE / MARATHON_MATCH, or configured tag- or skill-based rating path
+ * re-rating pass beginning with the supplied challenge.
+ * DATA_SCIENCE / Challenge rerates also replay Quality Assurance Challenge
+ * source rows because QA history is surfaced in that public rating bucket.
  * The relevant review-api results are reprocessed in chronological order and
  * persisted into the existing unified rating tables for the member.
  * @param {Object} currentUser the user who performs operation
@@ -4324,6 +4514,20 @@ async function rerateMemberStats (currentUser, handle, data) {
       member.userId,
       payload.challengeId
     )
+  } else if (trackId === TRACK_NAMES.DATA_SCIENCE && typeId === TYPE_NAMES.CHALLENGE) {
+    result = await rerateDevTrack(
+      prisma,
+      challengeClient,
+      reviewDbClient,
+      member.userId,
+      payload.challengeId,
+      {
+        targetTrackName: TRACK_NAMES.DATA_SCIENCE,
+        targetTypeName: TYPE_NAMES.CHALLENGE,
+        challengeTrackNames: getDataScienceChallengeSourceTrackNames(),
+        challengeTypeNames: [TYPE_NAMES.CHALLENGE]
+      }
+    )
   } else if (trackId === TRACK_NAMES.DATA_SCIENCE && typeId === TYPE_NAMES.MARATHON_MATCH) {
     result = await rerateMmTrack(
       prisma,
@@ -4334,7 +4538,7 @@ async function rerateMemberStats (currentUser, handle, data) {
       payload.challengeId
     )
   } else {
-    throw new errors.BadRequestError('Only DEVELOP / Challenge and DATA_SCIENCE / MARATHON_MATCH rerates are currently supported.')
+    throw new errors.BadRequestError('Only DEVELOP / Challenge, DATA_SCIENCE / Challenge, and DATA_SCIENCE / MARATHON_MATCH rerates are currently supported.')
   }
 
   return {

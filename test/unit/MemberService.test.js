@@ -19,6 +19,7 @@ process.env.RESOURCES_DB_URL = process.env.RESOURCES_DB_URL || placeholderDbUrl
 process.env.ENGAGEMENTS_DB_URL = process.env.ENGAGEMENTS_DB_URL || placeholderDbUrl
 
 const service = require('../../src/services/MemberService')
+const prisma = require('../../src/common/prisma').getClient()
 const testHelper = require('../testHelper')
 
 const should = chai.should()
@@ -84,6 +85,44 @@ describe('member service unit tests', () => {
       should.equal(testHelper.getDatesDiff(result.updatedAt, member1.updatedAt), 0)
       // should.equal(result.createdBy, member1.createdBy)
       // should.equal(result.updatedBy, member1.updatedBy)
+    })
+
+    it('get member includes challenge point summary and details', async () => {
+      const updateResult = await service.updateChallengePoints({ isMachine: true, userId: 'autopilot' }, 'challenge-1', {
+        challengeName: 'AI Points Challenge',
+        points: [
+          { userId: member1.userId, placement: 1, points: 250 },
+          { userId: member2.userId, placement: 2, points: 100 }
+        ]
+      })
+
+      should.equal(updateResult.updated, 2)
+
+      const result = await service.getMember({ isMachine: true }, member1.handle, {})
+      should.equal(result.challengePoints.total, 250)
+      should.equal(result.challengePoints.challenges, 1)
+      should.equal(result.challengePoints.details.length, 1)
+      should.equal(result.challengePoints.details[0].challengeId, 'challenge-1')
+      should.equal(result.challengePoints.details[0].challengeName, 'AI Points Challenge')
+      should.equal(result.challengePoints.details[0].placement, 1)
+      should.equal(result.challengePoints.details[0].points, 250)
+    })
+
+    it('update challenge points replaces stale rows for the challenge', async () => {
+      await service.updateChallengePoints({ isMachine: true, userId: 'autopilot' }, 'challenge-1', {
+        challengeName: 'AI Points Challenge Updated',
+        points: [
+          { userId: member1.userId, placement: 1, points: 300 }
+        ]
+      })
+
+      const member1Result = await service.getMember({ isMachine: true }, member1.handle, {})
+      should.equal(member1Result.challengePoints.total, 300)
+      should.equal(member1Result.challengePoints.details[0].challengeName, 'AI Points Challenge Updated')
+
+      const member2Result = await service.getMember({ isMachine: true }, member2.handle, {})
+      should.equal(member2Result.challengePoints.total, 0)
+      should.equal(member2Result.challengePoints.challenges, 0)
     })
 
     it('get member successfully 2', async () => {
@@ -152,6 +191,50 @@ describe('member service unit tests', () => {
         return
       }
       throw new Error('should not reach here')
+    })
+  })
+
+  describe('get profile completeness tests', () => {
+    it('counts open-to-work availability complete without legacy preferred roles', async () => {
+      const memberTraits = await prisma.memberTraits.findUnique({
+        where: { userId: member1.userId }
+      })
+
+      try {
+        await prisma.member.update({
+          where: { userId: member1.userId },
+          data: { availableForGigs: true }
+        })
+
+        await prisma.memberTraitPersonalization.create({
+          data: {
+            memberTraitId: memberTraits.id,
+            key: 'openToWork',
+            value: { availability: 'FULL_TIME' },
+            private: true,
+            createdBy: 'test'
+          }
+        })
+
+        const result = await service.getProfileCompleteness({ isMachine: true }, member1.handle, {})
+
+        should.equal(result.data.engagementAvailability, true)
+        should.equal(result.data.percentComplete, 0.5)
+      } finally {
+        if (memberTraits) {
+          await prisma.memberTraitPersonalization.deleteMany({
+            where: {
+              memberTraitId: memberTraits.id,
+              key: 'openToWork'
+            }
+          })
+        }
+
+        await prisma.member.update({
+          where: { userId: member1.userId },
+          data: { availableForGigs: null }
+        })
+      }
     })
   })
 

@@ -150,6 +150,40 @@ describe('stats dimension helper unit tests', () => {
     })
   })
 
+  it('buildUnifiedStatsResponse should display configured rating path names from deterministic type ids', () => {
+    const result = prismaHelper.buildUnifiedStatsResponse(
+      {
+        userId: global.BigInt(15391415),
+        handle: 'winterflame',
+        handleLower: 'winterflame',
+        maxRating: null
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-ds-id',
+          typeId: 'rating-path-ai-engineering',
+          trackName: TRACK_NAMES.DATA_SCIENCE,
+          challenges: 3,
+          wins: null,
+          rating: 1517,
+          volatility: 331,
+          mostRecentSubmission: null,
+          mostRecentEventDate: new Date('2024-06-01T00:00:00.000Z')
+        }
+      ]
+    )
+
+    should.exist(result.DATA_SCIENCE)
+    should.exist(result.DATA_SCIENCE['AI Engineering'])
+    should.not.exist(result.DATA_SCIENCE['rating-path-ai-engineering'])
+    result.DATA_SCIENCE['AI Engineering'].rank.should.deep.equal({
+      rating: 1517,
+      volatility: 331
+    })
+    result.maxRating.subTrack.should.equal('AI Engineering')
+  })
+
   it('buildUnifiedStatsResponse should backfill an empty matching subtrack rank from maxRating', () => {
     const result = prismaHelper.buildUnifiedStatsResponse(
       {
