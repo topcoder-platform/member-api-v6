@@ -19,6 +19,7 @@ const DEVELOP_TRACK_ID = 'track-develop-id'
 const DATA_SCIENCE_TRACK_ID = 'track-data-science-id'
 const CHALLENGE_TYPE_ID = 'type-challenge-id'
 const CODE_TYPE_ID = 'type-code-id'
+const BUG_HUNT_TYPE_ID = 'type-bug-hunt-id'
 const MARATHON_MATCH_TYPE_ID = 'type-marathon-match-id'
 
 function isBigIntValue (value) {
@@ -371,6 +372,7 @@ function createChallengeClient (metadataById, winnerRows = []) {
         return [
           { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
           { id: CODE_TYPE_ID, name: 'Code', abbreviation: 'CODE', legacyId: null, isTask: false },
+          { id: BUG_HUNT_TYPE_ID, name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
           { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
         ]
       }
@@ -598,7 +600,7 @@ describe('develop rating engine unit tests', () => {
     members.state.rankRecalculationCalls[0].typeId.should.equal(CHALLENGE_TYPE_ID)
   })
 
-  it('rerateDevTrack should include QA ChallengeWinner placements in Data Science Challenge rerates', async () => {
+  it('rerateDevTrack should include QA ChallengeWinner placements in Testing rerates', async () => {
     const targetUserId = toBigInt(89770374)
     const opponentUserId = toBigInt(100000039)
     const challengeId = 'qa-rating-jun-2'
@@ -648,9 +650,9 @@ describe('develop rating engine unit tests', () => {
       targetUserId,
       challengeId,
       {
-        targetTrackName: 'DATA_SCIENCE',
-        targetTypeName: 'Challenge',
-        challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+        targetTrackName: 'DEVELOP',
+        targetTypeName: 'BUG_HUNT',
+        challengeTrackNames: ['QUALITY_ASSURANCE'],
         challengeTypeNames: ['Challenge']
       }
     )
@@ -660,8 +662,8 @@ describe('develop rating engine unit tests', () => {
 
     const statsRow = members.state.statsRows.find((row) =>
       String(row.userId) === String(targetUserId) &&
-      row.trackId === DATA_SCIENCE_TRACK_ID &&
-      row.typeId === CHALLENGE_TYPE_ID
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === BUG_HUNT_TYPE_ID
     )
     should.exist(statsRow)
     statsRow.rating.should.equal(expectedTarget.rating)
@@ -671,16 +673,16 @@ describe('develop rating engine unit tests', () => {
 
     const historyRow = findHistoryRow(members.state.historyRows, targetUserId, challengeId)
     should.exist(historyRow)
-    historyRow.trackId.should.equal(DATA_SCIENCE_TRACK_ID)
-    historyRow.typeId.should.equal(CHALLENGE_TYPE_ID)
+    historyRow.trackId.should.equal(DEVELOP_TRACK_ID)
+    historyRow.typeId.should.equal(BUG_HUNT_TYPE_ID)
     historyRow.newRating.should.equal(expectedTarget.rating)
     historyRow.mostRecent.should.equal(true)
 
     const maxRatingRow = members.state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
     should.exist(maxRatingRow)
     maxRatingRow.rating.should.equal(expectedTarget.rating)
-    maxRatingRow.track.should.equal('DATA_SCIENCE')
-    maxRatingRow.subTrack.should.equal('Challenge')
+    maxRatingRow.track.should.equal('DEVELOP')
+    maxRatingRow.subTrack.should.equal('BUG_HUNT')
     maxRatingRow.ratingColor.should.equal(getRatingColor(expectedTarget.rating))
   })
 
