@@ -67,6 +67,7 @@ if (!_.includes(SUPPORTED_STATS_READ_SOURCES, configuredStatsReadSource)) {
 const USE_LEGACY_STATS_READS = configuredStatsReadSource === LEGACY_STATS_READ_SOURCE
 const RATING_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
 const RATING_SOURCE_DATA_SCIENCE_CHALLENGE = 'DATA_SCIENCE_CHALLENGE'
+const RATING_SOURCE_QUALITY_ASSURANCE_CHALLENGE = 'QUALITY_ASSURANCE_CHALLENGE'
 const RATING_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 const RERATE_MARATHON_ACTOR = 'rerate-mm-stats'
 const CHALLENGE_TRACK_QUALITY_ASSURANCE = 'QUALITY_ASSURANCE'
@@ -379,7 +380,7 @@ function normalizeChallengeSourceTrack (value) {
 
 /**
  * Check whether a challenge source track is Quality Assurance.
- * QA Challenge results are rated in the public Data Science Challenge bucket.
+ * QA Challenge results are surfaced in the legacy Testing bucket.
  * @param {*} value raw challenge track label, enum value, or abbreviation
  * @returns {boolean} true when the source track is QA
  */
@@ -390,11 +391,18 @@ function isQualityAssuranceChallengeSourceTrack (value) {
 
 /**
  * Build the source tracks replayed for Data Science Challenge ratings.
- * QA Challenges share the public Data Science Challenge rating bucket.
  * @returns {Array<string>} challenge source track labels
  */
 function getDataScienceChallengeSourceTrackNames () {
-  return [TRACK_NAMES.DATA_SCIENCE, CHALLENGE_TRACK_QUALITY_ASSURANCE]
+  return [TRACK_NAMES.DATA_SCIENCE]
+}
+
+/**
+ * Build the source tracks replayed for Quality Assurance Challenge ratings.
+ * @returns {Array<string>} challenge source track labels
+ */
+function getQualityAssuranceChallengeSourceTrackNames () {
+  return [CHALLENGE_TRACK_QUALITY_ASSURANCE]
 }
 
 /**
@@ -474,8 +482,11 @@ function resolveChallengeRatingSource (challenge) {
     return RATING_SOURCE_DEVELOPMENT
   }
 
-  if ((trackName === TRACK_NAMES.DATA_SCIENCE || isQualityAssuranceChallengeSourceTrack(rawTrackName)) &&
-    typeName === TYPE_NAMES.CHALLENGE) {
+  if (isQualityAssuranceChallengeSourceTrack(rawTrackName) && typeName === TYPE_NAMES.CHALLENGE) {
+    return RATING_SOURCE_QUALITY_ASSURANCE_CHALLENGE
+  }
+
+  if (trackName === TRACK_NAMES.DATA_SCIENCE && typeName === TYPE_NAMES.CHALLENGE) {
     return RATING_SOURCE_DATA_SCIENCE_CHALLENGE
   }
 
@@ -510,6 +521,14 @@ function buildBaseRatingJob (challenge, source) {
       source,
       trackId: TRACK_NAMES.DATA_SCIENCE,
       typeId: TYPE_NAMES.CHALLENGE
+    }
+  }
+
+  if (source === RATING_SOURCE_QUALITY_ASSURANCE_CHALLENGE) {
+    return {
+      source,
+      trackId: TRACK_NAMES.DEVELOP,
+      typeId: TYPE_NAMES.BUG_HUNT
     }
   }
 
@@ -650,7 +669,9 @@ async function fetchMarathonMatchParticipantIds (reviewDbClient, challengeId) {
  */
 async function fetchRatingParticipantIds (reviewDbClient, challengeClient, challengeId, source) {
   const challengeResultUserIds = await fetchChallengeResultParticipantIds(reviewDbClient, challengeId)
-  if (source === RATING_SOURCE_DEVELOPMENT || source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
+  if (source === RATING_SOURCE_DEVELOPMENT ||
+    source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE ||
+    source === RATING_SOURCE_QUALITY_ASSURANCE_CHALLENGE) {
     return _.uniqBy(
       challengeResultUserIds.concat(await fetchChallengeWinnerParticipantIds(challengeClient, challengeId)),
       stringifyUserId
@@ -726,15 +747,24 @@ async function rerateChallengeRatingJobForMember (challengeClient, reviewDbClien
   }
 
   if (job.source === RATING_SOURCE_DEVELOPMENT ||
-    job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
-    const rerateOptions = job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE
-      ? {
+    job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE ||
+    job.source === RATING_SOURCE_QUALITY_ASSURANCE_CHALLENGE) {
+    let rerateOptions
+    if (job.source === RATING_SOURCE_DATA_SCIENCE_CHALLENGE) {
+      rerateOptions = {
         targetTrackName: TRACK_NAMES.DATA_SCIENCE,
         targetTypeName: TYPE_NAMES.CHALLENGE,
         challengeTrackNames: getDataScienceChallengeSourceTrackNames(),
         challengeTypeNames: [TYPE_NAMES.CHALLENGE]
       }
-      : undefined
+    } else if (job.source === RATING_SOURCE_QUALITY_ASSURANCE_CHALLENGE) {
+      rerateOptions = {
+        targetTrackName: TRACK_NAMES.DEVELOP,
+        targetTypeName: TYPE_NAMES.BUG_HUNT,
+        challengeTrackNames: getQualityAssuranceChallengeSourceTrackNames(),
+        challengeTypeNames: [TYPE_NAMES.CHALLENGE]
+      }
+    }
 
     return rerateDevTrack(
       prisma,
@@ -963,8 +993,9 @@ function isMarathonMatchType (typeName) {
 
 /**
  * Resolve the public stats dimensions for a challenge-backed row.
- * Marathon Match and QA Challenge rows are part of the public DATA_SCIENCE
- * bucket even when source challenge metadata uses a different track.
+ * Marathon Match rows are part of the public DATA_SCIENCE bucket even when
+ * source challenge metadata uses a different track. QA Challenge rows retain
+ * the legacy Testing surface under DEVELOP / BUG_HUNT.
  * @param {Object} row row containing trackId and typeId
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @returns {Object} normalized track/type ids and names
@@ -983,12 +1014,16 @@ function resolveStatsDimensionForChallengeRow (row, dimensionLookup) {
 
   const trackName = resolveTrackNameFromLookup(dimensionLookup, row.trackId)
   if (typeName === TYPE_NAMES.CHALLENGE && isQualityAssuranceChallengeSourceTrack(trackName)) {
-    const dataScienceTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DATA_SCIENCE)
-    return {
-      trackId: dataScienceTrackId || row.trackId,
-      typeId: row.typeId,
-      trackName: TRACK_NAMES.DATA_SCIENCE,
-      typeName
+    const developTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DEVELOP)
+    const bugHuntTypeId = resolveTypeIdFromLookup(dimensionLookup, TYPE_NAMES.BUG_HUNT)
+
+    if (developTrackId && bugHuntTypeId) {
+      return {
+        trackId: developTrackId,
+        typeId: bugHuntTypeId,
+        trackName: TRACK_NAMES.DEVELOP,
+        typeName: TYPE_NAMES.BUG_HUNT
+      }
     }
   }
 
@@ -1236,9 +1271,10 @@ function filterUnifiedHistoryRowsToCompletedChallenges (rows, challengeMetadataB
  * the response payload consumed by the profiles UI.
  * @param {Array<Object>} rows unified history rows loaded from members.memberStatsHistory
  * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by UUID and legacy ids
+ * @param {Object} dimensionLookup shared challenge dimension lookup
  * @returns {Array<Object>} rows enriched with canonical challenge ids and names when available
  */
-function enrichUnifiedHistoryRowsWithChallengeMetadata (rows, challengeMetadataById) {
+function enrichUnifiedHistoryRowsWithChallengeMetadata (rows, challengeMetadataById, dimensionLookup) {
   return _.map(rows || [], (row) => {
     const challengeId = _.isNil(row.challengeId) ? null : String(row.challengeId).trim()
     if (!challengeId) {
@@ -1257,9 +1293,16 @@ function enrichUnifiedHistoryRowsWithChallengeMetadata (rows, challengeMetadataB
         : _.get(challenge, 'legacyRecord.legacySystemId')
     )
     const preserveLegacyChallengeId = isLegacyNumericMarathonHistoryRow(row)
+    const dimension = challenge.trackId && challenge.typeId
+      ? resolveStatsDimensionForChallengeRow({
+        trackId: String(challenge.trackId),
+        typeId: String(challenge.typeId)
+      }, dimensionLookup)
+      : {}
 
     return {
       ...row,
+      ...dimension,
       challengeId: preserveLegacyChallengeId ? challengeId : canonicalChallengeId,
       canonicalChallengeId,
       legacyChallengeId,
@@ -1532,10 +1575,7 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
       return
     }
 
-    const dimension = resolveStatsDimensionForChallengeRow({
-      trackId: String(challenge.trackId),
-      typeId: String(challenge.typeId)
-    }, dimensionLookup)
+    const dimension = resolveStatsDimensionForChallengeRow(challenge, dimensionLookup)
     const trackId = dimension.trackId
     const typeId = dimension.typeId
     if (!trackId || !typeId) {
@@ -1647,10 +1687,7 @@ function buildFallbackHistoryRowsFromReviewResults (reviewRows, challengeMetadat
       return
     }
 
-    const dimension = resolveStatsDimensionForChallengeRow({
-      trackId: String(challenge.trackId),
-      typeId: String(challenge.typeId)
-    }, dimensionLookup)
+    const dimension = resolveStatsDimensionForChallengeRow(challenge, dimensionLookup)
     const trackId = dimension.trackId
     const typeId = dimension.typeId
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
@@ -1731,10 +1768,7 @@ function buildFallbackHistoryRowsFromChallengeWinners (winnerRows, dimensionLook
       return
     }
 
-    const dimension = resolveStatsDimensionForChallengeRow({
-      trackId: String(challenge.trackId),
-      typeId: String(challenge.typeId)
-    }, dimensionLookup)
+    const dimension = resolveStatsDimensionForChallengeRow(challenge, dimensionLookup)
     const trackId = dimension.trackId
     const typeId = dimension.typeId
     const pairKey = buildStatsTrackTypeKey(trackId, typeId)
@@ -3425,7 +3459,8 @@ async function getHistoryStats (currentUser, handle, query) {
       let annotatedRows = dedupeUnifiedHistoryRows(filterUnifiedHistoryRowsToCompletedChallenges(
         enrichUnifiedHistoryRowsWithChallengeMetadata(
           annotateUnifiedDimensionRows(historyRows, dimensionLookup),
-          challengeMetadataById
+          challengeMetadataById,
+          dimensionLookup
         ),
         challengeMetadataById
       ))
@@ -4318,7 +4353,7 @@ refreshMemberStats.schema = {
  * rating dimensions. This includes the native challenge track/type rating when
  * supported and any configured named rating paths whose tags/skills match the
  * challenge, such as the default AI path. Quality Assurance Challenge rows are
- * replayed into the public DATA_SCIENCE / Challenge rating bucket.
+ * replayed into the legacy Testing bucket under DEVELOP / BUG_HUNT.
  * @param {Object} currentUser the user who performs operation
  * @param {Object} data rerate payload containing the completed challenge id
  * @returns {Object} summary of participants, rating jobs, updates, and per-member failures
@@ -4481,8 +4516,6 @@ rerateChallengeSubmitterRatings.schema = {
  * Trigger a DEVELOPMENT / Challenge, DATA_SCIENCE / Challenge,
  * DATA_SCIENCE / MARATHON_MATCH, or configured tag- or skill-based rating path
  * re-rating pass beginning with the supplied challenge.
- * DATA_SCIENCE / Challenge rerates also replay Quality Assurance Challenge
- * source rows because QA history is surfaced in that public rating bucket.
  * The relevant review-api results are reprocessed in chronological order and
  * persisted into the existing unified rating tables for the member.
  * @param {Object} currentUser the user who performs operation

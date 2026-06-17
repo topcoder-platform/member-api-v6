@@ -10,6 +10,9 @@ const TRACK_NAMES = {
 const TYPE_NAMES = {
   CHALLENGE: 'Challenge',
   CODE: 'CODE',
+  BUG_HUNT: 'BUG_HUNT',
+  TEST_SCENARIOS: 'TEST_SCENARIOS',
+  TEST_SUITES: 'TEST_SUITES',
   FIRST2FINISH: 'First2Finish',
   TASK: 'Task',
   SRM: 'SRM',
@@ -175,6 +178,9 @@ function buildChallengeDimensionLookup (trackRows, typeRows) {
   lookup.typeIds = {
     CHALLENGE: resolveTypeIdFromLookup(lookup, TYPE_NAMES.CHALLENGE) || null,
     CODE: resolveTypeIdFromLookup(lookup, TYPE_NAMES.CODE) || null,
+    BUG_HUNT: resolveTypeIdFromLookup(lookup, TYPE_NAMES.BUG_HUNT) || null,
+    TEST_SCENARIOS: resolveTypeIdFromLookup(lookup, TYPE_NAMES.TEST_SCENARIOS) || null,
+    TEST_SUITES: resolveTypeIdFromLookup(lookup, TYPE_NAMES.TEST_SUITES) || null,
     FIRST2FINISH: resolveTypeIdFromLookup(lookup, TYPE_NAMES.FIRST2FINISH) || null,
     TASK: resolveTypeIdFromLookup(lookup, TYPE_NAMES.TASK) || null,
     SRM: resolveTypeIdFromLookup(lookup, TYPE_NAMES.SRM) || null,
