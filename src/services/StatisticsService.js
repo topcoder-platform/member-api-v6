@@ -963,8 +963,8 @@ function isMarathonMatchType (typeName) {
 
 /**
  * Resolve the public stats dimensions for a challenge-backed row.
- * Marathon Match is part of the public DATA_SCIENCE bucket even when imported
- * challenge metadata has a Development track.
+ * Marathon Match and QA Challenge rows are part of the public DATA_SCIENCE
+ * bucket even when source challenge metadata uses a different track.
  * @param {Object} row row containing trackId and typeId
  * @param {Object} dimensionLookup shared challenge dimension lookup
  * @returns {Object} normalized track/type ids and names
@@ -981,10 +981,21 @@ function resolveStatsDimensionForChallengeRow (row, dimensionLookup) {
     }
   }
 
+  const trackName = resolveTrackNameFromLookup(dimensionLookup, row.trackId)
+  if (typeName === TYPE_NAMES.CHALLENGE && isQualityAssuranceChallengeSourceTrack(trackName)) {
+    const dataScienceTrackId = resolveTrackIdFromLookup(dimensionLookup, TRACK_NAMES.DATA_SCIENCE)
+    return {
+      trackId: dataScienceTrackId || row.trackId,
+      typeId: row.typeId,
+      trackName: TRACK_NAMES.DATA_SCIENCE,
+      typeName
+    }
+  }
+
   return {
     trackId: row.trackId,
     typeId: row.typeId,
-    trackName: resolveTrackNameFromLookup(dimensionLookup, row.trackId),
+    trackName,
     typeName
   }
 }

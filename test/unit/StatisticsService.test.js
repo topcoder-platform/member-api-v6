@@ -71,7 +71,8 @@ function createStatsDimensionHelperStub () {
   const trackNamesById = {
     'track-dev-id': TRACK_NAMES.DEVELOP,
     'track-design-id': TRACK_NAMES.DESIGN,
-    'track-ds-id': TRACK_NAMES.DATA_SCIENCE
+    'track-ds-id': TRACK_NAMES.DATA_SCIENCE,
+    'track-qa-id': 'Quality Assurance'
   }
   const typeNamesById = {
     'type-challenge-id': TYPE_NAMES.CHALLENGE,
@@ -1979,6 +1980,58 @@ describe('statistics service unit tests', () => {
       result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('Winner fallback challenge')
       result[0].DEVELOP.subTracks[0].history[0].placement.should.equal(1)
       result[0].DEVELOP.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should surface QA challenge winner history under Data Science Challenge', async () => {
+    const ratingDate = new Date('2026-06-15T08:00:00.000Z')
+    const qaChallenge = {
+      id: 'qa-challenge-june-15',
+      name: 'QA Challenge June 15',
+      status: 'COMPLETED',
+      trackId: 'track-qa-id',
+      typeId: 'type-challenge-id',
+      endDate: ratingDate
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-challenge-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      },
+      challengeRows: [],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'qa-challenge-june-15',
+        type: 'PLACEMENT',
+        placement: 1,
+        createdAt: new Date('2026-06-15T08:01:00.000Z'),
+        challenge: qaChallenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      should.exist(result[0].DATA_SCIENCE.Challenge)
+      result[0].DATA_SCIENCE.Challenge.history.should.have.length(1)
+      result[0].DATA_SCIENCE.Challenge.history[0].challengeId.should.equal('qa-challenge-june-15')
+      result[0].DATA_SCIENCE.Challenge.history[0].challengeName.should.equal('QA Challenge June 15')
+      result[0].DATA_SCIENCE.Challenge.history[0].placement.should.equal(1)
+      result[0].DATA_SCIENCE.Challenge.history[0].ratingDate.should.equal(ratingDate.getTime())
+      result[0].DATA_SCIENCE.Challenge.history[0].mostRecent.should.equal(true)
     } finally {
       restore()
     }
