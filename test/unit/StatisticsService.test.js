@@ -43,7 +43,8 @@ function createStatsDimensionHelperStub () {
   const TRACK_NAMES = {
     DEVELOP: 'DEVELOP',
     DESIGN: 'DESIGN',
-    DATA_SCIENCE: 'DATA_SCIENCE'
+    DATA_SCIENCE: 'DATA_SCIENCE',
+    QA: 'QA'
   }
   const TYPE_NAMES = {
     CHALLENGE: 'Challenge',
@@ -60,7 +61,8 @@ function createStatsDimensionHelperStub () {
   const trackIds = {
     DEVELOP: 'track-dev-id',
     DESIGN: 'track-design-id',
-    DATA_SCIENCE: 'track-ds-id'
+    DATA_SCIENCE: 'track-ds-id',
+    QA: 'track-qa-id'
   }
   const typeIds = {
     CHALLENGE: 'type-challenge-id',
@@ -78,7 +80,7 @@ function createStatsDimensionHelperStub () {
     'track-dev-id': TRACK_NAMES.DEVELOP,
     'track-design-id': TRACK_NAMES.DESIGN,
     'track-ds-id': TRACK_NAMES.DATA_SCIENCE,
-    'track-qa-id': 'Quality Assurance'
+    'track-qa-id': TRACK_NAMES.QA
   }
   const typeNamesById = {
     'type-challenge-id': TYPE_NAMES.CHALLENGE,
@@ -158,6 +160,9 @@ function createStatsDimensionHelperStub () {
       }
       if (normalized === 'DATA_SCIENCE' || normalized === 'DATA SCIENCE' || normalized === 'DS') {
         return TRACK_NAMES.DATA_SCIENCE
+      }
+      if (normalized === 'QUALITY_ASSURANCE' || normalized === 'QUALITY ASSURANCE' || normalized === 'QA') {
+        return TRACK_NAMES.QA
       }
       return value
     },
@@ -1041,7 +1046,7 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('rerateChallengeSubmitterRatings should rate QA Challenge winners in the Testing bucket', async () => {
+  it('rerateChallengeSubmitterRatings should rate QA Challenge winners in the QA bucket', async () => {
     const qaRerateCalls = []
     const { service, restore } = loadStatisticsService({
       challengeRow: {
@@ -1091,8 +1096,8 @@ describe('statistics service unit tests', () => {
       result.participantIds.should.deep.equal(['89770374', '100000039'])
       result.ratings.should.deep.equal([
         {
-          trackId: 'DEVELOP',
-          typeId: 'BUG_HUNT'
+          trackId: 'QA',
+          typeId: 'Challenge'
         }
       ])
       qaRerateCalls.should.deep.equal([
@@ -1100,8 +1105,8 @@ describe('statistics service unit tests', () => {
           userId: '89770374',
           challengeId: 'qa-winner-only-challenge',
           options: {
-            targetTrackName: 'DEVELOP',
-            targetTypeName: 'BUG_HUNT',
+            targetTrackName: 'QA',
+            targetTypeName: 'Challenge',
             challengeTrackNames: ['QUALITY_ASSURANCE'],
             challengeTypeNames: ['Challenge']
           }
@@ -1110,8 +1115,8 @@ describe('statistics service unit tests', () => {
           userId: '100000039',
           challengeId: 'qa-winner-only-challenge',
           options: {
-            targetTrackName: 'DEVELOP',
-            targetTypeName: 'BUG_HUNT',
+            targetTrackName: 'QA',
+            targetTypeName: 'Challenge',
             challengeTrackNames: ['QUALITY_ASSURANCE'],
             challengeTypeNames: ['Challenge']
           }
@@ -2012,7 +2017,7 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('getHistoryStats should surface QA challenge winner history under Testing', async () => {
+  it('getHistoryStats should surface QA challenge winner history under QA', async () => {
     const ratingDate = new Date('2026-06-15T08:00:00.000Z')
     const qaChallenge = {
       id: 'qa-challenge-june-15',
@@ -2028,8 +2033,8 @@ describe('statistics service unit tests', () => {
         memberStats: {
           findFirst: async () => null,
           findMany: async () => [{
-            trackId: 'track-dev-id',
-            typeId: 'type-bug-hunt-id'
+            trackId: 'track-qa-id',
+            typeId: 'type-challenge-id'
           }]
         },
         memberStatsHistory: {
@@ -2051,21 +2056,21 @@ describe('statistics service unit tests', () => {
       const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
 
       result.should.have.length(1)
-      should.exist(result[0].DEVELOP)
-      result[0].DEVELOP.subTracks.should.have.length(1)
-      result[0].DEVELOP.subTracks[0].name.should.equal('BUG_HUNT')
-      result[0].DEVELOP.subTracks[0].history.should.have.length(1)
-      result[0].DEVELOP.subTracks[0].history[0].challengeId.should.equal('qa-challenge-june-15')
-      result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('QA Challenge June 15')
-      result[0].DEVELOP.subTracks[0].history[0].placement.should.equal(1)
-      result[0].DEVELOP.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
-      result[0].DEVELOP.subTracks[0].history[0].mostRecent.should.equal(true)
+      should.exist(result[0].QA)
+      result[0].QA.subTracks.should.have.length(1)
+      result[0].QA.subTracks[0].name.should.equal('Challenge')
+      result[0].QA.subTracks[0].history.should.have.length(1)
+      result[0].QA.subTracks[0].history[0].challengeId.should.equal('qa-challenge-june-15')
+      result[0].QA.subTracks[0].history[0].challengeName.should.equal('QA Challenge June 15')
+      result[0].QA.subTracks[0].history[0].placement.should.equal(1)
+      result[0].QA.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
+      result[0].QA.subTracks[0].history[0].mostRecent.should.equal(true)
     } finally {
       restore()
     }
   })
 
-  it('getHistoryStats should remap persisted QA challenge history from Data Science to Testing', async () => {
+  it('getHistoryStats should remap persisted QA challenge history from Data Science to QA', async () => {
     const ratingDate = new Date('2026-06-15T08:00:00.000Z')
     const qaChallenge = {
       id: 'qa-challenge-june-15',
@@ -2107,16 +2112,16 @@ describe('statistics service unit tests', () => {
       const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
 
       result.should.have.length(1)
-      should.exist(result[0].DEVELOP)
+      should.exist(result[0].QA)
       should.not.exist(result[0].DATA_SCIENCE)
-      result[0].DEVELOP.subTracks.should.have.length(1)
-      result[0].DEVELOP.subTracks[0].name.should.equal('BUG_HUNT')
-      result[0].DEVELOP.subTracks[0].history.should.have.length(1)
-      result[0].DEVELOP.subTracks[0].history[0].challengeId.should.equal('qa-challenge-june-15')
-      result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('QA Challenge June 15')
-      result[0].DEVELOP.subTracks[0].history[0].rating.should.equal(1400)
-      result[0].DEVELOP.subTracks[0].history[0].placement.should.equal(1)
-      result[0].DEVELOP.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
+      result[0].QA.subTracks.should.have.length(1)
+      result[0].QA.subTracks[0].name.should.equal('Challenge')
+      result[0].QA.subTracks[0].history.should.have.length(1)
+      result[0].QA.subTracks[0].history[0].challengeId.should.equal('qa-challenge-june-15')
+      result[0].QA.subTracks[0].history[0].challengeName.should.equal('QA Challenge June 15')
+      result[0].QA.subTracks[0].history[0].rating.should.equal(1400)
+      result[0].QA.subTracks[0].history[0].placement.should.equal(1)
+      result[0].QA.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
     } finally {
       restore()
     }
