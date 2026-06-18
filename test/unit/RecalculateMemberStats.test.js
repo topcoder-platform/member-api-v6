@@ -45,7 +45,7 @@ describe('recalculateMemberStats unit tests', () => {
     recalculateMemberStats.resolveLegacyDesignTypeId(null, 40).should.equal('type-f2f-id')
   })
 
-  it('should normalize QA challenge aggregates into the Testing bucket', async () => {
+  it('should normalize QA challenge aggregates into the QA bucket', async () => {
     const fakeChallengesClient = {
       $queryRaw (strings) {
         const query = strings.join('')
@@ -96,8 +96,8 @@ describe('recalculateMemberStats unit tests', () => {
     )
 
     results.should.have.length(1)
-    results[0].trackId.should.equal('track-dev-id')
-    results[0].typeId.should.equal('type-bug-hunt-id')
+    results[0].trackId.should.equal('track-qa-id')
+    results[0].typeId.should.equal('type-ch-id')
     results[0].challenges.should.equal(1)
     results[0].wins.should.equal(1)
     results[0].mostRecentEventDate.should.deep.equal(eventDate)
