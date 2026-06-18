@@ -200,9 +200,9 @@ describe('stats dimension helper unit tests', () => {
       [
         {
           groupId: global.BigInt(1),
-          trackId: 'track-ds-id',
+          trackId: 'track-dev-id',
           typeId: 'rating-path-ai-engineering',
-          trackName: TRACK_NAMES.DATA_SCIENCE,
+          trackName: TRACK_NAMES.DEVELOP,
           challenges: 3,
           wins: null,
           rating: 1517,
@@ -213,13 +213,15 @@ describe('stats dimension helper unit tests', () => {
       ]
     )
 
-    should.exist(result.DATA_SCIENCE)
-    should.exist(result.DATA_SCIENCE['AI Engineering'])
-    should.not.exist(result.DATA_SCIENCE['rating-path-ai-engineering'])
-    result.DATA_SCIENCE['AI Engineering'].rank.should.deep.equal({
+    should.exist(result.DEVELOP)
+    result.DEVELOP.subTracks.should.have.length(1)
+    result.DEVELOP.subTracks[0].name.should.equal('AI Engineering')
+    result.DEVELOP.subTracks[0].rank.should.deep.equal({
       rating: 1517,
       volatility: 331
     })
+    should.not.exist(result.DATA_SCIENCE)
+    result.maxRating.track.should.equal(TRACK_NAMES.DEVELOP)
     result.maxRating.subTrack.should.equal('AI Engineering')
   })
 

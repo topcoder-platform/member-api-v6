@@ -753,7 +753,7 @@ describe('statistics service unit tests', () => {
       should.exist(capturedOptions)
       capturedOptions.ratingPath.name.should.equal('AI Engineering')
       capturedOptions.ratingPath.tags.should.deep.equal(['AI', 'AI Exponential League'])
-      result.trackId.should.equal('DATA_SCIENCE')
+      result.trackId.should.equal('DEVELOP')
       result.typeId.should.equal('AI Engineering')
       result.ratingName.should.equal('AI Engineering')
       result.ratingTags.should.deep.equal(['AI', 'AI Exponential League'])
@@ -876,7 +876,7 @@ describe('statistics service unit tests', () => {
           typeId: 'Challenge'
         },
         {
-          trackId: 'DATA_SCIENCE',
+          trackId: 'DEVELOP',
           typeId: 'AI Engineering',
           ratingName: 'AI Engineering',
           ratingTags: ['AI', 'AI Exponential League'],
