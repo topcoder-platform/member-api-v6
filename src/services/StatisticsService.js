@@ -1115,6 +1115,12 @@ async function fetchChallengeWinnerResultsForMember (challengeClient, userId) {
             trackId: true,
             typeId: true,
             endDate: true,
+            tags: true,
+            skills: {
+              select: {
+                skillId: true
+              }
+            },
             legacyRecord: {
               select: {
                 legacySystemId: true
@@ -1200,6 +1206,7 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
       trackId: true,
       typeId: true,
       endDate: true,
+      tags: true,
       track: {
         select: {
           name: true
@@ -1208,6 +1215,11 @@ async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
       type: {
         select: {
           name: true
+        }
+      },
+      skills: {
+        select: {
+          skillId: true
         }
       },
       metadata: RATING_METADATA_SELECT,
@@ -1660,6 +1672,179 @@ function getMissingUnifiedHistoryPairKeys (aggregateRows, historyRows, dimension
       .filter(pairKey => !persistedPairKeys.has(pairKey))
       .value()
   )
+}
+
+/**
+ * Resolve a configured rating path represented by an annotated stats row.
+ * @param {Object} row annotated memberStats row with track/type ids and names
+ * @returns {Object|null} normalized rating path config for the row
+ */
+function resolveConfiguredRatingPathForStatsRow (row) {
+  const ratingPath = getConfiguredRatingPath(config.RATING_PATHS, row && (row.typeName || row.typeId)) ||
+    getConfiguredRatingPathByTypeId(config.RATING_PATHS, row && row.typeId)
+
+  if (!ratingPath || row.trackName !== ratingPath.trackName) {
+    return null
+  }
+
+  return ratingPath
+}
+
+/**
+ * Build a lookup of missing aggregate pairs that belong to configured rating paths.
+ * @param {Array<Object>} aggregateRows unified memberStats rows for one member
+ * @param {Object} dimensionLookup shared challenge dimension lookup
+ * @param {Set<string>} missingPairKeys track/type pairs still needing history
+ * @returns {Map<string, Object>} missing configured rating path pairs keyed by track/type
+ */
+function getMissingConfiguredRatingPathPairMap (aggregateRows, dimensionLookup, missingPairKeys) {
+  const pairMap = new Map()
+
+  if (!missingPairKeys || missingPairKeys.size === 0) {
+    return pairMap
+  }
+
+  _.forEach(annotateUnifiedDimensionRows(aggregateRows || [], dimensionLookup), (row) => {
+    const pairKey = buildStatsTrackTypeKey(row.trackId, row.typeId)
+    if (!missingPairKeys.has(pairKey) || !isSupportedUnifiedHistoryTrack(row.trackName)) {
+      return
+    }
+
+    const ratingPath = resolveConfiguredRatingPathForStatsRow(row)
+    if (!ratingPath) {
+      return
+    }
+
+    pairMap.set(pairKey, {
+      trackId: row.trackId,
+      typeId: row.typeId,
+      trackName: row.trackName,
+      typeName: ratingPath.name,
+      ratingPath
+    })
+  })
+
+  return pairMap
+}
+
+/**
+ * Build transient history rows for missing configured rating path pairs.
+ * @param {Array<Object>} entries challenge history source entries
+ * @param {Map<string, Object>} ratingPathPairMap configured rating path pairs to synthesize
+ * @returns {Array<Object>} synthesized configured rating path history rows
+ */
+function buildConfiguredRatingPathFallbackRows (entries, ratingPathPairMap) {
+  const ratingPathPairs = Array.from((ratingPathPairMap || new Map()).values())
+  if (ratingPathPairs.length === 0 || !entries || entries.length === 0) {
+    return []
+  }
+
+  const fallbackRowsByChallengeKey = new Map()
+
+  _.forEach(entries, (entry) => {
+    const challenge = entry && entry.challenge
+    if (!challenge || !isCompletedChallenge(challenge)) {
+      return
+    }
+
+    const challengeId = _.isNil(challenge.id) ? null : String(challenge.id).trim()
+    if (!challengeId) {
+      return
+    }
+
+    const eventDate = toOptionalDate(challenge.endDate || entry.createdAt)
+    if (!eventDate) {
+      return
+    }
+
+    const createdAt = toOptionalDate(entry.createdAt) || eventDate
+
+    _.forEach(ratingPathPairs, (pair) => {
+      if (!challengeMatchesRatingPath(challenge, pair.ratingPath)) {
+        return
+      }
+
+      const pairKey = buildStatsTrackTypeKey(pair.trackId, pair.typeId)
+      const challengeKey = `${pairKey}::${challengeId}`
+      const existing = fallbackRowsByChallengeKey.get(challengeKey)
+
+      if (existing && createdAt <= existing.createdAt) {
+        return
+      }
+
+      fallbackRowsByChallengeKey.set(challengeKey, {
+        trackId: pair.trackId,
+        typeId: pair.typeId,
+        trackName: pair.trackName,
+        typeName: pair.typeName,
+        challengeId,
+        challengeName: challenge.name || null,
+        eventDate,
+        placement: entry.placement,
+        createdAt
+      })
+    })
+  })
+
+  const fallbackRows = []
+  const rowsByPairKey = _.groupBy(Array.from(fallbackRowsByChallengeKey.values()), row => buildStatsTrackTypeKey(row.trackId, row.typeId))
+
+  _.forEach(rowsByPairKey, (pairRows) => {
+    const orderedRows = _.orderBy(pairRows, [
+      row => row.eventDate.getTime(),
+      row => row.createdAt.getTime(),
+      row => row.challengeId
+    ], ['desc', 'desc', 'desc'])
+
+    _.forEach(orderedRows, (row, index) => {
+      fallbackRows.push(_.omit({
+        ...row,
+        mostRecent: index === 0
+      }, ['createdAt']))
+    })
+  })
+
+  return fallbackRows
+}
+
+/**
+ * Build transient configured rating path rows from review-api challenge results.
+ * @param {Array<Object>} reviewRows review-api challenge results for the member
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by UUID and legacy ids
+ * @param {Map<string, Object>} ratingPathPairMap configured rating path pairs to synthesize
+ * @returns {Array<Object>} synthesized configured rating path history rows
+ */
+function buildConfiguredRatingPathFallbackRowsFromReviewResults (
+  reviewRows,
+  challengeMetadataById,
+  ratingPathPairMap
+) {
+  const entries = _.chain(reviewRows || [])
+    .filter(isUsableReviewChallengeResultRow)
+    .map(row => ({
+      challenge: challengeMetadataById.get(String(row.challengeId)),
+      createdAt: row.createdAt,
+      placement: toVisiblePlacement(row.placement)
+    }))
+    .value()
+
+  return buildConfiguredRatingPathFallbackRows(entries, ratingPathPairMap)
+}
+
+/**
+ * Build transient configured rating path rows from challenge winner placements.
+ * @param {Array<Object>} winnerRows placement winner rows with embedded challenge metadata
+ * @param {Map<string, Object>} ratingPathPairMap configured rating path pairs to synthesize
+ * @returns {Array<Object>} synthesized configured rating path history rows
+ */
+function buildConfiguredRatingPathFallbackRowsFromChallengeWinners (winnerRows, ratingPathPairMap) {
+  const entries = _.map(winnerRows || [], row => ({
+    challenge: row.challenge,
+    createdAt: row.createdAt,
+    placement: toVisibleChallengeWinnerPlacement(row)
+  }))
+
+  return buildConfiguredRatingPathFallbackRows(entries, ratingPathPairMap)
 }
 
 /**
@@ -3465,14 +3650,25 @@ async function getHistoryStats (currentUser, handle, query) {
       ))
 
       if (unresolvedPairKeys.size > 0 && reviewRows.length > 0) {
+        const ratingPathPairMap = getMissingConfiguredRatingPathPairMap(
+          aggregateRows,
+          dimensionLookup,
+          unresolvedPairKeys
+        )
         const reviewFallbackRows = buildFallbackHistoryRowsFromReviewResults(
           reviewRows,
           challengeMetadataById,
           dimensionLookup,
           unresolvedPairKeys
         )
-        annotatedRows = mergeMissingHistoryRows(annotatedRows, reviewFallbackRows)
-        unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, reviewFallbackRows)
+        const ratingPathFallbackRows = buildConfiguredRatingPathFallbackRowsFromReviewResults(
+          reviewRows,
+          challengeMetadataById,
+          ratingPathPairMap
+        )
+        const fallbackRows = reviewFallbackRows.concat(ratingPathFallbackRows)
+        annotatedRows = mergeMissingHistoryRows(annotatedRows, fallbackRows)
+        unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, fallbackRows)
       }
 
       if (
@@ -3496,8 +3692,13 @@ async function getHistoryStats (currentUser, handle, query) {
           dimensionLookup,
           winnerFallbackPairKeys
         )
-        annotatedRows = mergeMissingHistoryRows(annotatedRows, winnerFallbackRows)
-        unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, winnerFallbackRows)
+        const ratingPathFallbackRows = buildConfiguredRatingPathFallbackRowsFromChallengeWinners(
+          winnerRows,
+          getMissingConfiguredRatingPathPairMap(aggregateRows, dimensionLookup, unresolvedPairKeys)
+        )
+        const fallbackRows = winnerFallbackRows.concat(ratingPathFallbackRows)
+        annotatedRows = mergeMissingHistoryRows(annotatedRows, fallbackRows)
+        unresolvedPairKeys = getUnresolvedHistoryPairKeys(unresolvedPairKeys, fallbackRows)
       }
 
       if (unresolvedPairKeys.size > 0) {

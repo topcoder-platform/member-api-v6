@@ -728,6 +728,116 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should synthesize configured rating path history for matching Data Science challenges', async () => {
+    const ratingDate = new Date('2026-06-17T11:28:39.672Z')
+    const aiChallenge = {
+      id: 'fd3472a8-b4d3-4ccc-ad95-d98937d3451a',
+      name: 'DS Ai',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-challenge-id',
+      endDate: ratingDate,
+      track: { name: 'Data Science' },
+      type: { name: 'Challenge' },
+      tags: ['AI'],
+      skills: [],
+      metadata: []
+    }
+    const nonAiChallenge = {
+      id: '6358e018-88b8-49fa-a0b5-62a9badd98e7',
+      name: 'Missing ch test 3',
+      status: 'COMPLETED',
+      trackId: 'track-ds-id',
+      typeId: 'type-challenge-id',
+      endDate: new Date('2026-05-10T10:00:00.000Z'),
+      track: { name: 'Data Science' },
+      type: { name: 'Challenge' },
+      tags: ['Other'],
+      skills: [],
+      metadata: []
+    }
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [
+        { name: 'AI Engineering', track: 'DATA_SCIENCE', tags: ['AI'] }
+      ],
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findMany: async () => [
+            {
+              trackId: 'track-ds-id',
+              typeId: 'type-challenge-id',
+              challenges: 2,
+              mostRecentSubmission: ratingDate,
+              mostRecentEventDate: ratingDate
+            },
+            {
+              trackId: 'track-ds-id',
+              typeId: 'rating-path-ai-engineering',
+              challenges: 1,
+              mostRecentSubmission: ratingDate,
+              mostRecentEventDate: ratingDate
+            }
+          ]
+        },
+        memberStatsHistory: {
+          findMany: async () => [
+            {
+              trackId: 'track-ds-id',
+              typeId: 'type-challenge-id',
+              challengeId: aiChallenge.id,
+              eventDate: ratingDate,
+              placement: 1,
+              mostRecent: true
+            },
+            {
+              trackId: 'track-ds-id',
+              typeId: 'type-challenge-id',
+              challengeId: nonAiChallenge.id,
+              eventDate: nonAiChallenge.endDate,
+              placement: 1,
+              mostRecent: false
+            }
+          ]
+        }
+      },
+      challengeRows: [aiChallenge, nonAiChallenge],
+      reviewRows: [
+        {
+          challengeId: aiChallenge.id,
+          userId: '88770025',
+          submissionId: 'sub-ds-ai',
+          finalScore: 100,
+          placement: 1,
+          validSubmission: true,
+          createdAt: ratingDate
+        },
+        {
+          challengeId: nonAiChallenge.id,
+          userId: '88770025',
+          submissionId: 'sub-non-ai',
+          finalScore: 95,
+          placement: 1,
+          validSubmission: true,
+          createdAt: nonAiChallenge.endDate
+        }
+      ]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE.Challenge.history.map(row => row.challengeName)
+        .should.deep.equal(['DS Ai', 'Missing ch test 3'])
+      result[0].DATA_SCIENCE['AI Engineering'].history.should.have.length(1)
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].challengeName.should.equal('DS Ai')
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].placement.should.equal(1)
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateMemberStats should route configured rating paths to the Marathon Match engine', async () => {
     let capturedOptions
     const { service, restore } = loadStatisticsService({
