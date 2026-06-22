@@ -4,12 +4,16 @@ const TRACK_NAMES = {
   DEVELOP: 'DEVELOP',
   DESIGN: 'DESIGN',
   DATA_SCIENCE: 'DATA_SCIENCE',
+  QA: 'QA',
   COPILOT: 'COPILOT'
 }
 
 const TYPE_NAMES = {
   CHALLENGE: 'Challenge',
   CODE: 'CODE',
+  BUG_HUNT: 'BUG_HUNT',
+  TEST_SCENARIOS: 'TEST_SCENARIOS',
+  TEST_SUITES: 'TEST_SUITES',
   FIRST2FINISH: 'First2Finish',
   TASK: 'Task',
   SRM: 'SRM',
@@ -46,6 +50,10 @@ function getCanonicalTrackName (value) {
 
   if (normalized.includes('DATA') && normalized.includes('SCIENCE')) {
     return TRACK_NAMES.DATA_SCIENCE
+  }
+
+  if (normalized === 'QA' || (normalized.includes('QUALITY') && normalized.includes('ASSURANCE'))) {
+    return TRACK_NAMES.QA
   }
 
   if (normalized.includes('DEVELOP') || normalized === 'DEV') {
@@ -140,6 +148,9 @@ function buildChallengeDimensionLookup (trackRows, typeRows) {
     addLookupEntry(trackIdsByLookup, row.abbreviation, id)
     addLookupEntry(trackIdsByLookup, row.legacyId, id)
     addLookupEntry(trackIdsByLookup, canonicalTrackName, id)
+    if (canonicalTrackName === TRACK_NAMES.QA) {
+      addLookupEntry(trackIdsByLookup, 'QUALITY_ASSURANCE', id)
+    }
   })
 
   typeRows.forEach((row) => {
@@ -170,11 +181,15 @@ function buildChallengeDimensionLookup (trackRows, typeRows) {
     DEVELOP: resolveTrackIdFromLookup(lookup, TRACK_NAMES.DEVELOP) || null,
     DESIGN: resolveTrackIdFromLookup(lookup, TRACK_NAMES.DESIGN) || null,
     DATA_SCIENCE: resolveTrackIdFromLookup(lookup, TRACK_NAMES.DATA_SCIENCE) || null,
+    QA: resolveTrackIdFromLookup(lookup, TRACK_NAMES.QA) || null,
     COPILOT: resolveTrackIdFromLookup(lookup, TRACK_NAMES.COPILOT) || null
   }
   lookup.typeIds = {
     CHALLENGE: resolveTypeIdFromLookup(lookup, TYPE_NAMES.CHALLENGE) || null,
     CODE: resolveTypeIdFromLookup(lookup, TYPE_NAMES.CODE) || null,
+    BUG_HUNT: resolveTypeIdFromLookup(lookup, TYPE_NAMES.BUG_HUNT) || null,
+    TEST_SCENARIOS: resolveTypeIdFromLookup(lookup, TYPE_NAMES.TEST_SCENARIOS) || null,
+    TEST_SUITES: resolveTypeIdFromLookup(lookup, TYPE_NAMES.TEST_SUITES) || null,
     FIRST2FINISH: resolveTypeIdFromLookup(lookup, TYPE_NAMES.FIRST2FINISH) || null,
     TASK: resolveTypeIdFromLookup(lookup, TYPE_NAMES.TASK) || null,
     SRM: resolveTypeIdFromLookup(lookup, TYPE_NAMES.SRM) || null,

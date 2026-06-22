@@ -365,7 +365,8 @@ function isMarathonMatchTypeId (typeId) {
 /**
  * Normalize challenge metadata dimensions into the public stats dimensions.
  * Marathon Match stats/history belong to DATA_SCIENCE even when the source
- * challenge row was imported with a Development track.
+ * challenge row was imported with a Development track. QA Challenge rows belong
+ * to the first-class QA / Challenge dimension.
  * @param {*} trackId raw ChallengeTrack id
  * @param {*} typeId raw ChallengeType id
  * @returns {Object} normalized trackId/typeId pair
@@ -376,6 +377,20 @@ function normalizeChallengeStatsDimension (trackId, typeId) {
     return {
       trackId: legacyLookupCache.trackIds.DATA_SCIENCE,
       typeId: normalizedTypeId
+    }
+  }
+
+  const trackName = resolveTrackNameFromLookup(legacyLookupCache, trackId)
+  const typeName = resolveTypeNameFromLookup(legacyLookupCache, normalizedTypeId) || resolveTypeName(normalizedTypeId)
+  const normalizedTrackName = normalizeLookupKey(trackName).replace(/[\s-]+/g, '_')
+  if (legacyLookupCache &&
+    (normalizedTrackName === 'QUALITY_ASSURANCE' || normalizedTrackName === 'QA') &&
+    typeName === TYPE_NAMES.CHALLENGE &&
+    legacyLookupCache.trackIds.QA &&
+    legacyLookupCache.typeIds.CHALLENGE) {
+    return {
+      trackId: legacyLookupCache.trackIds.QA,
+      typeId: legacyLookupCache.typeIds.CHALLENGE
     }
   }
 

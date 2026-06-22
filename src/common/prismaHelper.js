@@ -49,6 +49,10 @@ const marathonRankFields = [
   'minimumRating', 'maximumRating', 'countryRank', 'schoolRank', 'defaultLanguage'
 ]
 
+const groupedSubTrackStatsTrackNames = ['DEVELOP', 'DESIGN', 'QA']
+const supportedUnifiedStatsTrackNames = ['DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'QA', 'COPILOT']
+const supportedUnifiedHistoryTrackNames = ['DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'QA']
+
 const auditFields = [
   'createdAt', 'createdBy', 'updatedAt', 'updatedBy'
 ]
@@ -331,8 +335,10 @@ function applyMaxRatingRankFallback (item) {
     return
   }
 
-  if (trackName === 'DEVELOP' && item.DEVELOP && _.isArray(item.DEVELOP.subTracks)) {
-    const statsItem = _.find(item.DEVELOP.subTracks, subTrack =>
+  if ((trackName === 'DEVELOP' || trackName === 'QA') &&
+    item[trackName] &&
+    _.isArray(item[trackName].subTracks)) {
+    const statsItem = _.find(item[trackName].subTracks, subTrack =>
       getUnifiedTypeName(subTrack.id || subTrack.name) === typeName
     )
     if (statsItem) {
@@ -616,7 +622,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
       resolvedTrackName: getUnifiedTrackName(row.trackName || row.trackId),
       resolvedTypeName: getUnifiedTypeName(row.typeName || row.typeId)
     }))
-    .filter(row => _.includes(['DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT'], row.resolvedTrackName))
+    .filter(row => _.includes(supportedUnifiedStatsTrackNames, row.resolvedTrackName))
     .value()
   const first = _.head(validRows) || {}
   const item = {
@@ -635,10 +641,10 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
   _.forEach(validRows, (row) => {
     const trackName = row.resolvedTrackName
     const typeName = row.resolvedTypeName
-    if (trackName === 'DEVELOP') {
+    if (trackName === 'DEVELOP' || trackName === 'QA') {
       const challengeCount = toNumber(row.challenges)
-      if (!item.DEVELOP) {
-        item.DEVELOP = {
+      if (!item[trackName]) {
+        item[trackName] = {
           challenges: 0,
           wins: 0,
           mostRecentSubmission: null,
@@ -646,7 +652,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
           subTracks: []
         }
       }
-      mergeTrackCounters(item.DEVELOP, row)
+      mergeTrackCounters(item[trackName], row)
       const submissionStats = _.omitBy({
         ..._.pick(row, developSubmissionFields),
         ..._.mapValues(_.pick(row, developSubmissionBigIntFields), v => toNumber(v))
@@ -686,7 +692,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
         rank.minRating = row.minRating
       }
       subTrackItem.rank = rank
-      item.DEVELOP.subTracks.push(subTrackItem)
+      item[trackName].subTracks.push(subTrackItem)
     } else if (trackName === 'DESIGN') {
       if (!item.DESIGN) {
         item.DESIGN = {
@@ -815,7 +821,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
       resolvedTrackName: getUnifiedTrackName(row.trackName || row.trackId),
       resolvedTypeName: getUnifiedTypeName(row.typeName || row.typeId)
     }))
-    .filter(row => _.includes(['DEVELOP', 'DESIGN', 'DATA_SCIENCE'], row.resolvedTrackName))
+    .filter(row => _.includes(supportedUnifiedHistoryTrackNames, row.resolvedTrackName))
     .value()
   const first = _.head(validRows) || {}
   const item = {
@@ -828,8 +834,8 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
   const groupedByTrackType = _.groupBy(validRows, row => `${row.resolvedTrackName}::${row.resolvedTypeName}`)
   _.forEach(groupedByTrackType, (trackHistory, key) => {
     const [trackName, typeName] = key.split('::')
-    if (trackName === 'DEVELOP' || trackName === 'DESIGN') {
-      const historyTrackName = trackName === 'DESIGN' ? 'DESIGN' : 'DEVELOP'
+    if (_.includes(groupedSubTrackStatsTrackNames, trackName)) {
+      const historyTrackName = trackName
       if (!item[historyTrackName]) {
         item[historyTrackName] = { subTracks: [] }
       }

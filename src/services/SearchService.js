@@ -49,7 +49,7 @@ const MEMBER_AUTOCOMPLETE_FIELDS = ['userId', 'handle', 'handleLower',
 
 var MEMBER_STATS_FIELDS = ['userId', 'handle', 'handleLower', 'maxRating',
   'numberOfChallengesWon', 'numberOfChallengesPlaced',
-  'challenges', 'wins', 'DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'COPILOT']
+  'challenges', 'wins', 'DEVELOP', 'DESIGN', 'DATA_SCIENCE', 'QA', 'COPILOT']
 
 const SKILL_LEVEL_WEIGHTS = {
   verified: 1.0,

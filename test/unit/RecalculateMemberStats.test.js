@@ -19,13 +19,15 @@ describe('recalculateMemberStats unit tests', () => {
           return [
             { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
             { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
-            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null },
+            { id: 'track-qa-id', name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
           ]
         }
 
         if (query.includes('"ChallengeType"')) {
           return [
             { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-bug-hunt-id', name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
             { id: 'type-f2f-id', name: 'First2Finish', abbreviation: 'F2F', legacyId: null, isTask: false },
             { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
           ]
@@ -41,6 +43,64 @@ describe('recalculateMemberStats unit tests', () => {
     recalculateMemberStats.resolveLegacyDesignTypeId('STUDIO_OTHER', 34).should.equal('type-ch-id')
     recalculateMemberStats.resolveLegacyDesignTypeId('DESIGN_FIRST_2_FINISH', 40).should.equal('type-f2f-id')
     recalculateMemberStats.resolveLegacyDesignTypeId(null, 40).should.equal('type-f2f-id')
+  })
+
+  it('should normalize QA challenge aggregates into the QA bucket', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null },
+            { id: 'track-qa-id', name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-bug-hunt-id', name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const eventDate = new Date('2026-06-15T08:00:00.000Z')
+    const results = recalculateMemberStats.buildAggregatedStatsFromReviewResults(
+      [{
+        challengeId: 'qa-challenge-june-15',
+        userId: global.BigInt(88770025),
+        submissionId: 'submission-1',
+        validSubmission: true,
+        placement: 1,
+        createdAt: new Date('2026-06-15T08:01:00.000Z')
+      }],
+      new Map([[
+        'qa-challenge-june-15',
+        {
+          id: 'qa-challenge-june-15',
+          trackId: 'track-qa-id',
+          typeId: 'type-ch-id',
+          status: 'COMPLETED',
+          endDate: eventDate
+        }
+      ]]),
+      {}
+    )
+
+    results.should.have.length(1)
+    results[0].trackId.should.equal('track-qa-id')
+    results[0].typeId.should.equal('type-ch-id')
+    results[0].challenges.should.equal(1)
+    results[0].wins.should.equal(1)
+    results[0].mostRecentEventDate.should.deep.equal(eventDate)
   })
 
   it('should parse the concurrency option', () => {
