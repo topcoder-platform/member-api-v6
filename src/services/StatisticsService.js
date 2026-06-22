@@ -1266,6 +1266,21 @@ function filterUnifiedHistoryRowsToCompletedChallenges (rows, challengeMetadataB
 }
 
 /**
+ * Check whether a history row belongs to a configured rating path.
+ * Rating-path rows intentionally keep their stored type even when the source
+ * challenge was a native Challenge or Marathon Match event.
+ * @param {Object} row unified history row annotated with stored track/type names
+ * @returns {boolean} true when the row should preserve its stored rating-path dimensions
+ */
+function isConfiguredRatingPathHistoryRow (row) {
+  return !!(
+    getConfiguredRatingPath(config.RATING_PATHS, row && row.typeName) ||
+    getConfiguredRatingPath(config.RATING_PATHS, row && row.typeId) ||
+    getConfiguredRatingPathByTypeId(config.RATING_PATHS, row && row.typeId)
+  )
+}
+
+/**
  * Attach canonical challenge ids and names to unified history rows before shaping
  * the response payload consumed by the profiles UI.
  * @param {Array<Object>} rows unified history rows loaded from members.memberStatsHistory
@@ -1292,7 +1307,7 @@ function enrichUnifiedHistoryRowsWithChallengeMetadata (rows, challengeMetadataB
         : _.get(challenge, 'legacyRecord.legacySystemId')
     )
     const preserveLegacyChallengeId = isLegacyNumericMarathonHistoryRow(row)
-    const dimension = challenge.trackId && challenge.typeId
+    const dimension = !isConfiguredRatingPathHistoryRow(row) && challenge.trackId && challenge.typeId
       ? resolveStatsDimensionForChallengeRow({
         trackId: String(challenge.trackId),
         typeId: String(challenge.typeId)
