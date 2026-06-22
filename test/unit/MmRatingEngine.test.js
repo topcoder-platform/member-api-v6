@@ -689,6 +689,7 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(statsRow.maxRating, expectedTargetState.rating)
     should.equal(statsRow.minRating, expectedTargetState.rating)
     should.equal(statsRow.challenges, 1)
+    should.equal(statsRow.wins, 1)
     should.equal(statsRow.mostRecentEventDate.getTime(), challengeMetadata[challengeId].endDate.getTime())
     should.equal(statsRow.mostRecentSubmission.getTime(), baseReviewRows[0].createdAt.getTime())
     should.equal(maxRatingRow.rating, expectedTargetState.rating)
@@ -2212,6 +2213,8 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
     should.equal(statsRow.challenges, 2)
+    should.equal(statsRow.wins, 2)
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-06-01T10:00:00.000Z').getTime())
     should.equal(statsRow.mostRecentEventDate.getTime(), pathMetadata[targetChallengeId].endDate.getTime())
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTargetState.rating)
@@ -2315,7 +2318,15 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(result.ratingsUpdated, 1)
     should.equal(findHistoryRow(state.historyRows, targetUserId, invalidChallengeId), undefined)
 
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === AI_RATING_TYPE_ID
+    )
     const historyRow = findHistoryRow(state.historyRows, targetUserId, validChallengeId)
+    should.equal(statsRow.challenges, 1)
+    should.equal(statsRow.wins, 1)
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-06-01T09:00:00.000Z').getTime())
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
@@ -2479,6 +2490,8 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
     should.equal(statsRow.challenges, 2)
+    should.equal(statsRow.wins, 2)
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-06-01T10:00:00.000Z').getTime())
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTargetState.rating)
     should.equal(historyRow.placement, 1)

@@ -1096,6 +1096,40 @@ function buildHistoryResultFields (participants, targetUserKey, sourceRow) {
 }
 
 /**
+ * Resolve the timestamp used as the latest submission marker for a rating-path
+ * source row. Development Challenge rows come from challengeResult and Marathon
+ * Match rows come from review summations, so both use their source createdAt as
+ * the closest persisted participation timestamp.
+ * @param {Object} sourceRow target participant source row
+ * @param {Object} historyEntry rating path challenge entry
+ * @returns {Date|null} normalized submission timestamp when available
+ */
+function resolveRatingPathSubmissionDate (sourceRow, historyEntry) {
+  return normalizeDate(
+    sourceRow && sourceRow.createdAt,
+    historyEntry && historyEntry.eventDate
+  )
+}
+
+/**
+ * Return the later of two nullable dates.
+ * @param {Date|null|undefined} currentDate previously selected date
+ * @param {Date|null|undefined} candidateDate candidate date
+ * @returns {Date|null|undefined} latest date, preserving empty values when both are empty
+ */
+function maxDate (currentDate, candidateDate) {
+  if (!candidateDate) {
+    return currentDate
+  }
+
+  if (!currentDate || candidateDate > currentDate) {
+    return candidateDate
+  }
+
+  return currentDate
+}
+
+/**
  * Fetch all final Marathon Match system results for the target member.
  * The reviewSummation table is submission-scoped, so the latest final summation
  * per submission is selected before replay history is built. Deleted
@@ -1439,7 +1473,8 @@ function buildTargetHistory (mmResultRows, challengeMetadataById, ratingPath) {
       reviewChallengeIds: buildReviewChallengeIds(challenge, row.challengeId),
       createdAt: scoreDate,
       endDate: normalizeDate(challenge.endDate, scoreDate),
-      eventDate
+      eventDate,
+      placement: toOptionalPlacement(row.placement)
     })
   })
 
@@ -2116,7 +2151,9 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
   const dimensionIds = await resolveUnifiedDimensionIds(challengeClient, ratingPath)
   const stateByUserId = new Map()
   let targetChallengeCount = 0
+  let targetWinCount = 0
   let targetMostRecentEventDate
+  let targetMostRecentSubmission
   let challengesProcessed = 0
   let ratingPathChallengesProcessed = 0
   let ratingsUpdated = 0
@@ -2183,6 +2220,13 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
       targetUserKey,
       participantRowsByUserId.get(targetUserKey)
     )
+    if (targetHistoryFields.placement === 1) {
+      targetWinCount += 1
+    }
+    targetMostRecentSubmission = maxDate(
+      targetMostRecentSubmission,
+      resolveRatingPathSubmissionDate(participantRowsByUserId.get(targetUserKey), historyEntry)
+    )
 
     if (index < startIndex) {
       continue
@@ -2199,6 +2243,8 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
         dimensionIds,
         {
           challenges: targetChallengeCount,
+          wins: targetWinCount,
+          mostRecentSubmission: targetMostRecentSubmission,
           mostRecentEventDate: targetMostRecentEventDate,
           maxRating: targetRatingBounds.maxRating,
           minRating: targetRatingBounds.minRating
@@ -2300,8 +2346,12 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
 
   const dimensionIds = await resolveUnifiedDimensionIds(challengeClient)
   const latestTargetHistoryEntry = targetHistory[targetHistory.length - 1]
+  const targetHistoryHasPlacements = targetHistory.some((entry) => entry.placement)
   const targetAggregateFields = {
     challenges: targetHistory.length,
+    ...(targetHistoryHasPlacements ? {
+      wins: targetHistory.filter((entry) => entry.placement === 1).length
+    } : {}),
     mostRecentEventDate: latestTargetHistoryEntry.eventDate,
     mostRecentSubmission: latestTargetHistoryEntry.createdAt
   }

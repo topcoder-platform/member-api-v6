@@ -695,6 +695,61 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getMemberStats should hydrate missing configured rating path wins from history placements', async () => {
+    let historyFindManyArgs
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [
+        { name: 'AI Engineering', track: 'DATA_SCIENCE', tags: ['AI', 'AI Exponential League'] }
+      ],
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findMany: async () => [
+            {
+              trackId: 'track-ds-id',
+              typeId: 'rating-path-ai-engineering',
+              challenges: 4,
+              wins: null,
+              rating: 1517,
+              globalRank: 4,
+              volatility: 331,
+              mostRecentEventDate: new Date('2024-06-01T00:00:00.000Z'),
+              isPrivate: false
+            }
+          ]
+        },
+        memberStatsHistory: {
+          findMany: async (args) => {
+            historyFindManyArgs = args
+            return [
+              { trackId: 'track-ds-id', typeId: 'rating-path-ai-engineering', placement: 1 },
+              { trackId: 'track-ds-id', typeId: 'rating-path-ai-engineering', placement: 1 },
+              { trackId: 'track-ds-id', typeId: 'rating-path-ai-engineering', placement: 2 }
+            ]
+          }
+        }
+      }
+    })
+
+    try {
+      const result = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE['AI Engineering'].wins.should.equal(2)
+      result[0].DATA_SCIENCE['AI Engineering'].submissions.should.deep.equal({ submissions: 4 })
+      historyFindManyArgs.where.should.deep.equal({
+        userId: global.BigInt(88770025),
+        placement: 1,
+        OR: [{
+          trackId: 'track-ds-id',
+          typeId: 'rating-path-ai-engineering'
+        }]
+      })
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateMemberStats should route configured rating paths to the Marathon Match engine', async () => {
     let capturedOptions
     const { service, restore } = loadStatisticsService({
