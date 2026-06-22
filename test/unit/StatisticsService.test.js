@@ -728,6 +728,66 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getHistoryStats should preserve configured rating path dimensions after challenge metadata enrichment', async () => {
+    const ratingDate = new Date('2026-06-18T05:41:34.931Z')
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [
+        { name: 'AI Engineering', track: 'DATA_SCIENCE', tags: ['AI', 'AI Exponential League'] }
+      ],
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'rating-path-ai-engineering',
+            challenges: 1,
+            mostRecentEventDate: ratingDate
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'rating-path-ai-engineering',
+            challengeId: 'ai-history-challenge',
+            challengeName: null,
+            newRating: 840,
+            eventDate: ratingDate,
+            placement: 1,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [{
+        id: 'ai-history-challenge',
+        legacyId: null,
+        name: 'AI Engineering Challenge',
+        status: 'COMPLETED',
+        trackId: 'track-dev-id',
+        typeId: 'type-challenge-id',
+        endDate: ratingDate,
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        metadata: [],
+        legacyRecord: null
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      should.exist(result[0].DATA_SCIENCE['AI Engineering'])
+      result[0].DATA_SCIENCE['AI Engineering'].history.should.have.length(1)
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].challengeId.should.equal('ai-history-challenge')
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].challengeName.should.equal('AI Engineering Challenge')
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].newRating.should.equal(840)
+      should.not.exist(result[0].DEVELOP)
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateMemberStats should route configured rating paths to the Marathon Match engine', async () => {
     let capturedOptions
     const { service, restore } = loadStatisticsService({
