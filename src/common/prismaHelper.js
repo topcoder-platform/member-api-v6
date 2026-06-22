@@ -653,6 +653,13 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
         }
       }
       mergeTrackCounters(item[trackName], row)
+      const submissionStats = _.omitBy({
+        ..._.pick(row, developSubmissionFields),
+        ..._.mapValues(_.pick(row, developSubmissionBigIntFields), v => toNumber(v))
+      }, _.isNil)
+      if (_.isNil(submissionStats.submissions)) {
+        submissionStats.submissions = challengeCount
+      }
       const subTrackItem = {
         id: typeName,
         name: typeName,
@@ -660,11 +667,7 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
         wins: toNumber(row.wins),
         mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
         mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
-        // Unified stats do not persist legacy submission counters, but each counted
-        // development challenge necessarily represents one submission-level result.
-        submissions: {
-          submissions: challengeCount
-        }
+        submissions: submissionStats
       }
       const rank = {}
       if (!_.isNil(row.rating)) {
@@ -742,6 +745,9 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
           wins: toNumber(row.wins),
           mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
           mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
+          submissions: {
+            submissions: toNumber(row.challenges)
+          },
           rank: _.omitBy({
             rating: row.rating,
             rank: row.globalRank,
@@ -764,6 +770,9 @@ function buildUnifiedStatsResponse (member, statsData, fields) {
           wins: toNumber(row.wins),
           mostRecentSubmission: toUnixTime(row.mostRecentSubmission),
           mostRecentEventDate: toUnixTime(row.mostRecentEventDate),
+          submissions: {
+            submissions: toNumber(row.challenges)
+          },
           rank: _.omitBy({
             rating: row.rating,
             rank: row.globalRank,

@@ -113,6 +113,42 @@ describe('stats dimension helper unit tests', () => {
     result.DEVELOP.subTracks[0].rank.should.deep.equal({})
   })
 
+  it('buildUnifiedStatsResponse should prefer actual legacy develop submission counters', () => {
+    const result = prismaHelper.buildUnifiedStatsResponse(
+      {
+        userId: global.BigInt(40612623),
+        handle: 'cagdas001',
+        handleLower: 'cagdas001',
+        maxRating: null
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-dev-id',
+          typeId: 'type-code-id',
+          trackName: TRACK_NAMES.DEVELOP,
+          typeName: 'CODE',
+          challenges: 172,
+          wins: 10,
+          submissions: 43,
+          numInquiries: 172,
+          passedReview: 33,
+          submissionRate: 0.25,
+          mostRecentSubmission: null,
+          mostRecentEventDate: null
+        }
+      ]
+    )
+
+    result.DEVELOP.subTracks.should.have.length(1)
+    result.DEVELOP.subTracks[0].submissions.should.deep.include({
+      submissions: 43,
+      numInquiries: 172,
+      passedReview: 33,
+      submissionRate: 0.25
+    })
+  })
+
   it('buildUnifiedStatsResponse should expose custom data science rating paths', () => {
     const result = prismaHelper.buildUnifiedStatsResponse(
       {
@@ -141,6 +177,7 @@ describe('stats dimension helper unit tests', () => {
     should.exist(result.DATA_SCIENCE)
     should.exist(result.DATA_SCIENCE.AI)
     result.DATA_SCIENCE.AI.challenges.should.equal(3)
+    result.DATA_SCIENCE.AI.submissions.should.deep.equal({ submissions: 3 })
     result.DATA_SCIENCE.AI.rank.should.deep.equal({
       rating: 1422,
       volatility: 331
@@ -216,6 +253,7 @@ describe('stats dimension helper unit tests', () => {
     should.exist(result.DATA_SCIENCE)
     should.exist(result.DATA_SCIENCE['AI Engineering'])
     should.not.exist(result.DATA_SCIENCE['rating-path-ai-engineering'])
+    result.DATA_SCIENCE['AI Engineering'].submissions.should.deep.equal({ submissions: 3 })
     result.DATA_SCIENCE['AI Engineering'].rank.should.deep.equal({
       rating: 1517,
       volatility: 331
