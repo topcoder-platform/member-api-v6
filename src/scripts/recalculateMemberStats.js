@@ -365,7 +365,8 @@ function isMarathonMatchTypeId (typeId) {
 /**
  * Normalize challenge metadata dimensions into the public stats dimensions.
  * Marathon Match stats/history belong to DATA_SCIENCE even when the source
- * challenge row was imported with a Development track.
+ * challenge row was imported with a Development track. QA Challenge rows belong
+ * to the first-class QA / Challenge dimension.
  * @param {*} trackId raw ChallengeTrack id
  * @param {*} typeId raw ChallengeType id
  * @returns {Object} normalized trackId/typeId pair
@@ -376,6 +377,20 @@ function normalizeChallengeStatsDimension (trackId, typeId) {
     return {
       trackId: legacyLookupCache.trackIds.DATA_SCIENCE,
       typeId: normalizedTypeId
+    }
+  }
+
+  const trackName = resolveTrackNameFromLookup(legacyLookupCache, trackId)
+  const typeName = resolveTypeNameFromLookup(legacyLookupCache, normalizedTypeId) || resolveTypeName(normalizedTypeId)
+  const normalizedTrackName = normalizeLookupKey(trackName).replace(/[\s-]+/g, '_')
+  if (legacyLookupCache &&
+    (normalizedTrackName === 'QUALITY_ASSURANCE' || normalizedTrackName === 'QA') &&
+    typeName === TYPE_NAMES.CHALLENGE &&
+    legacyLookupCache.trackIds.QA &&
+    legacyLookupCache.typeIds.CHALLENGE) {
+    return {
+      trackId: legacyLookupCache.trackIds.QA,
+      typeId: legacyLookupCache.typeIds.CHALLENGE
     }
   }
 
@@ -695,6 +710,83 @@ function mergeAggregateRecord (lookup, record) {
     (!existing.mostRecentSubmission || record.mostRecentSubmission > existing.mostRecentSubmission)) {
     existing.mostRecentSubmission = record.mostRecentSubmission
   }
+}
+
+/**
+ * Normalize a legacy snapshot id for deterministic newest-row comparisons.
+ * @param {*} value raw memberStats or child row id value
+ * @returns {BigInt} normalized id, or zero when the source row did not expose one
+ */
+function toLegacySnapshotSortId (value) {
+  if (value === null || value === undefined || value === '') {
+    return global.BigInt(0)
+  }
+
+  return normalizeBigInt(value, 'legacy snapshot id')
+}
+
+/**
+ * Determine whether a candidate legacy aggregate row is newer than the selected row.
+ * Parent memberStats id wins first because duplicate legacy imports create a new
+ * parent snapshot; child row id is a stable tie-breaker within the same parent.
+ * @param {Object} candidate candidate legacy aggregate row
+ * @param {Object} selected currently selected legacy aggregate row
+ * @returns {boolean} true when candidate should replace selected
+ */
+function isNewerLegacyAggregateRow (candidate, selected) {
+  const candidateParentId = toLegacySnapshotSortId(candidate.memberStatsId)
+  const selectedParentId = toLegacySnapshotSortId(selected.memberStatsId)
+
+  if (candidateParentId !== selectedParentId) {
+    return candidateParentId > selectedParentId
+  }
+
+  return toLegacySnapshotSortId(candidate.legacyRowId) > toLegacySnapshotSortId(selected.legacyRowId)
+}
+
+/**
+ * Keep the latest legacy aggregate snapshot for each source child dimension.
+ * Duplicate public memberStats parents can contain identical legacy child rows;
+ * summing those snapshots doubles counters. The key builder must include the
+ * source child dimension, not only the final unified track/type, because some
+ * distinct legacy subtracks intentionally collapse into one public API type.
+ * @param {Array<Object>} rows raw legacy aggregate rows from one source table
+ * @param {Function} keyBuilder builds the source child dimension key for a row
+ * @returns {Array<Object>} latest aggregate rows per source child dimension
+ */
+function selectLatestLegacyAggregateRows (rows, keyBuilder) {
+  const selectedByKey = new Map()
+  const sourceRows = rows || []
+
+  sourceRows.forEach((row) => {
+    const key = keyBuilder(row)
+    if (!key) {
+      return
+    }
+
+    const selected = selectedByKey.get(key)
+    if (!selected || isNewerLegacyAggregateRow(row, selected)) {
+      selectedByKey.set(key, row)
+    }
+  })
+
+  return Array.from(selectedByKey.values())
+}
+
+/**
+ * Build a source child dimension key for deduping legacy subtrack aggregates.
+ * @param {Object} row raw legacy aggregate row
+ * @param {string} source legacy source category
+ * @returns {string} key scoped by user, source table, and source child dimension
+ */
+function buildLegacyChildAggregateKey (row, source) {
+  const userKey = row && row.userId !== undefined && row.userId !== null
+    ? normalizeBigInt(row.userId, 'user id').toString()
+    : ''
+  const subTrackKey = normalizeLookupKey(row && row.subTrackId)
+  const nameKey = normalizeLookupKey(row && row.name)
+
+  return `${userKey}::${source}::${subTrackKey || nameKey}::${nameKey}`
 }
 
 function getAggregateLookupForUser (aggregateLookupsByUserId, userId) {
@@ -1152,6 +1244,8 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
@@ -1171,6 +1265,8 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
@@ -1190,6 +1286,8 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        ds."memberStatsId" AS "memberStatsId",
+        srm."id" AS "legacyRowId",
         srm."challenges" AS "challenges",
         srm."wins" AS "wins",
         srm."mostRecentSubmission" AS "mostRecentSubmission",
@@ -1207,6 +1305,8 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        ds."memberStatsId" AS "memberStatsId",
+        marathon."id" AS "legacyRowId",
         marathon."challenges" AS "challenges",
         marathon."wins" AS "wins",
         marathon."mostRecentSubmission" AS "mostRecentSubmission",
@@ -1222,7 +1322,10 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   ])
 
-  developRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    developRows,
+    row => buildLegacyChildAggregateKey(row, 'develop')
+  ).forEach((row) => {
     const typeId = resolveChallengeTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy develop aggregate row for user ${row.userId} and subTrack ${row.name || row.subTrackId}`)
@@ -1236,7 +1339,10 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   })
 
-  designRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    designRows,
+    row => buildLegacyChildAggregateKey(row, 'design')
+  ).forEach((row) => {
     const typeId = resolveLegacyDesignTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy design aggregate row for user ${row.userId} and subTrack ${row.name || row.subTrackId}`)
@@ -1250,7 +1356,10 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   })
 
-  srmRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    srmRows,
+    row => `${normalizeBigInt(row.userId, 'user id').toString()}::srm`
+  ).forEach((row) => {
     const typeId = legacyLookupCache.typeIds.SRM || resolveChallengeTypeId(TYPE_NAMES.SRM)
     if (!typeId) {
       logWarn(`Skipping legacy SRM aggregate row for user ${row.userId} because the SRM type id could not be resolved`)
@@ -1264,7 +1373,10 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   })
 
-  marathonRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    marathonRows,
+    row => `${normalizeBigInt(row.userId, 'user id').toString()}::marathon`
+  ).forEach((row) => {
     const typeId = legacyLookupCache.typeIds.MARATHON_MATCH || resolveChallengeTypeId(TYPE_NAMES.MARATHON_MATCH)
     if (!typeId) {
       logWarn(`Skipping legacy marathon aggregate row for user ${row.userId} because the marathon type id could not be resolved`)
@@ -1307,6 +1419,8 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
@@ -1323,6 +1437,8 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
@@ -1339,6 +1455,8 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        ds."memberStatsId" AS "memberStatsId",
+        srm."id" AS "legacyRowId",
         srm."challenges" AS "challenges",
         srm."wins" AS "wins",
         srm."mostRecentSubmission" AS "mostRecentSubmission",
@@ -1353,6 +1471,8 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        ds."memberStatsId" AS "memberStatsId",
+        marathon."id" AS "legacyRowId",
         marathon."challenges" AS "challenges",
         marathon."wins" AS "wins",
         marathon."mostRecentSubmission" AS "mostRecentSubmission",
@@ -1366,7 +1486,10 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   ])
 
-  developRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    developRows,
+    row => buildLegacyChildAggregateKey(row, 'develop')
+  ).forEach((row) => {
     const typeId = resolveChallengeTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy develop aggregate row for user ${userId.toString()} and subTrack ${row.name || row.subTrackId}`)
@@ -1379,7 +1502,10 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   })
 
-  designRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    designRows,
+    row => buildLegacyChildAggregateKey(row, 'design')
+  ).forEach((row) => {
     const typeId = resolveLegacyDesignTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy design aggregate row for user ${userId.toString()} and subTrack ${row.name || row.subTrackId}`)
@@ -1392,7 +1518,10 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   })
 
-  srmRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    srmRows,
+    () => 'srm'
+  ).forEach((row) => {
     const typeId = legacyLookupCache.typeIds.SRM || resolveChallengeTypeId(TYPE_NAMES.SRM)
     if (!typeId) {
       logWarn(`Skipping legacy SRM aggregate row for user ${userId.toString()} because the SRM type id could not be resolved`)
@@ -1405,7 +1534,10 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   })
 
-  marathonRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    marathonRows,
+    () => 'marathon'
+  ).forEach((row) => {
     const typeId = legacyLookupCache.typeIds.MARATHON_MATCH || resolveChallengeTypeId(TYPE_NAMES.MARATHON_MATCH)
     if (!typeId) {
       logWarn(`Skipping legacy marathon aggregate row for user ${userId.toString()} because the marathon type id could not be resolved`)
@@ -4038,6 +4170,7 @@ module.exports = {
   parseArgs,
   getUserIds,
   getExistingMemberUserIdSet,
+  aggregateLegacyStatsForUser,
   aggregateStatsForUser,
   initializeLegacyLookupCache,
   fetchLegacyRatingFields,

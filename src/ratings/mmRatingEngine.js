@@ -40,10 +40,14 @@ const TRACK_NAME = 'DATA_SCIENCE'
 const TYPE_NAME = 'MARATHON_MATCH'
 const CHALLENGE_TYPE_NAME = 'MARATHON_MATCH'
 const DEVELOPMENT_CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
+const DATA_SCIENCE_CHALLENGE_TRACK_NAME = 'DATA_SCIENCE'
+const QUALITY_ASSURANCE_CHALLENGE_TRACK_NAME = 'QUALITY_ASSURANCE'
 const DEVELOPMENT_CHALLENGE_TYPE_NAME = 'Challenge'
 const RERATE_ACTOR = 'rerate-mm-stats'
 const SCORE_DIRECTION_MINIMIZE = 'MINIMIZE'
 const RATING_PATH_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
+const RATING_PATH_SOURCE_DATA_SCIENCE_CHALLENGE = 'DATA_SCIENCE_CHALLENGE'
+const RATING_PATH_SOURCE_QUALITY_ASSURANCE_CHALLENGE = 'QUALITY_ASSURANCE_CHALLENGE'
 const RATING_PATH_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
 const VALID_MM_SUBMISSION_STATUSES = ['ACTIVE', 'COMPLETED_WITHOUT_WIN', 'FAILED_REVIEW']
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
@@ -768,6 +772,37 @@ function isDevelopmentChallenge (challenge) {
 }
 
 /**
+ * Resolve whether challenge metadata belongs to the Data Science Challenge source.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge uses the Data Science Challenge rating source
+ */
+function isDataScienceChallenge (challenge) {
+  return !!(
+    challenge &&
+    challenge.track &&
+    challenge.type &&
+    normalizeChallengeDimension(challenge.track.name) === DATA_SCIENCE_CHALLENGE_TRACK_NAME &&
+    normalizeChallengeDimension(challenge.type.name) === normalizeChallengeDimension(DEVELOPMENT_CHALLENGE_TYPE_NAME)
+  )
+}
+
+/**
+ * Resolve whether challenge metadata belongs to the Quality Assurance Challenge source.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge uses the QA Challenge rating source
+ */
+function isQualityAssuranceChallenge (challenge) {
+  const trackName = normalizeChallengeDimension(challenge && challenge.track && challenge.track.name)
+  return !!(
+    challenge &&
+    challenge.track &&
+    challenge.type &&
+    (trackName === QUALITY_ASSURANCE_CHALLENGE_TRACK_NAME || trackName === 'QA') &&
+    normalizeChallengeDimension(challenge.type.name) === normalizeChallengeDimension(DEVELOPMENT_CHALLENGE_TYPE_NAME)
+  )
+}
+
+/**
  * Resolve the supported rating source for a tagged challenge path event.
  * @param {Object} challenge challenge metadata record
  * @returns {string|null} rating path source name or null when unsupported
@@ -777,11 +812,30 @@ function resolveRatingPathSource (challenge) {
     return RATING_PATH_SOURCE_DEVELOPMENT
   }
 
+  if (isDataScienceChallenge(challenge)) {
+    return RATING_PATH_SOURCE_DATA_SCIENCE_CHALLENGE
+  }
+
+  if (isQualityAssuranceChallenge(challenge)) {
+    return RATING_PATH_SOURCE_QUALITY_ASSURANCE_CHALLENGE
+  }
+
   if (isMarathonMatchChallenge(challenge)) {
     return RATING_PATH_SOURCE_MARATHON_MATCH
   }
 
   return null
+}
+
+/**
+ * Determine whether a rating path source reads challengeResult rows.
+ * @param {string} source rating path source identifier
+ * @returns {boolean} true when participant rows use userId/finalScore/placement
+ */
+function isChallengeResultRatingPathSource (source) {
+  return source === RATING_PATH_SOURCE_DEVELOPMENT ||
+    source === RATING_PATH_SOURCE_DATA_SCIENCE_CHALLENGE ||
+    source === RATING_PATH_SOURCE_QUALITY_ASSURANCE_CHALLENGE
 }
 
 /**
@@ -832,7 +886,7 @@ function normalizeScore (row, scoringConfig, options = {}) {
 }
 
 /**
- * Normalize one Development Challenge score for Qubits ordering.
+ * Normalize one challengeResult score for Qubits ordering.
  * @param {Object} row challengeResult participant row
  * @returns {number} normalized Qubits score
  */
@@ -851,7 +905,7 @@ function normalizeDevelopmentScore (row) {
 }
 
 /**
- * Resolve whether a Development Challenge participant should count toward rerating.
+ * Resolve whether a challengeResult participant should count toward rerating.
  * Invalid zero-score backfill rows represent non-submissions and must not enter
  * the Qubits participant pool. Passed and failed review rows remain eligible
  * when they carry a positive score or a positive placement.
@@ -1096,6 +1150,39 @@ function buildHistoryResultFields (participants, targetUserKey, sourceRow) {
 }
 
 /**
+ * Resolve the timestamp used as the latest submission marker for a rating-path
+ * source row. Challenge-result-backed rows and Marathon Match rows both use
+ * their source createdAt as the closest persisted participation timestamp.
+ * @param {Object} sourceRow target participant source row
+ * @param {Object} historyEntry rating path challenge entry
+ * @returns {Date|null} normalized submission timestamp when available
+ */
+function resolveRatingPathSubmissionDate (sourceRow, historyEntry) {
+  return normalizeDate(
+    sourceRow && sourceRow.createdAt,
+    historyEntry && historyEntry.eventDate
+  )
+}
+
+/**
+ * Return the later of two nullable dates.
+ * @param {Date|null|undefined} currentDate previously selected date
+ * @param {Date|null|undefined} candidateDate candidate date
+ * @returns {Date|null|undefined} latest date, preserving empty values when both are empty
+ */
+function maxDate (currentDate, candidateDate) {
+  if (!candidateDate) {
+    return currentDate
+  }
+
+  if (!currentDate || candidateDate > currentDate) {
+    return candidateDate
+  }
+
+  return currentDate
+}
+
+/**
  * Fetch all final Marathon Match system results for the target member.
  * The reviewSummation table is submission-scoped, so the latest final summation
  * per submission is selected before replay history is built. Deleted
@@ -1293,7 +1380,7 @@ async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
 }
 
 /**
- * Fetch all scored Development Challenge participants from challengeResult.
+ * Fetch all scored Challenge participants from challengeResult.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string} challengeId challenge identifier
  * @returns {Promise<Array<Object>>} eligible participant rows
@@ -1439,7 +1526,8 @@ function buildTargetHistory (mmResultRows, challengeMetadataById, ratingPath) {
       reviewChallengeIds: buildReviewChallengeIds(challenge, row.challengeId),
       createdAt: scoreDate,
       endDate: normalizeDate(challenge.endDate, scoreDate),
-      eventDate
+      eventDate,
+      placement: toOptionalPlacement(row.placement)
     })
   })
 
@@ -1930,9 +2018,9 @@ function buildRatingPathChallengeWhere (ratingPath) {
  * Load completed, rated challenges that belong to a configured rating path.
  * The Challenge API stores tags on the challenge row and skill links in
  * ChallengeSkill rows, while rated state is kept in metadata for some historical
- * imports. Supported sources are Development / Challenge and DATA_SCIENCE /
- * MARATHON_MATCH. Entries include canonical and legacy challenge id aliases for
- * review-api lookups.
+ * imports. Supported sources are Development / Challenge, DATA_SCIENCE /
+ * Challenge, QA / Challenge, and DATA_SCIENCE / MARATHON_MATCH. Entries include
+ * canonical and legacy challenge id aliases for review-api lookups.
  * @param {Object} challengeClient prisma challenge client
  * @param {Object} ratingPath normalized rating path config
  * @returns {Promise<Array<Object>>} ordered challenge entries for the rating path
@@ -2031,7 +2119,7 @@ async function fetchRatingPathHistory (challengeClient, ratingPath) {
 async function fetchRatingPathParticipantsForChallenge (reviewDbClient, maybeMmDbClientOrHistoryEntry, maybeHistoryEntry) {
   const historyEntry = maybeHistoryEntry || maybeMmDbClientOrHistoryEntry
 
-  if (historyEntry.source === RATING_PATH_SOURCE_DEVELOPMENT) {
+  if (isChallengeResultRatingPathSource(historyEntry.source)) {
     return {
       participantRows: await fetchDevelopmentParticipantsForChallenge(reviewDbClient, historyEntry.challengeId),
       scoringConfig: null
@@ -2067,7 +2155,7 @@ function resolveRatingPathParticipantId (row, source) {
  * @returns {number} normalized Qubits score
  */
 function normalizeRatingPathScore (row, source, scoringConfig, options = {}) {
-  if (source === RATING_PATH_SOURCE_DEVELOPMENT) {
+  if (isChallengeResultRatingPathSource(source)) {
     return normalizeDevelopmentScore(row)
   }
 
@@ -2116,7 +2204,9 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
   const dimensionIds = await resolveUnifiedDimensionIds(challengeClient, ratingPath)
   const stateByUserId = new Map()
   let targetChallengeCount = 0
+  let targetWinCount = 0
   let targetMostRecentEventDate
+  let targetMostRecentSubmission
   let challengesProcessed = 0
   let ratingPathChallengesProcessed = 0
   let ratingsUpdated = 0
@@ -2183,6 +2273,13 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
       targetUserKey,
       participantRowsByUserId.get(targetUserKey)
     )
+    if (targetHistoryFields.placement === 1) {
+      targetWinCount += 1
+    }
+    targetMostRecentSubmission = maxDate(
+      targetMostRecentSubmission,
+      resolveRatingPathSubmissionDate(participantRowsByUserId.get(targetUserKey), historyEntry)
+    )
 
     if (index < startIndex) {
       continue
@@ -2199,6 +2296,8 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
         dimensionIds,
         {
           challenges: targetChallengeCount,
+          wins: targetWinCount,
+          mostRecentSubmission: targetMostRecentSubmission,
           mostRecentEventDate: targetMostRecentEventDate,
           maxRating: targetRatingBounds.maxRating,
           minRating: targetRatingBounds.minRating
@@ -2300,8 +2399,12 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
 
   const dimensionIds = await resolveUnifiedDimensionIds(challengeClient)
   const latestTargetHistoryEntry = targetHistory[targetHistory.length - 1]
+  const targetHistoryHasPlacements = targetHistory.some((entry) => entry.placement)
   const targetAggregateFields = {
     challenges: targetHistory.length,
+    ...(targetHistoryHasPlacements ? {
+      wins: targetHistory.filter((entry) => entry.placement === 1).length
+    } : {}),
     mostRecentEventDate: latestTargetHistoryEntry.eventDate,
     mostRecentSubmission: latestTargetHistoryEntry.createdAt
   }

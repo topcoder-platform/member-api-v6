@@ -23,7 +23,8 @@ describe('stats dimension helper unit tests', () => {
       [
         { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
         { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
-        { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+        { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null },
+        { id: 'track-qa-id', name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
       ],
       [
         { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
@@ -35,10 +36,12 @@ describe('stats dimension helper unit tests', () => {
 
     resolveTrackIdFromLookup(lookup, 'DEVELOP').should.equal('track-dev-id')
     resolveTrackIdFromLookup(lookup, 'track-design-id').should.equal('track-design-id')
+    resolveTrackIdFromLookup(lookup, 'QUALITY_ASSURANCE').should.equal('track-qa-id')
     resolveTypeIdFromLookup(lookup, 'CH').should.equal('type-ch-id')
     resolveTypeIdFromLookup(lookup, TYPE_NAMES.TASK).should.equal('type-task-id')
     resolveTypeIdFromLookup(lookup, 118).should.equal('type-hidden-id')
     resolveTrackNameFromLookup(lookup, 'track-ds-id').should.equal(TRACK_NAMES.DATA_SCIENCE)
+    resolveTrackNameFromLookup(lookup, 'track-qa-id').should.equal(TRACK_NAMES.QA)
     resolveTypeNameFromLookup(lookup, 'type-hidden-id').should.equal('ARCHITECTURE')
     resolveTypeNameFromLookup(lookup, 'type-mm-id').should.equal(TYPE_NAMES.MARATHON_MATCH)
   })
@@ -110,6 +113,42 @@ describe('stats dimension helper unit tests', () => {
     result.DEVELOP.subTracks[0].rank.should.deep.equal({})
   })
 
+  it('buildUnifiedStatsResponse should prefer actual legacy develop submission counters', () => {
+    const result = prismaHelper.buildUnifiedStatsResponse(
+      {
+        userId: global.BigInt(40612623),
+        handle: 'cagdas001',
+        handleLower: 'cagdas001',
+        maxRating: null
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-dev-id',
+          typeId: 'type-code-id',
+          trackName: TRACK_NAMES.DEVELOP,
+          typeName: 'CODE',
+          challenges: 172,
+          wins: 10,
+          submissions: 43,
+          numInquiries: 172,
+          passedReview: 33,
+          submissionRate: 0.25,
+          mostRecentSubmission: null,
+          mostRecentEventDate: null
+        }
+      ]
+    )
+
+    result.DEVELOP.subTracks.should.have.length(1)
+    result.DEVELOP.subTracks[0].submissions.should.deep.include({
+      submissions: 43,
+      numInquiries: 172,
+      passedReview: 33,
+      submissionRate: 0.25
+    })
+  })
+
   it('buildUnifiedStatsResponse should expose custom data science rating paths', () => {
     const result = prismaHelper.buildUnifiedStatsResponse(
       {
@@ -138,6 +177,7 @@ describe('stats dimension helper unit tests', () => {
     should.exist(result.DATA_SCIENCE)
     should.exist(result.DATA_SCIENCE.AI)
     result.DATA_SCIENCE.AI.challenges.should.equal(3)
+    result.DATA_SCIENCE.AI.submissions.should.deep.equal({ submissions: 3 })
     result.DATA_SCIENCE.AI.rank.should.deep.equal({
       rating: 1422,
       volatility: 331
@@ -147,6 +187,42 @@ describe('stats dimension helper unit tests', () => {
       track: TRACK_NAMES.DATA_SCIENCE,
       subTrack: 'AI',
       ratingColor: '#616BD5'
+    })
+  })
+
+  it('buildUnifiedStatsResponse should expose QA stats as a subtrack group', () => {
+    const result = prismaHelper.buildUnifiedStatsResponse(
+      {
+        userId: global.BigInt(88770025),
+        handle: 'devtest1400',
+        handleLower: 'devtest1400',
+        maxRating: null
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-qa-id',
+          typeId: 'type-ch-id',
+          trackName: TRACK_NAMES.QA,
+          typeName: TYPE_NAMES.CHALLENGE,
+          challenges: 1,
+          wins: 1,
+          rating: 1400,
+          volatility: 385,
+          mostRecentSubmission: new Date('2026-06-15T08:01:00.000Z'),
+          mostRecentEventDate: new Date('2026-06-15T08:00:00.000Z')
+        }
+      ]
+    )
+
+    should.exist(result.QA)
+    result.QA.challenges.should.equal(1)
+    result.QA.wins.should.equal(1)
+    result.QA.subTracks.should.have.length(1)
+    result.QA.subTracks[0].name.should.equal(TYPE_NAMES.CHALLENGE)
+    result.QA.subTracks[0].rank.should.deep.include({
+      rating: 1400,
+      volatility: 385
     })
   })
 
@@ -177,6 +253,7 @@ describe('stats dimension helper unit tests', () => {
     should.exist(result.DATA_SCIENCE)
     should.exist(result.DATA_SCIENCE['AI Engineering'])
     should.not.exist(result.DATA_SCIENCE['rating-path-ai-engineering'])
+    result.DATA_SCIENCE['AI Engineering'].submissions.should.deep.equal({ submissions: 3 })
     result.DATA_SCIENCE['AI Engineering'].rank.should.deep.equal({
       rating: 1517,
       volatility: 331
@@ -250,5 +327,38 @@ describe('stats dimension helper unit tests', () => {
     result.DEVELOP.subTracks[0].history[0].challengeId.should.equal('11111111-1111-1111-1111-111111111111')
     result.DEVELOP.subTracks[0].history[0].challengeName.should.equal('Specification Challenge')
     result.DEVELOP.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
+  })
+
+  it('buildUnifiedStatsHistoryResponse should expose QA challenge history', () => {
+    const ratingDate = new Date('2026-06-15T08:00:00.000Z')
+    const result = prismaHelper.buildUnifiedStatsHistoryResponse(
+      {
+        userId: global.BigInt(88770025),
+        handle: 'devtest1400',
+        handleLower: 'devtest1400'
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-qa-id',
+          typeId: 'type-ch-id',
+          trackName: TRACK_NAMES.QA,
+          typeName: TYPE_NAMES.CHALLENGE,
+          challengeId: 'qa-challenge-june-15',
+          challengeName: 'QA Challenge June 15',
+          newRating: 1400,
+          placement: 1,
+          ratingDate,
+          mostRecent: true
+        }
+      ]
+    )
+
+    should.exist(result.QA)
+    result.QA.subTracks.should.have.length(1)
+    result.QA.subTracks[0].name.should.equal(TYPE_NAMES.CHALLENGE)
+    result.QA.subTracks[0].history.should.have.length(1)
+    result.QA.subTracks[0].history[0].challengeName.should.equal('QA Challenge June 15')
+    result.QA.subTracks[0].history[0].placement.should.equal(1)
   })
 })

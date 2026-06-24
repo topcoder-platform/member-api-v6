@@ -43,11 +43,15 @@ function createStatsDimensionHelperStub () {
   const TRACK_NAMES = {
     DEVELOP: 'DEVELOP',
     DESIGN: 'DESIGN',
-    DATA_SCIENCE: 'DATA_SCIENCE'
+    DATA_SCIENCE: 'DATA_SCIENCE',
+    QA: 'QA'
   }
   const TYPE_NAMES = {
     CHALLENGE: 'Challenge',
     CODE: 'CODE',
+    BUG_HUNT: 'BUG_HUNT',
+    TEST_SCENARIOS: 'TEST_SCENARIOS',
+    TEST_SUITES: 'TEST_SUITES',
     FIRST2FINISH: 'First2Finish',
     TASK: 'Task',
     SRM: 'SRM',
@@ -57,11 +61,15 @@ function createStatsDimensionHelperStub () {
   const trackIds = {
     DEVELOP: 'track-dev-id',
     DESIGN: 'track-design-id',
-    DATA_SCIENCE: 'track-ds-id'
+    DATA_SCIENCE: 'track-ds-id',
+    QA: 'track-qa-id'
   }
   const typeIds = {
     CHALLENGE: 'type-challenge-id',
     CODE: 'type-code-id',
+    BUG_HUNT: 'type-bug-hunt-id',
+    TEST_SCENARIOS: 'type-test-scenarios-id',
+    TEST_SUITES: 'type-test-suites-id',
     FIRST2FINISH: 'type-f2f-id',
     TASK: 'type-task-id',
     SRM: 'type-srm-id',
@@ -71,11 +79,15 @@ function createStatsDimensionHelperStub () {
   const trackNamesById = {
     'track-dev-id': TRACK_NAMES.DEVELOP,
     'track-design-id': TRACK_NAMES.DESIGN,
-    'track-ds-id': TRACK_NAMES.DATA_SCIENCE
+    'track-ds-id': TRACK_NAMES.DATA_SCIENCE,
+    'track-qa-id': TRACK_NAMES.QA
   }
   const typeNamesById = {
     'type-challenge-id': TYPE_NAMES.CHALLENGE,
     'type-code-id': TYPE_NAMES.CODE,
+    'type-bug-hunt-id': TYPE_NAMES.BUG_HUNT,
+    'type-test-scenarios-id': TYPE_NAMES.TEST_SCENARIOS,
+    'type-test-suites-id': TYPE_NAMES.TEST_SUITES,
     'type-f2f-id': TYPE_NAMES.FIRST2FINISH,
     'type-task-id': TYPE_NAMES.TASK,
     'type-srm-id': TYPE_NAMES.SRM,
@@ -113,6 +125,15 @@ function createStatsDimensionHelperStub () {
     if (normalized === 'CODE' || normalized === 'COD') {
       return typeIds.CODE
     }
+    if (normalized === 'BUG_HUNT' || normalized === 'LBGH') {
+      return typeIds.BUG_HUNT
+    }
+    if (normalized === 'TEST_SCENARIOS' || normalized === 'LSCN') {
+      return typeIds.TEST_SCENARIOS
+    }
+    if (normalized === 'TEST_SUITES' || normalized === 'LTST') {
+      return typeIds.TEST_SUITES
+    }
     if (normalized === 'TASK' || normalized === 'TSK') {
       return typeIds.TASK
     }
@@ -140,6 +161,9 @@ function createStatsDimensionHelperStub () {
       if (normalized === 'DATA_SCIENCE' || normalized === 'DATA SCIENCE' || normalized === 'DS') {
         return TRACK_NAMES.DATA_SCIENCE
       }
+      if (normalized === 'QUALITY_ASSURANCE' || normalized === 'QUALITY ASSURANCE' || normalized === 'QA') {
+        return TRACK_NAMES.QA
+      }
       return value
     },
     getCanonicalTypeName: (value) => {
@@ -152,6 +176,15 @@ function createStatsDimensionHelperStub () {
       }
       if (normalized === 'CODE' || normalized === 'COD') {
         return TYPE_NAMES.CODE
+      }
+      if (normalized === 'BUG_HUNT' || normalized === 'LBGH') {
+        return TYPE_NAMES.BUG_HUNT
+      }
+      if (normalized === 'TEST_SCENARIOS' || normalized === 'LSCN') {
+        return TYPE_NAMES.TEST_SCENARIOS
+      }
+      if (normalized === 'TEST_SUITES' || normalized === 'LTST') {
+        return TYPE_NAMES.TEST_SUITES
       }
       if (normalized === 'TASK' || normalized === 'TSK') {
         return TYPE_NAMES.TASK
@@ -695,6 +728,121 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getMemberStats should hydrate missing configured rating path wins from history placements', async () => {
+    let historyFindManyArgs
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [
+        { name: 'AI Engineering', track: 'DATA_SCIENCE', tags: ['AI', 'AI Exponential League'] }
+      ],
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findMany: async () => [
+            {
+              trackId: 'track-ds-id',
+              typeId: 'rating-path-ai-engineering',
+              challenges: 4,
+              wins: null,
+              rating: 1517,
+              globalRank: 4,
+              volatility: 331,
+              mostRecentEventDate: new Date('2024-06-01T00:00:00.000Z'),
+              isPrivate: false
+            }
+          ]
+        },
+        memberStatsHistory: {
+          findMany: async (args) => {
+            historyFindManyArgs = args
+            return [
+              { trackId: 'track-ds-id', typeId: 'rating-path-ai-engineering', placement: 1 },
+              { trackId: 'track-ds-id', typeId: 'rating-path-ai-engineering', placement: 1 },
+              { trackId: 'track-ds-id', typeId: 'rating-path-ai-engineering', placement: 2 }
+            ]
+          }
+        }
+      }
+    })
+
+    try {
+      const result = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DATA_SCIENCE['AI Engineering'].wins.should.equal(2)
+      result[0].DATA_SCIENCE['AI Engineering'].submissions.should.deep.equal({ submissions: 4 })
+      historyFindManyArgs.where.should.deep.equal({
+        userId: global.BigInt(88770025),
+        placement: 1,
+        OR: [{
+          trackId: 'track-ds-id',
+          typeId: 'rating-path-ai-engineering'
+        }]
+      })
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should preserve configured rating path dimensions after challenge metadata enrichment', async () => {
+    const ratingDate = new Date('2026-06-18T05:41:34.931Z')
+    const { service, restore } = loadStatisticsService({
+      ratingPaths: [
+        { name: 'AI Engineering', track: 'DATA_SCIENCE', tags: ['AI', 'AI Exponential League'] }
+      ],
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'rating-path-ai-engineering',
+            challenges: 1,
+            mostRecentEventDate: ratingDate
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'rating-path-ai-engineering',
+            challengeId: 'ai-history-challenge',
+            challengeName: null,
+            newRating: 840,
+            eventDate: ratingDate,
+            placement: 1,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [{
+        id: 'ai-history-challenge',
+        legacyId: null,
+        name: 'AI Engineering Challenge',
+        status: 'COMPLETED',
+        trackId: 'track-dev-id',
+        typeId: 'type-challenge-id',
+        endDate: ratingDate,
+        track: { name: 'Development' },
+        type: { name: 'Challenge' },
+        metadata: [],
+        legacyRecord: null
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].DATA_SCIENCE)
+      should.exist(result[0].DATA_SCIENCE['AI Engineering'])
+      result[0].DATA_SCIENCE['AI Engineering'].history.should.have.length(1)
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].challengeId.should.equal('ai-history-challenge')
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].challengeName.should.equal('AI Engineering Challenge')
+      result[0].DATA_SCIENCE['AI Engineering'].history[0].newRating.should.equal(840)
+      should.not.exist(result[0].DEVELOP)
+    } finally {
+      restore()
+    }
+  })
+
   it('rerateMemberStats should route configured rating paths to the Marathon Match engine', async () => {
     let capturedOptions
     const { service, restore } = loadStatisticsService({
@@ -923,7 +1071,7 @@ describe('statistics service unit tests', () => {
           options: {
             targetTrackName: 'DATA_SCIENCE',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+            challengeTrackNames: ['DATA_SCIENCE'],
             challengeTypeNames: ['Challenge']
           }
         },
@@ -933,7 +1081,7 @@ describe('statistics service unit tests', () => {
           options: {
             targetTrackName: 'DATA_SCIENCE',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+            challengeTrackNames: ['DATA_SCIENCE'],
             challengeTypeNames: ['Challenge']
           }
         }
@@ -1003,7 +1151,7 @@ describe('statistics service unit tests', () => {
           options: {
             targetTrackName: 'DATA_SCIENCE',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+            challengeTrackNames: ['DATA_SCIENCE'],
             challengeTypeNames: ['Challenge']
           }
         }
@@ -1013,7 +1161,7 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('rerateChallengeSubmitterRatings should rate QA Challenge winners in the Data Science Challenge bucket', async () => {
+  it('rerateChallengeSubmitterRatings should rate QA Challenge winners in the QA bucket', async () => {
     const qaRerateCalls = []
     const { service, restore } = loadStatisticsService({
       challengeRow: {
@@ -1063,7 +1211,7 @@ describe('statistics service unit tests', () => {
       result.participantIds.should.deep.equal(['89770374', '100000039'])
       result.ratings.should.deep.equal([
         {
-          trackId: 'DATA_SCIENCE',
+          trackId: 'QA',
           typeId: 'Challenge'
         }
       ])
@@ -1072,9 +1220,9 @@ describe('statistics service unit tests', () => {
           userId: '89770374',
           challengeId: 'qa-winner-only-challenge',
           options: {
-            targetTrackName: 'DATA_SCIENCE',
+            targetTrackName: 'QA',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+            challengeTrackNames: ['QUALITY_ASSURANCE'],
             challengeTypeNames: ['Challenge']
           }
         },
@@ -1082,9 +1230,9 @@ describe('statistics service unit tests', () => {
           userId: '100000039',
           challengeId: 'qa-winner-only-challenge',
           options: {
-            targetTrackName: 'DATA_SCIENCE',
+            targetTrackName: 'QA',
             targetTypeName: 'Challenge',
-            challengeTrackNames: ['DATA_SCIENCE', 'QUALITY_ASSURANCE'],
+            challengeTrackNames: ['QUALITY_ASSURANCE'],
             challengeTypeNames: ['Challenge']
           }
         }
@@ -1979,6 +2127,116 @@ describe('statistics service unit tests', () => {
       result[0].DEVELOP.subTracks[0].history[0].challengeName.should.equal('Winner fallback challenge')
       result[0].DEVELOP.subTracks[0].history[0].placement.should.equal(1)
       result[0].DEVELOP.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should surface QA challenge winner history under QA', async () => {
+    const ratingDate = new Date('2026-06-15T08:00:00.000Z')
+    const qaChallenge = {
+      id: 'qa-challenge-june-15',
+      name: 'QA Challenge June 15',
+      status: 'COMPLETED',
+      trackId: 'track-qa-id',
+      typeId: 'type-challenge-id',
+      endDate: ratingDate
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-qa-id',
+            typeId: 'type-challenge-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      },
+      challengeRows: [],
+      reviewRows: [],
+      challengeWinnerRows: [{
+        challengeId: 'qa-challenge-june-15',
+        type: 'PLACEMENT',
+        placement: 1,
+        createdAt: new Date('2026-06-15T08:01:00.000Z'),
+        challenge: qaChallenge
+      }]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].QA)
+      result[0].QA.subTracks.should.have.length(1)
+      result[0].QA.subTracks[0].name.should.equal('Challenge')
+      result[0].QA.subTracks[0].history.should.have.length(1)
+      result[0].QA.subTracks[0].history[0].challengeId.should.equal('qa-challenge-june-15')
+      result[0].QA.subTracks[0].history[0].challengeName.should.equal('QA Challenge June 15')
+      result[0].QA.subTracks[0].history[0].placement.should.equal(1)
+      result[0].QA.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
+      result[0].QA.subTracks[0].history[0].mostRecent.should.equal(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('getHistoryStats should remap persisted QA challenge history from Data Science to QA', async () => {
+    const ratingDate = new Date('2026-06-15T08:00:00.000Z')
+    const qaChallenge = {
+      id: 'qa-challenge-june-15',
+      legacyId: null,
+      name: 'QA Challenge June 15',
+      status: 'COMPLETED',
+      trackId: 'track-qa-id',
+      typeId: 'type-challenge-id',
+      endDate: ratingDate
+    }
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async () => [],
+        memberStats: {
+          findFirst: async () => null,
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-challenge-id'
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => [{
+            trackId: 'track-ds-id',
+            typeId: 'type-challenge-id',
+            challengeId: 'qa-challenge-june-15',
+            challengeName: null,
+            eventDate: ratingDate,
+            ratingDate,
+            newRating: 1400,
+            placement: 1,
+            mostRecent: true
+          }]
+        }
+      },
+      challengeRows: [qaChallenge]
+    })
+
+    try {
+      const result = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      should.exist(result[0].QA)
+      should.not.exist(result[0].DATA_SCIENCE)
+      result[0].QA.subTracks.should.have.length(1)
+      result[0].QA.subTracks[0].name.should.equal('Challenge')
+      result[0].QA.subTracks[0].history.should.have.length(1)
+      result[0].QA.subTracks[0].history[0].challengeId.should.equal('qa-challenge-june-15')
+      result[0].QA.subTracks[0].history[0].challengeName.should.equal('QA Challenge June 15')
+      result[0].QA.subTracks[0].history[0].rating.should.equal(1400)
+      result[0].QA.subTracks[0].history[0].placement.should.equal(1)
+      result[0].QA.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
     } finally {
       restore()
     }

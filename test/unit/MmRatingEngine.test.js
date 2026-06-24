@@ -689,6 +689,7 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(statsRow.maxRating, expectedTargetState.rating)
     should.equal(statsRow.minRating, expectedTargetState.rating)
     should.equal(statsRow.challenges, 1)
+    should.equal(statsRow.wins, 1)
     should.equal(statsRow.mostRecentEventDate.getTime(), challengeMetadata[challengeId].endDate.getTime())
     should.equal(statsRow.mostRecentSubmission.getTime(), baseReviewRows[0].createdAt.getTime())
     should.equal(maxRatingRow.rating, expectedTargetState.rating)
@@ -2212,6 +2213,8 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
     should.equal(statsRow.challenges, 2)
+    should.equal(statsRow.wins, 2)
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-06-01T10:00:00.000Z').getTime())
     should.equal(statsRow.mostRecentEventDate.getTime(), pathMetadata[targetChallengeId].endDate.getTime())
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTargetState.rating)
@@ -2220,6 +2223,117 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(nonAiHistoryRow, undefined)
     should.equal(unratedAiHistoryRow, undefined)
     should.equal(maxRatingRow.track, 'DEVELOP')
+    should.equal(maxRatingRow.subTrack, 'AI')
+  })
+
+  it('rerateMmTrack should replay tagged Data Science Challenge events under configured rating paths', async () => {
+    const targetUserId = toBigInt(7101)
+    const opponentUserId = toBigInt(7102)
+    const targetChallengeId = 'ai-data-science-challenge'
+    const nonAiChallengeId = 'plain-data-science-challenge'
+    const ratingPath = normalizeRatingPathConfig({
+      name: 'AI',
+      track: 'DATA_SCIENCE',
+      tags: ['AI', 'AI Exponential League']
+    })
+    const pathMetadata = {
+      [targetChallengeId]: {
+        id: targetChallengeId,
+        endDate: new Date('2024-06-01T00:00:00.000Z'),
+        track: { name: 'Data Science' },
+        type: { name: 'Challenge' },
+        tags: ['AI Exponential League'],
+        metadata: []
+      },
+      [nonAiChallengeId]: {
+        id: nonAiChallengeId,
+        endDate: new Date('2024-06-02T00:00:00.000Z'),
+        track: { name: 'Data Science' },
+        type: { name: 'Challenge' },
+        tags: ['Other'],
+        metadata: []
+      }
+    }
+    const reviewRows = [
+      {
+        challengeId: targetChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:00:00.000Z')
+      },
+      {
+        challengeId: targetChallengeId,
+        userId: opponentUserId,
+        finalScore: 80,
+        placement: 2,
+        rated: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-01T09:05:00.000Z')
+      },
+      {
+        challengeId: nonAiChallengeId,
+        userId: targetUserId,
+        finalScore: 100,
+        placement: 1,
+        rated: true,
+        validSubmission: true,
+        createdAt: new Date('2024-06-02T09:00:00.000Z')
+      }
+    ]
+    const expectedParticipants = [
+      createParticipant(targetUserId, 0, 0, 0, 100),
+      createParticipant(opponentUserId, 0, 0, 0, 80)
+    ]
+    runQubitsRating(expectedParticipants)
+    const expectedTarget = expectedParticipants.find((participant) => participant.coderId === String(targetUserId))
+
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [],
+      statsRows: [],
+      maxRatingRows: []
+    })
+    const reviewDbClient = createMmReviewDbClient(reviewRows)
+    const challengeClient = createChallengeClient(pathMetadata)
+
+    const result = await rerateMmTrack(
+      membersClient,
+      challengeClient,
+      null,
+      reviewDbClient,
+      targetUserId,
+      targetChallengeId,
+      {
+        ratingPath
+      }
+    )
+
+    should.equal(result.challengesProcessed, 1)
+    should.equal(result.ratingPathChallengesProcessed, 1)
+    should.equal(result.ratingsUpdated, 1)
+
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DATA_SCIENCE_TRACK_ID &&
+      row.typeId === AI_RATING_TYPE_ID
+    )
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, targetChallengeId)
+    const nonAiHistoryRow = findHistoryRow(state.historyRows, targetUserId, nonAiChallengeId)
+    const maxRatingRow = state.maxRatingRows.find((row) => String(row.userId) === String(targetUserId))
+
+    should.equal(statsRow.rating, expectedTarget.rating)
+    should.equal(statsRow.volatility, expectedTarget.volatility)
+    should.equal(statsRow.challenges, 1)
+    should.equal(statsRow.wins, 1)
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-06-01T09:00:00.000Z').getTime())
+    should.equal(statsRow.mostRecentEventDate.getTime(), pathMetadata[targetChallengeId].endDate.getTime())
+    should.equal(historyRow.oldRating, null)
+    should.equal(historyRow.newRating, expectedTarget.rating)
+    should.equal(historyRow.placement, 1)
+    should.equal(nonAiHistoryRow, undefined)
+    should.equal(maxRatingRow.track, 'DATA_SCIENCE')
     should.equal(maxRatingRow.subTrack, 'AI')
   })
 
@@ -2315,7 +2429,15 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(result.ratingsUpdated, 1)
     should.equal(findHistoryRow(state.historyRows, targetUserId, invalidChallengeId), undefined)
 
+    const statsRow = state.statsRows.find((row) =>
+      String(row.userId) === String(targetUserId) &&
+      row.trackId === DEVELOP_TRACK_ID &&
+      row.typeId === AI_RATING_TYPE_ID
+    )
     const historyRow = findHistoryRow(state.historyRows, targetUserId, validChallengeId)
+    should.equal(statsRow.challenges, 1)
+    should.equal(statsRow.wins, 1)
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-06-01T09:00:00.000Z').getTime())
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTarget.rating)
   })
@@ -2479,6 +2601,8 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(statsRow.rating, expectedTargetState.rating)
     should.equal(statsRow.volatility, expectedTargetState.volatility)
     should.equal(statsRow.challenges, 2)
+    should.equal(statsRow.wins, 2)
+    should.equal(statsRow.mostRecentSubmission.getTime(), new Date('2024-06-01T10:00:00.000Z').getTime())
     should.equal(historyRow.oldRating, null)
     should.equal(historyRow.newRating, expectedTargetState.rating)
     should.equal(historyRow.placement, 1)

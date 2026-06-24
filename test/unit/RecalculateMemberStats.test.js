@@ -19,13 +19,15 @@ describe('recalculateMemberStats unit tests', () => {
           return [
             { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
             { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
-            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null },
+            { id: 'track-qa-id', name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
           ]
         }
 
         if (query.includes('"ChallengeType"')) {
           return [
             { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-bug-hunt-id', name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
             { id: 'type-f2f-id', name: 'First2Finish', abbreviation: 'F2F', legacyId: null, isTask: false },
             { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
           ]
@@ -41,6 +43,64 @@ describe('recalculateMemberStats unit tests', () => {
     recalculateMemberStats.resolveLegacyDesignTypeId('STUDIO_OTHER', 34).should.equal('type-ch-id')
     recalculateMemberStats.resolveLegacyDesignTypeId('DESIGN_FIRST_2_FINISH', 40).should.equal('type-f2f-id')
     recalculateMemberStats.resolveLegacyDesignTypeId(null, 40).should.equal('type-f2f-id')
+  })
+
+  it('should normalize QA challenge aggregates into the QA bucket', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null },
+            { id: 'track-qa-id', name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-bug-hunt-id', name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const eventDate = new Date('2026-06-15T08:00:00.000Z')
+    const results = recalculateMemberStats.buildAggregatedStatsFromReviewResults(
+      [{
+        challengeId: 'qa-challenge-june-15',
+        userId: global.BigInt(88770025),
+        submissionId: 'submission-1',
+        validSubmission: true,
+        placement: 1,
+        createdAt: new Date('2026-06-15T08:01:00.000Z')
+      }],
+      new Map([[
+        'qa-challenge-june-15',
+        {
+          id: 'qa-challenge-june-15',
+          trackId: 'track-qa-id',
+          typeId: 'type-ch-id',
+          status: 'COMPLETED',
+          endDate: eventDate
+        }
+      ]]),
+      {}
+    )
+
+    results.should.have.length(1)
+    results[0].trackId.should.equal('track-qa-id')
+    results[0].typeId.should.equal('type-ch-id')
+    results[0].challenges.should.equal(1)
+    results[0].wins.should.equal(1)
+    results[0].mostRecentEventDate.should.deep.equal(eventDate)
   })
 
   it('should parse the concurrency option', () => {
@@ -216,6 +276,117 @@ describe('recalculateMemberStats unit tests', () => {
     result[0].userId.should.equal(global.BigInt(456))
     result[0].mostRecentEventDate.toISOString().should.equal('2024-03-05T00:00:00.000Z')
     result[0].mostRecentSubmission.toISOString().should.equal('2024-03-05T10:00:00.000Z')
+  })
+
+  it('should dedupe duplicate legacy aggregate parent snapshots by source subtrack', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-f2f-id', name: 'First2Finish', abbreviation: 'F2F', legacyId: null, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+    const membersClient = {
+      $queryRawUnsafe: async (sql) => {
+        if (sql.includes('"memberDevelopStats"')) {
+          return [
+            {
+              memberStatsId: 100,
+              legacyRowId: 1001,
+              subTrackId: 149,
+              name: 'FIRST_2_FINISH',
+              challenges: 103,
+              wins: 46,
+              mostRecentSubmission: '2022-06-08T21:28:00.000Z',
+              mostRecentEventDate: '2025-03-15T23:30:10.000Z'
+            },
+            {
+              memberStatsId: 200,
+              legacyRowId: 2001,
+              subTrackId: 149,
+              name: 'FIRST_2_FINISH',
+              challenges: 103,
+              wins: 46,
+              mostRecentSubmission: '2022-06-08T21:28:00.000Z',
+              mostRecentEventDate: '2025-03-15T23:30:10.000Z'
+            }
+          ]
+        }
+
+        if (sql.includes('"memberDesignStats"')) {
+          return [
+            {
+              memberStatsId: 100,
+              legacyRowId: 3001,
+              subTrackId: 17,
+              name: 'WEB_DESIGNS',
+              challenges: 2,
+              wins: 1,
+              mostRecentSubmission: '2024-01-01T00:00:00.000Z',
+              mostRecentEventDate: '2024-01-02T00:00:00.000Z'
+            },
+            {
+              memberStatsId: 200,
+              legacyRowId: 4001,
+              subTrackId: 17,
+              name: 'WEB_DESIGNS',
+              challenges: 2,
+              wins: 1,
+              mostRecentSubmission: '2024-01-01T00:00:00.000Z',
+              mostRecentEventDate: '2024-01-02T00:00:00.000Z'
+            },
+            {
+              memberStatsId: 200,
+              legacyRowId: 4002,
+              subTrackId: 34,
+              name: 'STUDIO_OTHER',
+              challenges: 3,
+              wins: 1,
+              mostRecentSubmission: '2024-02-01T00:00:00.000Z',
+              mostRecentEventDate: '2024-02-02T00:00:00.000Z'
+            }
+          ]
+        }
+
+        if (sql.includes('"memberSrmStats"') || sql.includes('"memberMarathonStats"')) {
+          return []
+        }
+
+        throw new Error(`Unexpected query: ${sql}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const results = await recalculateMemberStats.aggregateLegacyStatsForUser(
+      membersClient,
+      global.BigInt(123),
+      {},
+      [global.BigInt(100), global.BigInt(200)]
+    )
+    const developF2F = results.find((row) => row.trackId === 'track-dev-id' && row.typeId === 'type-f2f-id')
+    const designChallenge = results.find((row) => row.trackId === 'track-design-id' && row.typeId === 'type-ch-id')
+
+    developF2F.challenges.should.equal(103)
+    developF2F.wins.should.equal(46)
+    designChallenge.challenges.should.equal(5)
+    designChallenge.wins.should.equal(2)
+    designChallenge.mostRecentEventDate.toISOString().should.equal('2024-02-02T00:00:00.000Z')
   })
 
   it('should bulk update and insert history rows during legacy backfill', async () => {
