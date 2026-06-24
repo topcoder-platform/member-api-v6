@@ -104,10 +104,22 @@ function joinSqlConditions (conditions) {
   return Prisma.join(conditions, ' AND ')
 }
 
+/**
+ * Convert an optional database value to an integer for API response hydration.
+ * Accepts numeric, string, and BigInt inputs from Prisma/raw SQL rows; null,
+ * undefined, and empty strings stay omitted from the response.
+ * @param {*} value raw database value
+ * @returns {number|undefined} normalized integer or undefined when omitted
+ */
 function toOptionalInt (value) {
   if (_.isNil(value) || value === '') {
     return undefined
   }
+
+  if (Object.prototype.toString.call(value) === '[object BigInt]') {
+    return Number(value)
+  }
+
   return _.toInteger(value)
 }
 
