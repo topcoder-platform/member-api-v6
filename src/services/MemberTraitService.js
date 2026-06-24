@@ -206,7 +206,7 @@ async function getTraits (currentUser, handle, query) {
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
-    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+    currentUser.handle.toLowerCase() === handle.toLowerCase()
 
   // can read private personalisation info on a member
   const canReadPrivate = isM2M || hasSensitiveDataRole || isSelf
@@ -284,7 +284,7 @@ getTraits.schema = {
   query: Joi.object().keys({
     traitIds: Joi.string(),
     fields: Joi.string()
-  })
+  }).unknown(true)
 }
 
 /**
@@ -659,7 +659,7 @@ removeTraits.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     traitIds: Joi.string() // if not provided, then all member traits are removed
-  })
+  }).unknown(true)
 }
 /**
 * This function is used to calculate a deduction to the skill score used in the talent search

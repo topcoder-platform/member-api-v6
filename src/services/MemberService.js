@@ -147,7 +147,7 @@ function omitMemberAttributes (currentUser, mb) {
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle && mb.handleLower &&
-    currentUser.handle.trim().toLowerCase() === mb.handleLower.trim().toLowerCase()
+    currentUser.handle.toLowerCase() === mb.handleLower.toLowerCase()
   const canSeeIdentityVerified = isM2M || hasSensitiveDataRole || isSelf
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
   const canSeeFullAddress = canManageMember || hasSensitiveDataRole
@@ -282,6 +282,7 @@ function getCountryNameFromCode (isoCode3) {
  * @returns {Object} the member profile data
  */
 async function getMemberData (handle, query, allowedFields = MEMBER_FIELDS) {
+  helper.validateHandle(handle)
   // validate and parse query parameter
   const selectFields = helper.parseCommaSeparatedString(query.fields, allowedFields) || allowedFields
 
@@ -339,7 +340,7 @@ async function getMember (currentUser, handle, query) {
   const hasSensitiveDataRole = helper.hasSensitiveDataRole(currentUser)
   const isM2M = currentUser && currentUser.isMachine
   const isSelf = currentUser && currentUser.handle &&
-    currentUser.handle.trim().toLowerCase() === handle.trim().toLowerCase()
+    currentUser.handle.toLowerCase() === handle.toLowerCase()
 
   const canSeePhones = isM2M || hasSensitiveDataRole || isSelf
   const canSeeRecentActivity = isM2M || hasSensitiveDataRole || isSelf
@@ -435,7 +436,7 @@ getMember.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
-  })
+  }).unknown(true)
 }
 
 /**
@@ -532,6 +533,7 @@ function buildSendgridEmailActivityQuery (email, startTime, endTime) {
  * @returns {Array} up to the most recent SendGrid message activity records
  */
 async function getMemberSendgridEmails (currentUser, handle) {
+  helper.validateHandle(handle)
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     throw new errors.ForbiddenError('You are not allowed to view SendGrid email activity.')
   }
@@ -746,7 +748,7 @@ getProfileCompleteness.schema = {
   query: Joi.object().keys({
     fields: Joi.string(),
     toast: Joi.string()
-  })
+  }).unknown(true)
 }
 
 /**
@@ -770,7 +772,7 @@ getMemberUserIdSignature.schema = {
   currentUser: Joi.any(),
   query: Joi.object().keys({
     type: Joi.string().valid('userflow').required()
-  }).required()
+  }).unknown(true).required()
 }
 
 /**
@@ -782,6 +784,7 @@ getMemberUserIdSignature.schema = {
  * @returns {Object} the updated member data
  */
 async function updateMember (currentUser, handle, query, data) {
+  helper.validateHandle(handle)
   const operatorId = currentUser.userId || currentUser.sub
   const member = await helper.getMemberByHandle(handle)
   // check authorization
@@ -938,7 +941,7 @@ updateMember.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
-  }),
+  }).unknown(true),
   data: Joi.object().keys({
     handle: Joi.forbidden(),
     handleLower: Joi.forbidden(),
@@ -980,6 +983,7 @@ updateMember.schema = {
  * @returns {Object} the updated member data
  */
 async function updateHandle (currentUser, handle, query, data) {
+  helper.validateHandle(handle)
   const operatorId = currentUser.userId || currentUser.sub
   const member = await helper.getMemberByHandle(handle)
 
@@ -1085,7 +1089,7 @@ updateHandle.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     fields: Joi.string()
-  }),
+  }).unknown(true),
   data: Joi.object().keys({
     newHandle: Joi.string().required()
   }).required()
@@ -1148,7 +1152,7 @@ verifyEmail.schema = {
   handle: Joi.string().required(),
   query: Joi.object().keys({
     token: Joi.string().required()
-  }).required()
+  }).unknown(true).required()
 }
 
 /**
@@ -1230,6 +1234,7 @@ async function uploadPhoto (currentUser, handle, files) {
  * @returns {Object} the deletion result
  */
 async function deleteMember (currentUser, handle, data) {
+  helper.validateHandle(handle)
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
     throw new errors.ForbiddenError('You are not allowed to delete the member.')
   }
@@ -2099,6 +2104,7 @@ async function aggregatePDFData (currentUser, handle) {
  * @returns {Stream} PDF stream
  */
 async function downloadProfile (currentUser, handle) {
+  helper.validateHandle(handle)
   // Validate handle exists
   const member = await helper.getMemberByHandle(handle)
 

@@ -9,6 +9,7 @@ const service = require('../services/MemberService')
  * @param {Object} res the response
  */
 async function getMember (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.getMember(req.authUser, req.params.handle, req.query)
   res.send(result)
 }
@@ -18,6 +19,7 @@ async function getMember (req, res) {
  * @param {Object} res the response
  */
 async function getProfileCompleteness (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.getProfileCompleteness(req.authUser, req.params.handle, req.query)
   res.send(result)
 }
@@ -48,6 +50,7 @@ async function updateChallengePoints (req, res) {
  * @param {Object} res the response
  */
 async function getMemberSkill (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.getMemberSkill(req.authUser, req.params.handle, req.params.skillid)
   res.send(result)
 }
@@ -58,6 +61,7 @@ async function getMemberSkill (req, res) {
  * @param {Object} res the response
  */
 async function updateMember (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.updateMember(req.authUser, req.params.handle, req.query, req.body)
   res.send(result)
 }
@@ -68,6 +72,7 @@ async function updateMember (req, res) {
  * @param {Object} res the response
  */
 async function updateHandle (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.updateHandle(req.authUser, req.params.handle, req.query, req.body)
   res.send(result)
 }
@@ -78,6 +83,7 @@ async function updateHandle (req, res) {
  * @param {Object} res the response
  */
 async function verifyEmail (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.verifyEmail(req.authUser, req.params.handle, req.query)
   res.send(result)
 }
@@ -88,6 +94,7 @@ async function verifyEmail (req, res) {
  * @param {Object} res the response
  */
 async function uploadPhoto (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.uploadPhoto(req.authUser, req.params.handle, req.files)
   res.send(result)
 }
@@ -98,6 +105,7 @@ async function uploadPhoto (req, res) {
  * @param {Object} res the response
  */
 async function deleteMember (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.deleteMember(req.authUser, req.params.handle, req.body)
   res.send(result)
 }
@@ -108,6 +116,7 @@ async function deleteMember (req, res) {
  * @param {Object} res the response
  */
 async function confirmProfileData (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.confirmProfileData(req.authUser, req.params.handle)
   res.send(result)
 }
@@ -118,6 +127,7 @@ async function confirmProfileData (req, res) {
  * @param {Object} res the response
  */
 async function downloadProfile (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const pdfStream = await service.downloadProfile(req.authUser, req.params.handle)
   res.setHeader('Content-Type', 'application/pdf')
   res.setHeader('Content-Disposition', `attachment; filename="topcoder-profile-${req.params.handle}.pdf"`)
@@ -130,6 +140,7 @@ async function downloadProfile (req, res) {
  * @param {Object} res the response
  */
 async function getMemberSendgridEmails (req, res) {
+  const handle = decodeURIComponent(req.params.handle)
   const result = await service.getMemberSendgridEmails(req.authUser, req.params.handle)
   res.send(result)
 }

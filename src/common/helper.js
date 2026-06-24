@@ -630,7 +630,20 @@ function convertBigIntDeep (value) {
   }
   return value
 }
-
+/**
+ * Validate that a member handle contains only permitted characters.
+ * Handles with special chars like <, >, ?, spaces, or raw Unicode
+ * that were created via legacy systems should return a clean 404.
+ * @param {String} handle the member handle
+ * @throws {NotFoundError} if handle contains invalid characters
+ */
+function validateHandle (handle) {
+  // Topcoder handles: 2–50 chars, letters, digits, hyphens, underscores, periods only
+  const VALID_HANDLE_RE = /^[a-zA-Z0-9\-_.]{2,50}$/
+  if (!VALID_HANDLE_RE.test(handle)) {
+    throw new errors.NotFoundError(`Member with handle: "${handle}" doesn't exist`)
+  }
+}
 module.exports = {
   wrapExpress,
   autoWrapExpress,
@@ -661,5 +674,6 @@ module.exports = {
   secureMemberAddressData,
   truncateLastName,
   bigIntToNumber,
-  convertBigIntDeep
+  convertBigIntDeep,
+  validateHandle
 }
