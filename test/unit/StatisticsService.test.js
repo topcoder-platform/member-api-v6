@@ -547,6 +547,76 @@ describe('statistics service unit tests', () => {
     }
   })
 
+  it('getMemberStats should hydrate BigInt legacy Develop submission counters', async () => {
+    const legacyMemberStatsId = global.BigInt(501)
+    const legacyDevelopStatsId = global.BigInt(601)
+    const { service, restore } = loadStatisticsService({
+      prismaStub: {
+        $queryRaw: async (...args) => {
+          const query = Array.isArray(args[0]) ? args[0].join('') : ''
+          if (query.includes('FROM "members"."memberStats" ms')) {
+            return [{
+              id: legacyMemberStatsId,
+              userId: global.BigInt(88770025),
+              isPrivate: false
+            }]
+          }
+          if (query.includes('FROM "members"."memberDevelopStatsItem"')) {
+            return [{
+              id: global.BigInt(701),
+              developStatsId: legacyDevelopStatsId,
+              subTrackId: 'CH',
+              name: 'Challenge',
+              challenges: global.BigInt(2),
+              numInquiries: global.BigInt(4),
+              submissions: global.BigInt(8),
+              passedScreening: global.BigInt(7),
+              passedReview: global.BigInt(6),
+              appeals: global.BigInt(1)
+            }]
+          }
+          if (query.includes('FROM "members"."memberDevelopStats"')) {
+            return [{
+              id: legacyDevelopStatsId,
+              memberStatsId: legacyMemberStatsId
+            }]
+          }
+
+          return []
+        },
+        memberStats: {
+          findMany: async () => [{
+            trackId: 'track-dev-id',
+            typeId: 'type-challenge-id',
+            challenges: 3,
+            wins: 1,
+            mostRecentEventDate: new Date('2024-06-01T00:00:00.000Z'),
+            isPrivate: false
+          }]
+        },
+        memberStatsHistory: {
+          findMany: async () => []
+        }
+      }
+    })
+
+    try {
+      const result = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+
+      result.should.have.length(1)
+      result[0].DEVELOP.challenges.should.equal(3)
+      const subTrack = result[0].DEVELOP.subTracks[0]
+      subTrack.name.should.equal('Challenge')
+      subTrack.submissions.numInquiries.should.equal(4)
+      subTrack.submissions.submissions.should.equal(9)
+      subTrack.submissions.passedScreening.should.equal(7)
+      subTrack.submissions.passedReview.should.equal(6)
+      subTrack.submissions.appeals.should.equal(1)
+    } finally {
+      restore()
+    }
+  })
+
   it('getMemberStats should preserve imported Marathon Match rating bounds over historical rerates', async () => {
     const { service, restore } = loadStatisticsService({
       prismaStub: {
