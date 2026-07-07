@@ -329,6 +329,78 @@ describe('stats dimension helper unit tests', () => {
     result.DEVELOP.subTracks[0].history[0].ratingDate.should.equal(ratingDate.getTime())
   })
 
+  it('buildUnifiedStatsHistoryResponse should fill missing challenge history display fields from duplicate rating paths', () => {
+    const firstRatingDate = new Date('2026-05-01T00:00:00.000Z')
+    const secondRatingDate = new Date('2026-05-02T00:00:00.000Z')
+    const result = prismaHelper.buildUnifiedStatsHistoryResponse(
+      {
+        userId: global.BigInt(15391415),
+        handle: 'winterflame',
+        handleLower: 'winterflame'
+      },
+      [
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-dev-id',
+          typeId: 'type-challenge-id',
+          trackName: TRACK_NAMES.DEVELOP,
+          typeName: TYPE_NAMES.CHALLENGE,
+          challengeId: 'ai-profile-pipeline',
+          challengeName: 'AI-Powered Topcoder Member Profile Video Pipeline',
+          eventDate: firstRatingDate,
+          mostRecent: false
+        },
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-ds-id',
+          typeId: 'rating-path-ai-engineering',
+          trackName: TRACK_NAMES.DATA_SCIENCE,
+          typeName: 'AI Engineering',
+          challengeId: 'ai-profile-pipeline',
+          challengeName: 'AI-Powered Topcoder Member Profile Video Pipeline',
+          newRating: 1180,
+          placement: 4,
+          eventDate: firstRatingDate,
+          mostRecent: false
+        },
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-dev-id',
+          typeId: 'type-challenge-id',
+          trackName: TRACK_NAMES.DEVELOP,
+          typeName: TYPE_NAMES.CHALLENGE,
+          challengeId: 'cognitive-diplomat',
+          challengeName: 'Cognitive Diplomat: Negotiation Next-Turn Predictor',
+          newRating: 1357,
+          eventDate: secondRatingDate,
+          mostRecent: true
+        },
+        {
+          groupId: global.BigInt(1),
+          trackId: 'track-ds-id',
+          typeId: 'rating-path-ai-engineering',
+          trackName: TRACK_NAMES.DATA_SCIENCE,
+          typeName: 'AI Engineering',
+          challengeId: 'cognitive-diplomat',
+          challengeName: 'Cognitive Diplomat: Negotiation Next-Turn Predictor',
+          newRating: 1225,
+          placement: 5,
+          eventDate: secondRatingDate,
+          mostRecent: true
+        }
+      ]
+    )
+
+    const developmentHistory = result.DEVELOP.subTracks[0].history
+    developmentHistory[0].newRating.should.equal(1180)
+    developmentHistory[0].rating.should.equal(1180)
+    developmentHistory[0].placement.should.equal(4)
+    developmentHistory[1].newRating.should.equal(1357)
+    developmentHistory[1].rating.should.equal(1357)
+    developmentHistory[1].placement.should.equal(5)
+    result.DATA_SCIENCE['AI Engineering'].history[0].placement.should.equal(4)
+  })
+
   it('buildUnifiedStatsHistoryResponse should expose QA challenge history', () => {
     const ratingDate = new Date('2026-06-15T08:00:00.000Z')
     const result = prismaHelper.buildUnifiedStatsHistoryResponse(

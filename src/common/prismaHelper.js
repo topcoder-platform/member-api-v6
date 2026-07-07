@@ -85,6 +85,101 @@ function getUnifiedTypeName (typeId) {
   return canonical || typeId
 }
 
+/**
+ * Normalize a challenge id used to match duplicate history rows across tracks.
+ * @param {*} value raw challenge id from a memberStatsHistory response row
+ * @returns {string|undefined} normalized challenge id when available
+ */
+function normalizeHistoryChallengeId (value) {
+  if (_.isNil(value)) {
+    return undefined
+  }
+
+  const challengeId = String(value).trim()
+  return challengeId || undefined
+}
+
+/**
+ * Normalize a history placement so only positive integer placements are copied.
+ * @param {*} value raw placement value from a history row
+ * @returns {number|undefined} visible placement when available
+ */
+function normalizeHistoryPlacement (value) {
+  const placement = _.toInteger(value)
+  return Number.isInteger(placement) && placement > 0 ? placement : undefined
+}
+
+/**
+ * Return the rating value that a history card can display.
+ * @param {Object} row unified history row
+ * @returns {*} newRating or rating when either value is available
+ */
+function getHistoryDisplayRating (row) {
+  return _.isNil(row && row.newRating) ? row && row.rating : row.newRating
+}
+
+/**
+ * Fill missing display fields on duplicate challenge history rows.
+ *
+ * A completed challenge can appear once under its source track and again under a
+ * configured rating path, for example DEVELOPMENT / Challenge and DATA_SCIENCE /
+ * AI Engineering. The source-track row may only have the challenge card metadata,
+ * while the rating-path row carries the placement and rating needed by profile
+ * details. Existing values are preserved and only missing placement/newRating
+ * fields are copied.
+ *
+ * @param {Array<Object>} rows unified history rows
+ * @returns {Array<Object>} history rows with duplicate display fields backfilled
+ */
+function fillMissingHistoryDisplayFields (rows) {
+  const displayFieldsByChallengeId = new Map()
+
+  _.forEach(rows || [], (row) => {
+    const challengeId = normalizeHistoryChallengeId(row && row.challengeId)
+    if (!challengeId) {
+      return
+    }
+
+    const placement = normalizeHistoryPlacement(row.placement)
+    const rating = getHistoryDisplayRating(row)
+    if (!placement && _.isNil(rating)) {
+      return
+    }
+
+    const existing = displayFieldsByChallengeId.get(challengeId) || {}
+    displayFieldsByChallengeId.set(challengeId, {
+      placement: placement && (!existing.placement || placement < existing.placement)
+        ? placement
+        : existing.placement,
+      rating: _.isNil(existing.rating) ? rating : existing.rating
+    })
+  })
+
+  return _.map(rows || [], (row) => {
+    const challengeId = normalizeHistoryChallengeId(row && row.challengeId)
+    const displayFields = challengeId ? displayFieldsByChallengeId.get(challengeId) : undefined
+    if (!displayFields) {
+      return row
+    }
+
+    const existingPlacement = normalizeHistoryPlacement(row.placement)
+    const placement = existingPlacement || displayFields.placement
+    const newRating = _.isNil(row.newRating) && !_.isNil(displayFields.rating)
+      ? displayFields.rating
+      : row.newRating
+
+    if (placement === existingPlacement && newRating === row.newRating) {
+      return row
+    }
+
+    return {
+      ...row,
+      placement,
+      newRating
+    }
+  })
+}
+
 function isUuidValue (value) {
   return uuidPattern.test(String(value || '').trim())
 }
@@ -823,7 +918,8 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
     }))
     .filter(row => _.includes(supportedUnifiedHistoryTrackNames, row.resolvedTrackName))
     .value()
-  const first = _.head(validRows) || {}
+  const displayRows = fillMissingHistoryDisplayFields(validRows)
+  const first = _.head(displayRows) || {}
   const item = {
     userId: helper.bigIntToNumber(member.userId),
     groupId: helper.bigIntToNumber(first.groupId),
@@ -831,7 +927,7 @@ function buildUnifiedStatsHistoryResponse (member, historyStats, fields) {
     handleLower: member.handleLower
   }
 
-  const groupedByTrackType = _.groupBy(validRows, row => `${row.resolvedTrackName}::${row.resolvedTypeName}`)
+  const groupedByTrackType = _.groupBy(displayRows, row => `${row.resolvedTrackName}::${row.resolvedTypeName}`)
   _.forEach(groupedByTrackType, (trackHistory, key) => {
     const [trackName, typeName] = key.split('::')
     if (_.includes(groupedSubTrackStatsTrackNames, trackName)) {
