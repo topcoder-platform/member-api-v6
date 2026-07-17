@@ -132,7 +132,7 @@ The following parameters can be set in config files or in env variables:
 - STATISTICS_SECURE_FIELDS: Member Statistics identifiable info fields, only admin, M2M, or member himself can fetch these fields
 - STATS_READ_SOURCE: Controls stats read backend, `unified` (default, new tables) or `legacy` (pre-refactor tables)
 - RATING_PATHS: JSON array of tag- and skill-based Development Challenge and Marathon Match rating paths. Each entry has `name`, optional `tags`, optional `skillIds`, and optional `track` (`DATA_SCIENCE`, `DEVELOP`, or `DEVELOPMENT`); at least one of `tags` or `skillIds` is required. Tags match any listed challenge tag, while skill IDs require every listed challenge skill. Defaults to `[{"name":"AI Engineering","track":"DATA_SCIENCE","tags":["AI","AI Exponential League"]}]`. Re-rate a path by passing `ratingName` to `POST /members/{handle}/stats/rerate`; rows are stored under `{track} / {name}` in unified stats.
-- HEALTH_CHECK_TIMEOUT: health check timeout in milliseconds
+- HEALTH_CHECK_TIMEOUT: maximum primary members database probe duration in milliseconds before the health endpoint returns 503
 
 Set the following environment variables used by bus API to get TC M2M token (use 'set' insted of 'export' for Windows OS):
 ```
@@ -339,7 +339,9 @@ These commands will set auth0 and event bus api to local mock server.
 - Install dependencies with `pnpm install`.
 - Compile the application with `pnpm build`.
 - Start the compiled NestJS application with `pnpm start`.
-- App is running at port 3000. You can visit `http://localhost:3000/v6/members/health`
+- App is running at port 3000. You can visit `http://localhost:3000/v6/members/health`.
+  Startup warms the primary members database connection before listening, and
+  concurrent health requests share one lightweight connectivity query.
 
 
 ## Tests

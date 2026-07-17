@@ -49,7 +49,11 @@ const getMembersClient = () => {
   if (!membersClient) {
     membersClient = new MembersPrismaClient({
       ...clientOptions,
-      adapter: createPostgresAdapter(process.env.DATABASE_URL, 'DATABASE_URL')
+      adapter: createPostgresAdapter(
+        process.env.DATABASE_URL,
+        'DATABASE_URL',
+        { min: 1 }
+      )
     })
   }
   return membersClient

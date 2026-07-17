@@ -6,6 +6,7 @@ import { AppModule } from './src/app.module';
 
 const config = require('config');
 const expressApplication = require('./app');
+const { checkMemberDatabaseHealth } = require('./src/common/memberDatabaseHealth');
 const logger = require('./src/common/logger');
 
 /**
@@ -16,8 +17,11 @@ const logger = require('./src/common/logger');
  * middleware in a behavior-sensitive order. The existing PORT environment
  * variable remains the only listener configuration.
  *
+ * Before accepting traffic, startup verifies and warms the same primary
+ * database connection used by the public health endpoint.
+ *
  * @returns A promise that resolves after the HTTP server begins listening.
- * @throws Propagates Nest application creation or listener startup failures.
+ * @throws Propagates Nest creation, database warm-up, or listener failures.
  */
 export async function bootstrap(): Promise<void> {
   const adapter = new ExpressAdapter(expressApplication);
@@ -26,6 +30,7 @@ export async function bootstrap(): Promise<void> {
     logger: false,
   });
 
+  await checkMemberDatabaseHealth();
   await app.listen(config.PORT);
   logger.info(`NestJS server listening on port ${config.PORT}`);
 }

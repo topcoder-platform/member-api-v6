@@ -152,12 +152,16 @@ paths:
     get:
       tags:
         - Health
-      description: Get member distribution statistics
+      description: Check service readiness using the primary members database
       responses:
         '200':
           description: OK
           schema:
             $ref: '#/definitions/Health'
+        '503':
+          description: Members database is unavailable or responding too slowly
+          schema:
+            $ref: '#/definitions/ErrorModel'
         '400':
           description: Bad request data
           schema:

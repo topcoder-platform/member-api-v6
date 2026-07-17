@@ -24,4 +24,11 @@ describe('Prisma PostgreSQL adapter', () => {
     expect(() => createPostgresAdapter(undefined, 'DATABASE_URL'))
       .to.throw('DATABASE_URL is not configured')
   })
+
+  it('forwards explicit pool options without changing the connection URL', () => {
+    const connectionString = 'postgresql://user:password@localhost:5432/member'
+    const adapter = createPostgresAdapter(connectionString, 'DATABASE_URL', { min: 1 })
+
+    expect(adapter.config).to.deep.equal({ connectionString, min: 1 })
+  })
 })

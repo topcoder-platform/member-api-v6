@@ -1,4 +1,7 @@
 import { PrismaPg } from '@prisma/adapter-pg';
+import type { PoolConfig } from 'pg';
+
+export type PostgresPoolOptions = Omit<PoolConfig, 'connectionString'>;
 
 /**
  * Extracts the PostgreSQL schema selected by a Prisma-style connection URL.
@@ -28,12 +31,14 @@ export function getPostgresSchema(
  *
  * @param connectionString PostgreSQL URL supplied by the existing environment.
  * @param environmentVariable Name reported when the required URL is absent.
+ * @param poolOptions Optional `pg` pool settings applied without replacing the URL.
  * @returns A configured PostgreSQL adapter for Prisma Client.
  * @throws Error when the connection URL is not configured.
  */
 export function createPostgresAdapter(
   connectionString: string | undefined,
   environmentVariable: string,
+  poolOptions: PostgresPoolOptions = {},
 ): PrismaPg {
   if (!connectionString) {
     throw new Error(`${environmentVariable} is not configured`);
@@ -41,7 +46,7 @@ export function createPostgresAdapter(
 
   const schema = getPostgresSchema(connectionString);
   return new PrismaPg(
-    { connectionString },
+    { ...poolOptions, connectionString },
     schema ? { schema } : undefined,
   );
 }
