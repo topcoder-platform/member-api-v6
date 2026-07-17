@@ -5,7 +5,6 @@ generator identityClient {
 
 datasource identitydb {
   provider = "postgresql"
-  url      = env("IDENTITY_DB_URL")
   schemas  = ["identity"]
 }
 

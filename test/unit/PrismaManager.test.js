@@ -7,7 +7,7 @@ const chai = require('chai')
 
 const should = chai.should()
 
-const prismaPath = path.resolve(__dirname, '../../src/common/prisma.js')
+const prismaPath = path.resolve(__dirname, '../../src/common/prisma.ts')
 
 describe('prisma manager unit tests', () => {
   const originalChallengeDbUrl = process.env.CHALLENGE_DB_URL

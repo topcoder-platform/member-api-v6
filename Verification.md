@@ -1,7 +1,7 @@
 
 ## JWT
 
-To make it easier to review, I create a script at `src/scripts/member-jwt.js` to generate JWT.
+To make it easier to review, I create a script at `src/scripts/member-jwt.ts` to generate JWT.
 
 You need to make sure:
 - `secret` equals to config `AUTH_SECRET`
@@ -74,7 +74,7 @@ There are some changes to prisma schema.
 
 ### 2b. Script validation
 
-Run `node src/scripts/verifyStatsMigration.js --samples 50` and review the output fields. Values above `50` are clamped by the script, so rerun `--samples 50` for additional random-user coverage:
+Run `pnpm verify-stats-migration --samples 50` and review the output fields. Values above `50` are clamped by the script, so rerun `--samples 50` for additional random-user coverage:
 
 - Table availability map: confirms whether each legacy and unified table needed for comparison is reachable
 - Row counts per table: confirms expected population levels before cutover

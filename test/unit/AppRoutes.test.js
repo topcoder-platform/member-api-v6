@@ -7,13 +7,13 @@ const chai = require('chai')
 
 chai.should()
 
-const appRoutesPath = path.resolve(__dirname, '../../app-routes.js')
-const helperPath = path.resolve(__dirname, '../../src/common/helper.js')
-const loggerPath = path.resolve(__dirname, '../../src/common/logger.js')
-const routesPath = path.resolve(__dirname, '../../src/routes.js')
+const appRoutesPath = path.resolve(__dirname, '../../app-routes.ts')
+const helperPath = path.resolve(__dirname, '../../src/common/helper.ts')
+const loggerPath = path.resolve(__dirname, '../../src/common/logger.ts')
+const routesPath = path.resolve(__dirname, '../../src/routes.ts')
 const configPath = require.resolve('config')
 const coreLibraryPath = require.resolve('tc-core-library-js')
-const statisticsControllerPath = path.resolve(__dirname, '../../src/controllers/StatisticsController.js')
+const statisticsControllerPath = path.resolve(__dirname, '../../src/controllers/StatisticsController.ts')
 
 function setStubModule (modulePath, exports) {
   delete require.cache[modulePath]

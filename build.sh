@@ -1,23 +1,13 @@
-#!/bin/bash
-set -eo pipefail
-APP_NAME=$1
-UPDATE_CACHE=""
-#docker-compose -f docker/docker-compose.yml build $APP_NAME
-docker build -f docker/Dockerfile -t $APP_NAME:latest .
-docker create --name app $APP_NAME:latest
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-if [ -d node_modules ]
-then
-  mv package-lock.json old-package-lock.json
-  docker cp app:/$APP_NAME/package-lock.json package-lock.json
-  set +eo pipefail
-  UPDATE_CACHE=$(cmp package-lock.json old-package-lock.json)
-  set -eo pipefail
-else
-  UPDATE_CACHE=1
+readonly APP_NAME="${1:?Usage: $0 <application-name>}"
+build_args=(--file docker/Dockerfile --tag "${APP_NAME}:latest")
+
+# CircleCI may create this file for private registry access. Pass it through
+# BuildKit without copying credentials into the image or build context layers.
+if [[ -f .npmrc ]]; then
+  build_args+=(--secret id=npmrc,src=.npmrc)
 fi
 
-if [ "$UPDATE_CACHE" == 1 ]
-then
-  docker cp app:/$APP_NAME/node_modules .
-fi
+DOCKER_BUILDKIT=1 docker build "${build_args[@]}" .
