@@ -2,6 +2,8 @@
  * Controller for statistics endpoints
  */
 const service = require('../services/StatisticsService')
+const specialRoleService = require('../services/SpecialRoleService')
+const helper = require('../common/helper')
 
 /**
  * Get distribution statistics
@@ -50,6 +52,39 @@ async function partiallyUpdateHistoryStats (req, res) {
  */
 async function getMemberStats (req, res) {
   const result = await service.getMemberStats(req.authUser, req.params.handle, req.query, true)
+  res.send(result)
+}
+
+/**
+ * Get the public Copilot and Reviewer challenge-count summary for a member.
+ * The request handle is resolved by the special-role statistics service and
+ * database or missing-member errors are forwarded to Express middleware.
+ * @param {Object} req the request containing the member handle
+ * @param {Object} res the response that receives the role summary
+ * @returns {Promise<void>} resolves after the JSON response is sent
+ * @throws {Error} propagates service validation and lookup errors
+ */
+async function getMemberRoleStats (req, res) {
+  const result = await specialRoleService.getMemberRoleStats(req.params.handle)
+  res.send(result)
+}
+
+/**
+ * Get one public page of distinct challenges for a member's Copilot or Reviewer
+ * role. Pagination and role validation are handled by the service and errors
+ * are forwarded through the standard Express middleware.
+ * @param {Object} req the request containing handle, role, and pagination query
+ * @param {Object} res the response that receives the paginated challenge list
+ * @returns {Promise<void>} resolves after the JSON response is sent
+ * @throws {Error} propagates service validation and lookup errors
+ */
+async function getMemberRoleChallenges (req, res) {
+  const result = await specialRoleService.getMemberRoleChallenges(
+    req.params.handle,
+    req.params.role,
+    req.query
+  )
+  helper.setResHeaders(req, res, result)
   res.send(result)
 }
 
@@ -152,6 +187,8 @@ module.exports = {
   createHistoryStats,
   partiallyUpdateHistoryStats,
   getMemberStats,
+  getMemberRoleStats,
+  getMemberRoleChallenges,
   createMemberStats,
   partiallyUpdateMemberStats,
   refreshMemberStats,

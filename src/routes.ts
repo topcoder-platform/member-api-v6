@@ -237,6 +237,24 @@ module.exports = {
       access: constants.ADMIN_ROLES
     }
   },
+  '/members/:handle/stats/roles': {
+    get: {
+      controller: 'StatisticsController',
+      method: 'getMemberRoleStats',
+      auth: 'jwt',
+      allowNoToken: true,
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
+    }
+  },
+  '/members/:handle/stats/roles/:role/challenges': {
+    get: {
+      controller: 'StatisticsController',
+      method: 'getMemberRoleChallenges',
+      auth: 'jwt',
+      allowNoToken: true,
+      scopes: [MEMBERS.READ, MEMBERS.ALL]
+    }
+  },
   '/members/:handle/stats': {
     get: {
       controller: 'StatisticsController',

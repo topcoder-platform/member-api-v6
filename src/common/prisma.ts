@@ -12,10 +12,12 @@ const {
   PrismaClient: SkillsPrismaClient
 } = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
 const {
-  PrismaClient: ResourcesPrismaClient
+  PrismaClient: ResourcesPrismaClient,
+  Prisma: ResourcesPrisma
 } = require('@topcoder/resource-api-v6/packages/resources-prisma-client')
 const {
-  PrismaClient: ChallengesPrismaClient
+  PrismaClient: ChallengesPrismaClient,
+  Prisma: ChallengesPrisma
 } = require('@topcoder/challenge-api-v6/packages/challenge-prisma-client')
 const {
   PrismaClient: AcademyPrismaClient
@@ -262,6 +264,8 @@ validateMmClientDependencies()
 
 module.exports = {
   Prisma,
+  ChallengesPrisma,
+  ResourcesPrisma,
   getClient: getMembersClient,
   getMembersClient,
   getSkillsClient,
