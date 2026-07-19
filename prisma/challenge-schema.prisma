@@ -5,7 +5,6 @@ generator challengeClient {
 
 datasource challengedb {
   provider = "postgresql"
-  url      = env("CHALLENGE_DB_URL")
 }
 
 model ChallengeTrack {

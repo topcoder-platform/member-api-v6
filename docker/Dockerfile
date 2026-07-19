@@ -1,19 +1,27 @@
-# Use the base image with Node.js
-FROM node:22.22.0
+# syntax=docker/dockerfile:1.7
 
-# Copy the current directory into the Docker image
-COPY . /member-api-v6
+# Keep a Debian/glibc base because upstream generated Prisma clients ship Debian engines.
+FROM node:22.22.0 AS base
 
-# Set working directory for future use
 WORKDIR /member-api-v6
+RUN npm install --global pnpm@10.33.2
 
-# Install the dependencies from package.json
-RUN npm install -g pnpm@10.33.2
-RUN pnpm install --frozen-lockfile
+FROM base AS build
 
-# Copy and set permissions for entrypoint script
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY . .
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false \
+    pnpm install --frozen-lockfile
+RUN pnpm lint && pnpm build
 
-# Use entrypoint script
+FROM base AS runtime
+
+ENV NODE_OPTIONS="--enable-source-maps"
+
+# Retain the validated install because startup migrations and maintenance scripts
+# require Prisma CLI, ts-node, schemas, and generated clients at runtime.
+COPY --from=build --chown=node:node /member-api-v6 /member-api-v6
+COPY --from=build /member-api-v6/docker/entrypoint.sh /entrypoint.sh
+RUN chmod 0555 /entrypoint.sh
+
+USER node
 ENTRYPOINT ["/entrypoint.sh"]

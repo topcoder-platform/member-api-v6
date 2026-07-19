@@ -1,5 +1,5 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+set -eu
 
 echo "Running Prisma migrations..."
 
@@ -11,7 +11,7 @@ else
   echo "DATABASE_URL is present (length: ${#DATABASE_URL})"
 fi
 
-./node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
+pnpm exec prisma migrate deploy --schema=prisma/schema.prisma
 
 echo "Starting application..."
-exec node app.js
+exec node dist/main.js

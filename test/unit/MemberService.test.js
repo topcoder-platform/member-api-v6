@@ -56,7 +56,10 @@ describe('member service unit tests', () => {
   describe('get member tests', () => {
     it('get member successfully 1', async () => {
       const result = await service.getMember({ isMachine: true }, member1.handle, {})
-      should.equal(_.isEqual(result.maxRating, member1.maxRating), true)
+      should.equal(_.isEqual(result.maxRating, {
+        ...member1.maxRating,
+        ratingColor: '#69C329'
+      }), true)
       should.equal(result.userId, member1.userId)
       should.equal(result.firstName, member1.firstName)
       should.equal(result.lastName, member1.lastName)
@@ -484,8 +487,16 @@ describe('member service unit tests', () => {
         availableForGigs: true
       })
       should.equal(result.availableForGigs, true)
-      should.exist(result.availableForGigsLastUpdateDate)
-      should.equal(testHelper.getDatesDiff(result.availableForGigsLastUpdateDate, new Date()), 0)
+      // The timestamp is tracked in storage but remains an internal response field.
+      should.not.exist(result.availableForGigsLastUpdateDate)
+      const updatedMember = await prisma.member.findUnique({
+        where: { userId: BigInt(member2.userId) }
+      })
+      should.exist(updatedMember.availableForGigsLastUpdateDate)
+      should.equal(Math.abs(testHelper.getDatesDiff(
+        updatedMember.availableForGigsLastUpdateDate,
+        new Date()
+      )) < 1000, true)
     })
 
     it('update member - availableForGigsLastUpdateDate not set when availableForGigs not changed', async () => {
