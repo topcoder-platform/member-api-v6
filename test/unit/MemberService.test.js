@@ -8,7 +8,8 @@ const config = require('config')
 const chai = require('chai')
 const fs = require('fs')
 const path = require('path')
-const awsMock = require('aws-sdk-mock')
+const { mockClient } = require('aws-sdk-client-mock')
+const { PutObjectCommand, S3Client } = require('@aws-sdk/client-s3')
 const axios = require('axios')
 
 const placeholderDbUrl = 'postgresql://user:pass@localhost:5432/topcoder?schema=public'
@@ -25,6 +26,7 @@ const testHelper = require('../testHelper')
 const should = chai.should()
 
 const photoContent = fs.readFileSync(path.join(__dirname, '../photo.png'))
+const s3Mock = mockClient(S3Client)
 
 describe('member service unit tests', () => {
   // test data
@@ -37,20 +39,15 @@ describe('member service unit tests', () => {
     member1 = data.member1
     member2 = data.member2
 
-    // mock S3 before creating S3 instance
-    awsMock.mock('S3', 'getObject', (params, callback) => {
-      callback(null, { Body: Buffer.from(photoContent) })
-    })
-
-    awsMock.mock('S3', 'upload', (params, callback) => {
-      callback(null)
-    })
+    // Mock the SDK v3 command before the lazy S3 client is first used.
+    s3Mock.reset()
+    s3Mock.on(PutObjectCommand).resolves({})
   })
 
   after(async () => {
     await testHelper.clearData()
 
-    awsMock.restore('S3')
+    s3Mock.restore()
   })
 
   describe('get member tests', () => {

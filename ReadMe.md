@@ -2,10 +2,10 @@
 
 ## Technology Stack
 
-- Node.js 22 (use the version pinned in `.nvmrc`)
+- Node.js 26.5.0 (use the version pinned in `.nvmrc`)
 - TypeScript and NestJS 11, with the established Express routes mounted through Nest
 - Prisma ORM 7 with the PostgreSQL driver adapter
-- pnpm 10.33.2
+- pnpm 11.15.1
 - PostgreSQL
 - Docker and Docker Compose
 

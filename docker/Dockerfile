@@ -15,21 +15,47 @@ FROM build-base AS build
 COPY . .
 RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false \
     pnpm install --frozen-lockfile
-RUN pnpm lint && pnpm build
+RUN pnpm lint && pnpm build \
+    && rm -rf dist/src/scripts \
+    && rm -f "dist/docs/Member API.postman_collection.json" \
+        dist/tsconfig.build.tsbuildinfo \
+    && find dist -type f -name '*.d.ts' -delete
 RUN sh docker/prune-internal-api-packages.sh \
-    && rm docker/prune-internal-api-packages.sh
+    && rm docker/prune-internal-api-packages.sh \
+    && pnpm prune --prod \
+    && find node_modules -type f \
+        \( -name yarn.lock -o -name package-lock.json -o -name pnpm-lock.yaml \
+        -o -name npm-shrinkwrap.json \) -delete \
+    && rm -f pnpm-lock.yaml \
+        node_modules/.modules.yaml \
+        node_modules/.package-map.json \
+        node_modules/.pnpm-workspace-state-v1.json \
+        node_modules/.pnpm/lock.yaml
 
 # The pinned Wolfi/glibc runtime supports the checked-in Debian/OpenSSL 3 Prisma
 # engines without shipping a shell, package manager, or build toolchain.
 FROM cgr.dev/chainguard/node:latest@sha256:c002402b355201714dfbeb3b1a7ca99152cccced4b334496db2442a3a9bf4883 AS runtime
 
+# The upstream minimal Node image currently includes npm launchers. Remove them
+# and their package payload with Node itself; this image intentionally has no shell.
+USER 0
+RUN ["/usr/bin/node", "-e", "const fs=require('node:fs'); for (const target of ['/usr/bin/npm','/usr/bin/npx','/usr/bin/corepack','/usr/lib/node_modules/npm','/usr/lib/node_modules/corepack']) fs.rmSync(target,{force:true,recursive:true})"]
+
 WORKDIR /member-api-v6
 
 ENV NODE_OPTIONS="--enable-source-maps"
 
-# Retain the validated install because startup migrations and maintenance scripts
-# require Prisma CLI, ts-node, schemas, and generated clients at runtime.
-COPY --from=build --chown=65532:65532 /member-api-v6 /member-api-v6
+# Copy only compiled application code, production dependencies, static runtime
+# assets, configuration, and the Prisma CLI migration inputs. The Chainguard
+# runtime itself contains neither npm nor pnpm, and no source tree, development
+# dependency, repository metadata, or lockfile is copied from the build stage.
+COPY --from=build --chown=65532:65532 /member-api-v6/node_modules ./node_modules
+COPY --from=build --chown=65532:65532 /member-api-v6/dist ./dist
+COPY --from=build --chown=65532:65532 /member-api-v6/config/default.js ./config/default.js
+COPY --from=build --chown=65532:65532 /member-api-v6/prisma/migrations ./prisma/migrations
+COPY --from=build --chown=65532:65532 /member-api-v6/prisma/schema.prisma ./prisma/schema.prisma
+COPY --from=build --chown=65532:65532 /member-api-v6/prisma.config.ts ./prisma.config.ts
+COPY --from=build --chown=65532:65532 /member-api-v6/docker/entrypoint.js ./docker/entrypoint.js
 
 USER 65532
 ENTRYPOINT ["/usr/bin/node", "/member-api-v6/docker/entrypoint.js"]

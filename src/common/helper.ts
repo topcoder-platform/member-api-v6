@@ -4,7 +4,7 @@
 const _ = require('lodash')
 const constants = require('../../app-constants')
 const errors = require('./errors')
-const AWS = require('aws-sdk')
+const { PutObjectCommand, S3Client } = require('@aws-sdk/client-s3')
 const config = require('config')
 const axios = require('axios')
 const busApi = require('topcoder-bus-api-wrapper')
@@ -33,22 +33,32 @@ const RATING_COLORS = [{
 let busApiClient
 
 const awsConfig: any = {
-  s3: config.AMAZON.S3_API_VERSION,
   region: config.AMAZON.AWS_REGION
 }
 if (config.AMAZON.AWS_ACCESS_KEY_ID && config.AMAZON.AWS_SECRET_ACCESS_KEY) {
-  awsConfig.accessKeyId = config.AMAZON.AWS_ACCESS_KEY_ID
-  awsConfig.secretAccessKey = config.AMAZON.AWS_SECRET_ACCESS_KEY
+  awsConfig.credentials = {
+    accessKeyId: config.AMAZON.AWS_ACCESS_KEY_ID,
+    secretAccessKey: config.AMAZON.AWS_SECRET_ACCESS_KEY,
+    ...(config.AMAZON.AWS_SESSION_TOKEN
+      ? { sessionToken: config.AMAZON.AWS_SESSION_TOKEN }
+      : {})
+  }
 }
-
-AWS.config.update(awsConfig)
 
 let s3
 
-// lazy loading to allow mock tests
+/**
+ * Return the shared AWS SDK v3 S3 client, creating it on first use.
+ *
+ * The client uses the configured region and optional explicit credentials;
+ * otherwise the standard AWS credential provider chain remains active.
+ *
+ * @returns {import('@aws-sdk/client-s3').S3Client} shared S3 client
+ * @throws {Error} if the AWS SDK cannot initialize its configured providers
+ */
 function getS3 () {
   if (!s3) {
-    s3 = new AWS.S3()
+    s3 = new S3Client(awsConfig)
   }
   return s3
 }
@@ -219,7 +229,8 @@ async function getMemberByHandle (handle) {
  * @param {Buffer} data the file data
  * @param {String} mimetype the MIME type
  * @param {String} fileName the original file name
- * @return {Promise<String>} the uploaded photo URL
+ * @returns {Promise<String>} the uploaded photo URL
+ * @throws {Error} when the S3 upload fails
  */
 async function uploadPhotoToS3 (data, mimetype, fileName) {
   const params = {
@@ -233,7 +244,7 @@ async function uploadPhotoToS3 (data, mimetype, fileName) {
     }
   }
   // Upload to S3
-  await getS3().upload(params).promise()
+  await getS3().send(new PutObjectCommand(params))
 
   // construct photo URL
   return config.PHOTO_URL_TEMPLATE.replace('<key>', fileName)

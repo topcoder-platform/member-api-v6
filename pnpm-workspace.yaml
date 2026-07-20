@@ -45,4 +45,3 @@ overrides:
   'picomatch@>=4.0.0 <4.0.4': 4.0.4
   'qs@<6.15.2': 6.15.3
   'serialize-javascript@<7.0.5': 7.0.7
-  'uuid@<11.1.1': 11.1.1
