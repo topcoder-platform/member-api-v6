@@ -48,7 +48,8 @@ async function main () {
   ])
 
   console.log('Starting application...')
-  require(path.join(process.cwd(), 'dist/main.js'))
+  const { bootstrap } = require(path.join(process.cwd(), 'dist/main.js'))
+  await bootstrap()
 }
 
 main().catch(error => {
