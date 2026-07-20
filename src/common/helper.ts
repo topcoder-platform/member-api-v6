@@ -6,9 +6,9 @@ const constants = require('../../app-constants')
 const errors = require('./errors')
 const AWS = require('aws-sdk')
 const config = require('config')
+const axios = require('axios')
 const busApi = require('topcoder-bus-api-wrapper')
 const querystring = require('querystring')
-const request = require('request')
 const prisma = require('./prisma').getClient()
 
 // Color schema for Ratings
@@ -498,20 +498,16 @@ async function parseGroupIds (groupIds) {
 
 async function getGroupId (id): Promise<any> {
   const token = await getM2MToken()
-  return new Promise<any>(function (resolve, reject) {
-    request({ url: `${config.GROUPS_API_URL}/${id}`,
-      headers: {
-        Authorization: `Bearer ${token}`
-      } },
-    function (error, response, body) {
-      if (response.statusCode === 200) {
-        resolve(JSON.parse(body))
-      } else {
-        reject(error)
-      }
-    }
-    )
+  const response = await axios.get(`${config.GROUPS_API_URL}/${id}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    validateStatus: () => true
   })
+  if (response.status === 200) {
+    return response.data
+  }
+  throw new Error(`Groups API returned status ${response.status}`)
 }
 
 async function getAllowedGroupIds (currentUser, subjectUser, groupIds) {
@@ -538,20 +534,16 @@ async function getAllowedGroupIds (currentUser, subjectUser, groupIds) {
 
 async function getMemberGroups (memberId): Promise<any[]> {
   const token = await getM2MToken()
-  return new Promise<any[]>(function (resolve, reject) {
-    request({ url: `${config.GROUPS_API_URL}/memberGroups/${memberId}`,
-      headers: {
-        Authorization: `Bearer ${token}`
-      } },
-    function (error, response, body) {
-      if (response.statusCode === 200) {
-        resolve(JSON.parse(body))
-      } else {
-        reject(error)
-      }
-    }
-    )
+  const response = await axios.get(`${config.GROUPS_API_URL}/memberGroups/${memberId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    validateStatus: () => true
   })
+  if (response.status === 200) {
+    return response.data
+  }
+  throw new Error(`Groups API returned status ${response.status}`)
 }
 
 /*
