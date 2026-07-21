@@ -90,7 +90,7 @@ module.exports = {
   FILE_UPLOAD_SIZE_LIMIT: process.env.FILE_UPLOAD_SIZE_LIMIT
     ? Number(process.env.FILE_UPLOAD_SIZE_LIMIT) : 10 * 1024 * 1024, // 10M
 
-  // photo URL template, its <key> will be replaced with S3 object key,
+  // photo URL template, its <key> will be replaced with the generated file name,
   // the URL is specific to AWS region and bucket, you may go to AWS console S3 service to
   // see bucket object URL to get the URL structure
   PHOTO_URL_TEMPLATE: process.env.PHOTO_URL_TEMPLATE || 'https://member-media.topcoder-dev.com/member/profile/<key>',

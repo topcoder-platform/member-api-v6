@@ -233,9 +233,13 @@ async function getMemberByHandle (handle) {
  * @throws {Error} when the S3 upload fails
  */
 async function uploadPhotoToS3 (data, mimetype, fileName) {
+  // AWS SDK v2 treated a configured "bucket/prefix" as a bucket plus key prefix.
+  // SDK v3 requires Bucket to contain only the bucket name, so preserve that behavior explicitly.
+  const [bucket, ...keyPrefixParts] = config.AMAZON.PHOTO_S3_BUCKET.split('/')
+  const key = [...keyPrefixParts.filter(Boolean), fileName].join('/')
   const params = {
-    Bucket: config.AMAZON.PHOTO_S3_BUCKET,
-    Key: fileName,
+    Bucket: bucket,
+    Key: key,
     Body: data,
     ContentType: mimetype,
     // ACL: 'public-read', // no public access after platform security updates

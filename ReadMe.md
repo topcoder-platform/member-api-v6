@@ -117,10 +117,10 @@ The following parameters can be set in config files or in env variables:
 - AMAZON.AWS_SECRET_ACCESS_KEY: The Amazon certificate access key to use when connecting.
 - AMAZON.AWS.SESSION_TOKEN: The user session token, used when developing locally against the TC dev AWS services
 - AMAZON.AWS_REGION: The Amazon certificate region to use when connecting.
-- AMAZON.PHOTO_S3_BUCKET: the AWS S3 bucket to store photos
+- AMAZON.PHOTO_S3_BUCKET: the AWS S3 bucket to store photos, optionally followed by an object key prefix (for example, `bucket/member/profile`)
 - AMAZON.S3_API_VERSION: the AWS S3 API version
 - FILE_UPLOAD_SIZE_LIMIT: the file upload size limit in bytes
-- PHOTO_URL_TEMPLATE: photo URL template, its <key> will be replaced with S3 object key
+- PHOTO_URL_TEMPLATE: photo URL template, its <key> will be replaced with the generated file name
 - VERIFY_TOKEN_EXPIRATION: verify token expiration in minutes
 - EMAIL_VERIFY_AGREE_URL: email verify agree URL, the <emailVerifyToken> will be replaced with generated verify token
 - EMAIL_VERIFY_DISAGREE_URL: email verify disagree URL

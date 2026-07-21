@@ -20,6 +20,7 @@ process.env.RESOURCES_DB_URL = process.env.RESOURCES_DB_URL || placeholderDbUrl
 process.env.ENGAGEMENTS_DB_URL = process.env.ENGAGEMENTS_DB_URL || placeholderDbUrl
 
 const service = require('../../src/services/MemberService')
+const helper = require('../../src/common/helper')
 const prisma = require('../../src/common/prisma').getClient()
 const testHelper = require('../testHelper')
 
@@ -507,15 +508,48 @@ describe('member service unit tests', () => {
 
   describe('upload photo tests', () => {
     it('upload photo successfully', async () => {
-      const result = await service.uploadPhoto({ handle: 'admin', roles: ['admin'] }, member2.handle, {
-        photo: {
-          data: photoContent,
-          mimetype: 'image/png',
-          name: 'photo.png',
-          size: photoContent.length
-        }
-      })
-      should.equal(result.photoURL.startsWith(config.PHOTO_URL_TEMPLATE.replace('<key>', '')), true)
+      const originalPhotoS3Bucket = config.AMAZON.PHOTO_S3_BUCKET
+      config.AMAZON.PHOTO_S3_BUCKET = 'test-photo-bucket/member/profile'
+      s3Mock.reset()
+      s3Mock.on(PutObjectCommand).resolves({})
+
+      try {
+        const result = await service.uploadPhoto({ handle: 'admin', roles: ['admin'] }, member2.handle, {
+          photo: {
+            data: photoContent,
+            mimetype: 'image/png',
+            name: 'photo.png',
+            size: photoContent.length
+          }
+        })
+        should.equal(result.photoURL.startsWith(config.PHOTO_URL_TEMPLATE.replace('<key>', '')), true)
+
+        const calls = s3Mock.commandCalls(PutObjectCommand)
+        should.equal(calls.length, 1)
+        should.equal(calls[0].args[0].input.Bucket, 'test-photo-bucket')
+        calls[0].args[0].input.Key.should.match(/^member\/profile\/.+\.png$/)
+      } finally {
+        config.AMAZON.PHOTO_S3_BUCKET = originalPhotoS3Bucket
+      }
+    })
+
+    it('upload photo successfully with a bare bucket name', async () => {
+      const originalPhotoS3Bucket = config.AMAZON.PHOTO_S3_BUCKET
+      config.AMAZON.PHOTO_S3_BUCKET = 'test-photo-bucket'
+      s3Mock.reset()
+      s3Mock.on(PutObjectCommand).resolves({})
+
+      try {
+        const result = await helper.uploadPhotoToS3(photoContent, 'image/png', 'photo.png')
+        should.equal(result, config.PHOTO_URL_TEMPLATE.replace('<key>', 'photo.png'))
+
+        const calls = s3Mock.commandCalls(PutObjectCommand)
+        should.equal(calls.length, 1)
+        should.equal(calls[0].args[0].input.Bucket, 'test-photo-bucket')
+        should.equal(calls[0].args[0].input.Key, 'photo.png')
+      } finally {
+        config.AMAZON.PHOTO_S3_BUCKET = originalPhotoS3Bucket
+      }
     })
 
     it('upload photo - not found', async () => {
