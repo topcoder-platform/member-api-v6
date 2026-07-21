@@ -27,6 +27,33 @@ const service = require('../../src/services/SearchService')
 const should = chai.should()
 
 describe('search service unit tests', () => {
+  it('searchMembers should accept a JSON-array string for userIds', async () => {
+    const prisma = prismaManager.getClient()
+    const originalMemberCount = prisma.member.count
+    let memberFilter
+
+    try {
+      prisma.member.count = async (filter) => {
+        memberFilter = filter
+        return 0
+      }
+
+      await service.searchMembers(
+        { isMachine: true },
+        {
+          userIds: '[100000013,40158994,89770408]',
+          fields: 'handle,userId'
+        }
+      )
+
+      memberFilter.where.AND.should.deep.equal([
+        { userId: { in: [100000013, 40158994, 89770408] } }
+      ])
+    } finally {
+      prisma.member.count = originalMemberCount
+    }
+  })
+
   it('searchMembers should skip stats and skills hydration for explicit field-limited lookups', async () => {
     const prisma = prismaManager.getClient()
     const skillsPrisma = prismaManager.getSkillsClient()

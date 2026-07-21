@@ -65,6 +65,35 @@ const BULK_IDENTIFIER_MAX_LENGTH = 256
 const BULK_EMAIL_REGEX = /^[+_A-Za-z0-9-]+(\.[+_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9]+)*(\.[A-Za-z]{2,}$)/
 const BULK_HANDLE_REGEX = /^[-A-Za-z0-9_.`{}[\]]+$/
 
+/**
+ * Accept arrays parsed by `qs` as well as the JSON-array query format documented
+ * by this API. Joi 14 coerced JSON array strings automatically, while Joi 18
+ * no longer coerces them.
+ * @returns {Object} Joi schema for a query-string array
+ */
+function queryArraySchema () {
+  return Joi.any().custom((value, helpers) => {
+    if (_.isArray(value)) {
+      return value
+    }
+
+    if (_.isString(value)) {
+      try {
+        const parsed = JSON.parse(value)
+        if (_.isArray(parsed)) {
+          return parsed
+        }
+      } catch (err) {
+        // Fall through to the same validation error as a non-array value.
+      }
+    }
+
+    return helpers.error('array.base')
+  }).messages({
+    'array.base': '{{#label}} must be an array'
+  })
+}
+
 const monthsAgo = (n) => {
   const date = new Date()
   date.setMonth(date.getMonth() - n)
@@ -408,12 +437,12 @@ searchMembers.schema = {
   currentUser: Joi.any(),
   query: Joi.object().keys({
     handleLower: Joi.string(),
-    handlesLower: Joi.array(),
+    handlesLower: queryArraySchema(),
     handle: Joi.string(),
-    handles: Joi.array(),
+    handles: queryArraySchema(),
     email: Joi.string(),
     userId: Joi.number(),
-    userIds: Joi.array(),
+    userIds: queryArraySchema(),
     term: Joi.string(),
     fields: Joi.string(),
     includeStats: Joi.string(),
