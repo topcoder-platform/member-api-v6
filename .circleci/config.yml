@@ -60,7 +60,7 @@ workflows:
             only:
             - develop
             - PM-4482
-            - typescript
+            - security_july_2026
             
     # Production builds are exectuted only on tagged commits to the
     # master branch.

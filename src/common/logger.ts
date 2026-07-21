@@ -109,7 +109,7 @@ logger.decorateWithLogging = (service) => {
 /**
  * Decorate all functions of a service and validate input values
  * and replace input arguments with sanitized result form Joi
- * Service method must have a `schema` property with Joi schema
+ * Service method must have a `schema` property containing a Joi property map.
  * @param {Object} service the service
  */
 logger.decorateWithValidators = function (service) {
@@ -121,7 +121,7 @@ logger.decorateWithValidators = function (service) {
     service[name] = async function () {
       const args = Array.prototype.slice.call(arguments)
       const value = _combineObject(params, args)
-      const normalized = Joi.attempt(value, method.schema, { abortEarly: false })
+      const normalized = Joi.attempt(value, Joi.object(method.schema), { abortEarly: false })
 
       const newArgs = []
       // Joi will normalize values

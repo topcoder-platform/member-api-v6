@@ -1,0 +1,47 @@
+packages:
+  - .
+
+allowBuilds:
+  '@nestjs/core': true
+  '@prisma/engines': true
+  '@scarf/scarf': false
+  aws-sdk: false
+  dtrace-provider: false
+  prisma: true
+  sharp: true
+  tc-identity-service@https://codeload.github.com/topcoder-platform/identity-api-v6/tar.gz/1b34a83edf9382dd16e8289a5704702a6b19b9d6: false
+  tc-payments-api@https://codeload.github.com/topcoder-platform/tc-finance-api/tar.gz/e5322a5b39f519573934264551ec2ca6a86f88ea: false
+  topcoder-challenge-recources-api@https://codeload.github.com/topcoder-platform/resource-api-v6/tar.gz/c15912780c8c49fe65e03e22235db7b1e2aecdae: false
+  topcoder-challenges-api@https://codeload.github.com/topcoder-platform/challenge-api-v6/tar.gz/f1e5dad7178b002d4fcfc920f9ca2b3a39921f8b: false
+
+# topcoder-bus-api-wrapper intentionally resolves tc-core-library-js from Git.
+# Preserve that established dependency graph when using pnpm 11's stricter defaults.
+blockExoticSubdeps: false
+
+overrides:
+  '@hono/node-server@<1.19.13': 1.19.14
+  '@isaacs/brace-expansion@<=5.0.0': 5.0.1
+  '@nestjs/core@<=11.1.17': 11.1.28
+  'ajv@<6.14.0': 6.15.0
+  'ajv@>=7.0.0 <8.18.0': 8.18.0
+  'axios@<1.18.1': 1.18.1
+  'brace-expansion@>=1.0.0 <2.0.0': 1.1.16
+  'brace-expansion@>=2.0.0 <3.0.0': 2.1.2
+  'diff@>=6.0.0 <8.0.3': 8.0.4
+  'fast-uri@<3.1.2': 3.1.2
+  'file-type@>=20.0.0 <21.3.2': 21.3.2
+  'follow-redirects@<1.16.0': 1.16.0
+  'form-data@>=4.0.0 <4.0.6': 4.0.6
+  'js-yaml@>=3.0.0 <4.0.0': 3.15.0
+  'js-yaml@>=4.0.0 <4.1.2': 4.3.0
+  'lodash@<4.18.1': 4.18.1
+  'minimatch@>=3.0.0 <3.1.4': 3.1.5
+  'minimatch@>=9.0.0 <9.0.7': 9.0.9
+  'minimatch@>=10.0.0 <10.2.3': 10.2.4
+  'multer@<2.2.0': 2.2.0
+  'path-to-regexp@>=0.1.0 <0.1.13': 0.1.13
+  'path-to-regexp@>=8.0.0 <8.4.0': 8.4.2
+  'picomatch@>=2.0.0 <2.3.2': 2.3.2
+  'picomatch@>=4.0.0 <4.0.4': 4.0.4
+  'qs@<6.15.2': 6.15.3
+  'serialize-javascript@<7.0.5': 7.0.7

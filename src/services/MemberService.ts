@@ -7,7 +7,7 @@
 const _ = require('lodash')
 const Joi = require('joi')
 const crypto = require('crypto')
-const uuid = require('uuid/v4')
+const { v4: uuid } = require('uuid')
 const config = require('config')
 const helper = require('../common/helper')
 const logger = require('../common/logger')
@@ -18,7 +18,7 @@ const hubspot = require('../common/hubspot')
 const copilotEmailAccess = require('../common/copilotEmailAccess')
 const memberTraitService = require('./MemberTraitService')
 const mime = require('mime-types')
-const fileType = require('file-type')
+const { fileTypeFromBuffer } = require('file-type')
 const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
@@ -36,7 +36,6 @@ const academyPrisma = prismaManager.getAcademyClient()
 const resourcesPrisma = prismaManager.getResourcesClient()
 const engagementsPrisma = prismaManager.getEngagementsClient()
 const profilePDFService = require('./ProfilePDFService')
-const request = require('request')
 const axios = require('axios')
 const cityTimezones = require('city-timezones')
 const moment = require('moment-timezone')
@@ -1180,7 +1179,7 @@ async function uploadPhoto (currentUser, handle, files) {
     } characters.`)
   }
   // mime type validation
-  const type = await fileType.fromBuffer(file.data)
+  const type = await fileTypeFromBuffer(file.data)
   const fileContentType = type.mime
   if (!fileContentType || !fileContentType.startsWith('image/')) {
     throw new errors.BadRequestError('The photo should be an image file.')
@@ -1527,73 +1526,70 @@ async function fetchGamificationAchievements (userId) {
       return ''
     }
 
-    return new Promise((resolve, reject) => {
-      try {
-        request({
-          url: finalGamificationUrl,
-          headers: {
-            Authorization: `Bearer ${token}`
+    let response
+    try {
+      response = await axios.get(finalGamificationUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        validateStatus: () => true
+      })
+    } catch (requestError) {
+      logger.warn(`Failed to fetch gamification achievements for user ${userId}: ${requestError.message}`)
+      return ''
+    }
+
+    if (response.status !== 200) {
+      logger.warn(`Gamification API returned status ${response.status} for user ${userId}`)
+      return ''
+    }
+
+    try {
+      const body = response.data
+      const data = typeof body === 'string' ? JSON.parse(body) : body
+      // Format achievements: count multiples and join with " | "
+      // Response structure: { rows: [...], count: ... }
+      const achievementMap: Record<string, number> = {}
+      const badges = data.rows || []
+
+      logger.debug(`Gamification API response for user ${userId}: rows count=${badges.length}, hasRows=${!!data.rows}`)
+
+      badges.forEach(badge => {
+        const orgBadge = badge.org_badge
+        if (orgBadge && orgBadge.badge_name) {
+          // Check if badge is active - handle both boolean and string values
+          const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
+          // Check status - case insensitive
+          const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
+
+          logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
+
+          if (isActive && isActiveStatus) {
+            const name = htmlToText(orgBadge.badge_name)
+            const key = normalizeAchievementName(name)
+            achievementMap[key] = (achievementMap[key] || 0) + 1
+          } else {
+            logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
           }
-        }, (error, response, body) => {
-          if (error) {
-            logger.warn(`Failed to fetch gamification achievements for user ${userId}: ${error.message}`)
-            resolve('')
-            return
-          }
-          if (response.statusCode !== 200) {
-            logger.warn(`Gamification API returned status ${response.statusCode} for user ${userId}`)
-            resolve('')
-            return
-          }
-          try {
-            const data = JSON.parse(body)
-            // Format achievements: count multiples and join with " | "
-            // Response structure: { rows: [...], count: ... }
-            const achievementMap: Record<string, number> = {}
-            const badges = data.rows || []
+        } else {
+          logger.debug('Badge missing org_badge or badge_name:', { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
+        }
+      })
 
-            logger.debug(`Gamification API response for user ${userId}: rows count=${badges.length}, hasRows=${!!data.rows}`)
+      logger.debug(`Achievement map for user ${userId}:`, achievementMap)
 
-            badges.forEach(badge => {
-              const orgBadge = badge.org_badge
-              if (orgBadge && orgBadge.badge_name) {
-                // Check if badge is active - handle both boolean and string values
-                const isActive = orgBadge.active === true || orgBadge.active === 'true' || String(orgBadge.active).toLowerCase() === 'true'
-                // Check status - case insensitive
-                const isActiveStatus = orgBadge.badge_status && String(orgBadge.badge_status).toLowerCase() === 'active'
+      const achievements = Object.entries(achievementMap)
+        .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
+        .join(' | ')
 
-                logger.debug(`Badge: ${orgBadge.badge_name}, active=${orgBadge.active} (${typeof orgBadge.active}), status=${orgBadge.badge_status}, isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
-
-                if (isActive && isActiveStatus) {
-                  const name = htmlToText(orgBadge.badge_name)
-                  const key = normalizeAchievementName(name)
-                  achievementMap[key] = (achievementMap[key] || 0) + 1
-                } else {
-                  logger.debug(`Badge ${orgBadge.badge_name} filtered out: isActive=${isActive}, isActiveStatus=${isActiveStatus}`)
-                }
-              } else {
-                logger.debug('Badge missing org_badge or badge_name:', { hasOrgBadge: !!badge.org_badge, hasBadgeName: !!(badge.org_badge && badge.org_badge.badge_name) })
-              }
-            })
-
-            logger.debug(`Achievement map for user ${userId}:`, achievementMap)
-
-            const achievements = Object.entries(achievementMap)
-              .map(([name, count]) => count > 1 ? `${count}x ${name}` : name)
-              .join(' | ')
-
-            logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
-            resolve(achievements)
-          } catch (parseError) {
-            logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${body && body.substring(0, 200)}`)
-            resolve('')
-          }
-        })
-      } catch (requestError) {
-        logger.error(`Error creating gamification request for user ${userId}: ${requestError.message}`)
-        resolve('')
-      }
-    })
+      logger.debug(`Final achievements string for user ${userId}: "${achievements}"`)
+      return achievements
+    } catch (parseError) {
+      const body = response.data
+      const bodyPreview = typeof body === 'string' ? body.substring(0, 200) : JSON.stringify(body).substring(0, 200)
+      logger.warn(`Failed to parse gamification response for user ${userId}: ${parseError.message}, body: ${bodyPreview}`)
+      return ''
+    }
   } catch (error) {
     logger.warn(`Error fetching gamification achievements for user ${userId}: ${error.message}`)
     return ''
@@ -1639,50 +1635,45 @@ async function fetchCertificationsAndCourses (userId): Promise<any> {
       return { certifications: [], courses: [] }
     }
 
-    return new Promise((resolve, reject) => {
-      try {
-        request({
-          url: finalUrl,
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }, (error, response, body) => {
-          if (error) {
-            logger.warn(`Failed to fetch certifications for user ${userId}: ${error.message}`)
-            resolve({ certifications: [], courses: [] })
-            return
-          }
-          if (response.statusCode !== 200) {
-            logger.warn(`Learning-paths API returned status ${response.statusCode} for user ${userId}`)
-            resolve({ certifications: [], courses: [] })
-            return
-          }
-          try {
-            const data = JSON.parse(body)
+    let response
+    try {
+      response = await axios.get(finalUrl, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        validateStatus: () => true
+      })
+    } catch (requestError) {
+      logger.warn(`Failed to fetch certifications for user ${userId}: ${requestError.message}`)
+      return { certifications: [], courses: [] }
+    }
 
-            // Process certifications
-            const certifications = (data.enrollments || [])
-              .filter(e => e.status === 'completed' && e.topcoderCertification)
-              .map(e => `${e.topcoderCertification.title} - Topcoder Academy`)
+    if (response.status !== 200) {
+      logger.warn(`Learning-paths API returned status ${response.status} for user ${userId}`)
+      return { certifications: [], courses: [] }
+    }
 
-            // Process courses
-            const courses = (data.courses || [])
-              .map(c => {
-                const title = c.certificationTitle || c.certification || 'Course'
-                return `${title} - Topcoder Academy`
-              })
+    try {
+      const body = response.data
+      const data = typeof body === 'string' ? JSON.parse(body) : body
 
-            resolve({ certifications, courses })
-          } catch (parseError) {
-            logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
-            resolve({ certifications: [], courses: [] })
-          }
+      // Process certifications
+      const certifications = (data.enrollments || [])
+        .filter(e => e.status === 'completed' && e.topcoderCertification)
+        .map(e => `${e.topcoderCertification.title} - Topcoder Academy`)
+
+      // Process courses
+      const courses = (data.courses || [])
+        .map(c => {
+          const title = c.certificationTitle || c.certification || 'Course'
+          return `${title} - Topcoder Academy`
         })
-      } catch (requestError) {
-        logger.error(`Error creating request for user ${userId}: ${requestError.message}`)
-        resolve({ certifications: [], courses: [] })
-      }
-    })
+
+      return { certifications, courses }
+    } catch (parseError) {
+      logger.warn(`Failed to parse learning-paths response for user ${userId}: ${parseError.message}`)
+      return { certifications: [], courses: [] }
+    }
   } catch (error) {
     logger.warn(`Error fetching certifications for user ${userId}: ${error.message}`)
     return { certifications: [], courses: [] }

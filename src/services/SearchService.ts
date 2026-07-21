@@ -890,7 +890,7 @@ searchMembersBySkills.schema = {
     page: Joi.page(),
     perPage: Joi.perPage(),
     includeStats: Joi.string(),
-    sortBy: Joi.string().valid(MEMBER_SORT_BY_FIELDS).default('skillScore'),
+    sortBy: Joi.string().valid(...MEMBER_SORT_BY_FIELDS).default('skillScore'),
     sortOrder: Joi.string().valid('asc', 'desc').default('desc')
   })
 }
