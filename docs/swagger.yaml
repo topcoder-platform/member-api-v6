@@ -1647,15 +1647,16 @@ paths:
         - Statistics
       description: >
         Get the count-only Copilot and Reviewer special-role summary displayed
-        on a member profile. Counts are distinct resource challenge IDs. A
-        challenge with more than one matching reviewer role is counted once,
-        and a role key is omitted when its count is zero. Reviewer assignments
-        include exactly Iterative Reviewer, Primary Reviewer, Reviewer, Failure
-        Reviewer, Final Reviewer, Aggregator, Stress Reviewer, Accuracy
-        Reviewer, Primary Screener, Checkpoint Screener, and Checkpoint
-        Reviewer. Copilot assignments use the Copilot resource role. This cheap
-        summary reads only the resources schema and does not load challenge
-        names or Copilot track/fulfillment details.
+        on a member profile. Counts use the same anonymous-visible challenge
+        set as the role detail endpoints: challenges have no groups, no
+        user-whitelist rows, and are not tasks. A challenge with more than one
+        matching reviewer role is counted once, and a role key is omitted when
+        its count is zero. Reviewer assignments include exactly Iterative
+        Reviewer, Primary Reviewer, Reviewer, Failure Reviewer, Final Reviewer,
+        Aggregator, Stress Reviewer, Accuracy Reviewer, Primary Screener,
+        Checkpoint Screener, and Checkpoint Reviewer. Copilot assignments use
+        the Copilot resource role. The summary does not load challenge names or
+        Copilot track/fulfillment details.
 
         Authorization:
           - Public: Anonymous callers may retrieve the count-only summary.
@@ -1676,6 +1677,10 @@ paths:
             $ref: '#/definitions/ErrorModel'
         '404':
           description: Member not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '503':
+          description: Required co-located challenges/resources schemas are unavailable
           schema:
             $ref: '#/definitions/ErrorModel'
         '500':
@@ -1710,10 +1715,10 @@ paths:
         excluded, a zero denominator returns 0, and the percentage is rounded
         to two decimal places on a 0-100 scale.
 
-        Cross-schema detail queries require the `challenges` and `resources`
+        Cross-schema special-role queries require the `challenges` and `resources`
         schemas to be co-located in the challenge database, as in the supported
         deployment. A split-database deployment receives `503 Service
-        Unavailable` for details while the resource-only summary remains usable.
+        Unavailable` for summary and detail requests.
 
         Authorization:
           - Public: Anonymous callers may retrieve anonymous-visible challenges.
@@ -2823,7 +2828,7 @@ definitions:
     type: object
     description: >
       Count-only special-role summary. `copilot` and `reviewer` are omitted when
-      their distinct resource challenge count is zero.
+      their anonymous-visible distinct challenge count is zero.
     properties:
       copilot:
         $ref: '#/definitions/SpecialRoleCount'
@@ -2838,7 +2843,7 @@ definitions:
         type: integer
         format: int32
         minimum: 1
-        description: Distinct resource challenge count for this role family.
+        description: Anonymous-visible distinct challenge count for this role family.
   SpecialRoleTrackCounts:
     type: object
     description: >
