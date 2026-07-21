@@ -1,9 +1,8 @@
 /**
  * Provides public profile statistics for a member's Copilot and Reviewer
- * challenge assignments. Summary counts stay in the resources database, while
- * detail queries join the resources and challenges schemas so visibility
- * filtering, sorting, and pagination remain database-bound for members with
- * thousands of role assignments.
+ * challenge assignments. Summary and detail queries join the resources and
+ * challenges schemas so visibility filtering, sorting, and pagination remain
+ * database-bound for members with thousands of role assignments.
  */
 
 const _ = require('lodash')
@@ -13,7 +12,7 @@ const logger = require('../common/logger')
 const errors = require('../common/errors')
 const prismaManager = require('../common/prisma')
 
-const { ChallengesPrisma, ResourcesPrisma } = prismaManager
+const { ChallengesPrisma } = prismaManager
 
 const COPILOT_ROLE = 'copilot'
 const REVIEWER_ROLE = 'reviewer'
@@ -39,8 +38,6 @@ const ROLE_NAMES_LOWER = {
   [COPILOT_ROLE]: [COPILOT_ROLE],
   [REVIEWER_ROLE]: REVIEWER_ROLE_NAMES_LOWER
 }
-const ALL_ROLE_NAMES_LOWER = [COPILOT_ROLE, ...REVIEWER_ROLE_NAMES_LOWER]
-
 const TRACK_KEY_BY_NORMALIZED_NAME = {
   DEVELOPMENT: 'DEVELOPMENT',
   DEVELOP: 'DEVELOPMENT',
@@ -56,8 +53,8 @@ const TRACK_KEY_BY_NORMALIZED_NAME = {
 /**
  * Execute a challenge-client raw query and turn a missing cross-schema relation
  * into an explicit service-availability error. Supported deployments co-locate
- * the `challenges` and `resources` schemas; split-database deployments can still
- * use the resource-only summary but cannot safely paginate visible details.
+ * the `challenges` and `resources` schemas; split-database deployments cannot
+ * safely calculate anonymous-visible summary or detail results.
  * @param {Object} query parameterized ChallengesPrisma SQL fragment
  * @returns {Promise<Array<Object>>} raw PostgreSQL result rows
  * @throws {ServiceUnavailableError} when required cross-schema tables are absent
@@ -76,7 +73,7 @@ async function runChallengeCrossSchemaQuery (query) {
       databaseMessage.includes('does not exist')
     ) {
       throw new errors.ServiceUnavailableError(
-        'Special role challenge details require the challenges and resources schemas to be co-located.'
+        'Special role queries require the challenges and resources schemas to be co-located.'
       )
     }
     throw error
@@ -127,48 +124,6 @@ function buildFulfillment (completed, cancelled) {
     total,
     rate: total > 0 ? Number(((completed / total) * 100).toFixed(2)) : 0
   }
-}
-
-/**
- * Count distinct resource challenges for both special-role families without
- * joining challenge details. The main profile summary uses this resource-only
- * query so restricted challenges still contribute to the role badge count and
- * long histories are reduced to two scalar rows in PostgreSQL.
- * @param {BigInt|Number|String} userId member user ID from the members database
- * @returns {Promise<Object>} `copilot` and `reviewer` distinct resource counts
- * @throws {Error} propagates resources database query failures
- */
-async function loadRoleCounts (userId) {
-  const rows = await prismaManager.getResourcesClient().$queryRaw(ResourcesPrisma.sql`
-    WITH "specialRoleChallenges" AS (
-      SELECT
-        CASE
-          WHEN resourceRole."nameLower" = ${COPILOT_ROLE} THEN ${COPILOT_ROLE}
-          ELSE ${REVIEWER_ROLE}
-        END AS "role",
-        resource."challengeId"
-      FROM resources."Resource" AS resource
-      INNER JOIN resources."ResourceRole" AS resourceRole
-        ON resourceRole."id" = resource."roleId"
-      WHERE resource."memberId" = ${String(userId)}
-        AND resourceRole."nameLower" IN (${ResourcesPrisma.join(ALL_ROLE_NAMES_LOWER)})
-      GROUP BY 1, resource."challengeId"
-    )
-    SELECT "role", COUNT(*)::int AS "challengeCount"
-    FROM "specialRoleChallenges"
-    GROUP BY "role"
-  `)
-
-  const counts = {
-    [COPILOT_ROLE]: 0,
-    [REVIEWER_ROLE]: 0
-  }
-  _.forEach(rows, row => {
-    if (_.includes(SPECIAL_ROLES, row.role)) {
-      counts[row.role] = Number(row.challengeCount) || 0
-    }
-  })
-  return counts
 }
 
 /**
@@ -226,7 +181,8 @@ function buildVisibleRoleChallengesCte (userId, role) {
  * @param {BigInt|Number|String} userId member user ID from the members database
  * @param {String} role `copilot` or `reviewer`
  * @returns {Promise<Number>} visible distinct challenge count
- * @throws {Error} propagates resources database query failures
+ * @throws {ServiceUnavailableError} when required cross-schema tables are absent
+ * @throws {Error} propagates challenge database query failures
  */
 async function countVisibleRoleChallenges (userId, role) {
   const roleChallengesCte = buildVisibleRoleChallengesCte(userId, role)
@@ -376,17 +332,26 @@ function formatChallenge (challenge) {
 }
 
 /**
- * Get cheap public Copilot and Reviewer badge counts for a member profile.
- * Roles with no distinct resource challenges are omitted, and challenges with
- * multiple reviewer assignments count once. No challenge names are loaded.
+ * Get public Copilot and Reviewer badge counts for a member profile. The
+ * summary reuses the detail view's anonymous-visible challenge set so its
+ * counts match the role details. Roles with no visible challenges are omitted,
+ * and challenges with multiple reviewer assignments count once.
  * @param {String} handle member handle resolved through the members table
  * @returns {Promise<Object>} optional count-only Copilot/Reviewer summaries
  * @throws {NotFoundError} when the member handle does not exist
- * @throws {Error} propagates resources database lookup failures
+ * @throws {ServiceUnavailableError} when required cross-schema tables are absent
+ * @throws {Error} propagates challenge database query failures
  */
 async function getMemberRoleStats (handle) {
   const member = await helper.getMemberByHandle(handle)
-  const counts = await loadRoleCounts(member.userId)
+  const [copilotCount, reviewerCount] = await Promise.all([
+    countVisibleRoleChallenges(member.userId, COPILOT_ROLE),
+    countVisibleRoleChallenges(member.userId, REVIEWER_ROLE)
+  ])
+  const counts = {
+    [COPILOT_ROLE]: copilotCount,
+    [REVIEWER_ROLE]: reviewerCount
+  }
   const result = {}
 
   if (counts[COPILOT_ROLE] > 0) {
@@ -412,7 +377,8 @@ getMemberRoleStats.schema = {
  * @returns {Promise<Object>} internally consistent paginated challenge result
  * @throws {NotFoundError} when the member handle does not exist
  * @throws {ValidationError} when role or pagination input is invalid
- * @throws {Error} propagates resources database lookup failures
+ * @throws {ServiceUnavailableError} when required cross-schema tables are absent
+ * @throws {Error} propagates challenge database query failures
  */
 async function getMemberRoleChallenges (handle, role, query: any = {}) {
   const member = await helper.getMemberByHandle(handle)
