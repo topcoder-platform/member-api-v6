@@ -2,8 +2,8 @@
  * Provides public profile statistics for a member's Copilot and Reviewer
  * challenge assignments. Summary counts stay in the resources database, while
  * detail queries join the resources and challenges schemas so visibility
- * filtering, sorting, and pagination remain database-bound for members with
- * thousands of role assignments.
+ * filtering and sorting remain database-bound for members with thousands of
+ * role assignments.
  */
 
 const _ = require('lodash')
@@ -18,8 +18,6 @@ const { ChallengesPrisma, ResourcesPrisma } = prismaManager
 const COPILOT_ROLE = 'copilot'
 const REVIEWER_ROLE = 'reviewer'
 const SPECIAL_ROLES = [COPILOT_ROLE, REVIEWER_ROLE]
-const DEFAULT_PER_PAGE = 100
-const MAX_PER_PAGE = 100
 
 const REVIEWER_ROLE_NAMES_LOWER = [
   'iterative reviewer',
@@ -57,7 +55,7 @@ const TRACK_KEY_BY_NORMALIZED_NAME = {
  * Execute a challenge-client raw query and turn a missing cross-schema relation
  * into an explicit service-availability error. Supported deployments co-locate
  * the `challenges` and `resources` schemas; split-database deployments can still
- * use the resource-only summary but cannot safely paginate visible details.
+ * use the resource-only summary but cannot safely load visible details.
  * @param {Object} query parameterized ChallengesPrisma SQL fragment
  * @returns {Promise<Array<Object>>} raw PostgreSQL result rows
  * @throws {ServiceUnavailableError} when required cross-schema tables are absent
@@ -220,37 +218,16 @@ function buildVisibleRoleChallengesCte (userId, role) {
 }
 
 /**
- * Count distinct anonymous-visible challenges for one role. Details pagination
- * uses this count, rather than the unrestricted badge count, so totals and
- * pages never disclose or reserve positions for restricted challenge IDs.
- * @param {BigInt|Number|String} userId member user ID from the members database
- * @param {String} role `copilot` or `reviewer`
- * @returns {Promise<Number>} visible distinct challenge count
- * @throws {Error} propagates resources database query failures
- */
-async function countVisibleRoleChallenges (userId, role) {
-  const roleChallengesCte = buildVisibleRoleChallengesCte(userId, role)
-  const rows = await runChallengeCrossSchemaQuery(ChallengesPrisma.sql`
-    ${roleChallengesCte}
-    SELECT COUNT(*)::int AS "challengeCount"
-    FROM "visibleRoleChallenges"
-  `)
-  return Number(_.get(rows, '[0].challengeCount')) || 0
-}
-
-/**
- * Load one bounded page of anonymous-visible challenge details. PostgreSQL
+ * Load every anonymous-visible challenge detail. PostgreSQL
  * orders lifecycle end date, then start/creation fallback, newest first; latest
  * Resource assignment and challenge ID are deterministic tie-breakers. The
  * Resource timestamp is assignment time, not a literal review-completion date.
  * @param {BigInt|Number|String} userId member user ID from the members database
  * @param {String} role `copilot` or `reviewer`
- * @param {Number} offset zero-based visible challenge offset
- * @param {Number} limit maximum challenge rows, bounded to 100 by Joi
  * @returns {Promise<Array<Object>>} newest-first visible challenge rows
  * @throws {Error} propagates cross-schema PostgreSQL query failures
  */
-async function loadVisibleRoleChallengesPage (userId, role, offset, limit) {
+async function loadVisibleRoleChallenges (userId, role) {
   const roleChallengesCte = buildVisibleRoleChallengesCte(userId, role)
   return runChallengeCrossSchemaQuery(ChallengesPrisma.sql`
     ${roleChallengesCte}
@@ -278,8 +255,6 @@ async function loadVisibleRoleChallengesPage (userId, role, offset, limit) {
       ) DESC,
       challenge."resourceCreatedAt" DESC,
       challenge."id" ASC
-    LIMIT ${limit}
-    OFFSET ${offset}
   `)
 }
 
@@ -354,7 +329,7 @@ function serializeDate (value) {
 
 /**
  * Format a visible cross-schema query row for the public challenge-card
- * contract. This is used for every paginated detail item and does not raise.
+ * contract. This is used for every detail item and does not raise.
  * @param {Object} challenge flat visible challenge, track, and type row
  * @returns {Object} documented public role challenge list item
  */
@@ -403,36 +378,28 @@ getMemberRoleStats.schema = {
 }
 
 /**
- * Get one newest-first page of a member's anonymous-visible Copilot or Reviewer
- * challenges. Copilot responses also include public-set track counts and
- * terminal fulfillment. Details never return restricted challenge IDs.
+ * Get every newest-first anonymous-visible Copilot or Reviewer challenge for a
+ * member. Copilot responses also include public-set track counts and terminal
+ * fulfillment. Details never return restricted challenge IDs.
  * @param {String} handle member handle resolved through the members table
  * @param {String} role `copilot` or `reviewer`
- * @param {Object} query one-based `page` and `perPage` up to 100
- * @returns {Promise<Object>} internally consistent paginated challenge result
+ * @returns {Promise<Object>} complete challenge list and aggregate role metrics
  * @throws {NotFoundError} when the member handle does not exist
- * @throws {ValidationError} when role or pagination input is invalid
+ * @throws {ValidationError} when role input is invalid
  * @throws {Error} propagates resources database lookup failures
  */
-async function getMemberRoleChallenges (handle, role, query: any = {}) {
+async function getMemberRoleChallenges (handle, role) {
   const member = await helper.getMemberByHandle(handle)
-  const page = query.page || 1
-  const perPage = query.perPage || DEFAULT_PER_PAGE
-  const offset = (page - 1) * perPage
 
-  const [total, challengeRows, copilotMetrics] = await Promise.all([
-    countVisibleRoleChallenges(member.userId, role),
-    loadVisibleRoleChallengesPage(member.userId, role, offset, perPage),
+  const [challengeRows, copilotMetrics] = await Promise.all([
+    loadVisibleRoleChallenges(member.userId, role),
     role === COPILOT_ROLE
       ? loadVisibleCopilotMetrics(member.userId)
       : Promise.resolve(null)
   ])
   const result: any = {
     role,
-    total,
-    page,
-    perPage,
-    totalPages: total > 0 ? Math.ceil(total / perPage) : 0,
+    total: challengeRows.length,
     challenges: _.map(challengeRows, formatChallenge)
   }
   if (role === COPILOT_ROLE) {
@@ -444,11 +411,7 @@ async function getMemberRoleChallenges (handle, role, query: any = {}) {
 
 getMemberRoleChallenges.schema = {
   handle: Joi.string().trim().required(),
-  role: Joi.string().trim().lowercase().valid(...SPECIAL_ROLES).required(),
-  query: Joi.object().keys({
-    page: Joi.number().integer().min(1).default(1),
-    perPage: Joi.number().integer().min(1).max(MAX_PER_PAGE).default(DEFAULT_PER_PAGE)
-  }).default({})
+  role: Joi.string().trim().lowercase().valid(...SPECIAL_ROLES).required()
 }
 
 module.exports = {

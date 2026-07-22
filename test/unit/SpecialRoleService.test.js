@@ -60,7 +60,7 @@ function restoreModuleCache (originalEntries) {
 
 /**
  * Render nested test SQL fragments to readable text. Query-aware client stubs
- * use the output to return count, page, or metric rows; this helper does not
+ * use the output to return count, detail, or metric rows; this helper does not
  * execute SQL or raise for supported fragments.
  * @param {*} value SQL fragment, joined values, or scalar interpolation
  * @returns {String} flattened SQL-like text
@@ -177,15 +177,12 @@ describe('special role service unit tests', () => {
     }
   })
 
-  it('getMemberRoleChallenges should return a visible Reviewer page newest first', async () => {
+  it('getMemberRoleChallenges should return all visible Reviewer challenges newest first', async () => {
     const challengeSql = []
     const { service, restore } = loadSpecialRoleService({
       onResourceQuery: async () => [],
       onChallengeQuery: async (sql) => {
         challengeSql.push(sql)
-        if (sql.includes('SELECT COUNT(*)::int AS "challengeCount"')) {
-          return [{ challengeCount: 2 }]
-        }
         if (sql.includes('challengeType."name" AS "typeName"')) {
           return [
             {
@@ -219,7 +216,7 @@ describe('special role service unit tests', () => {
     })
 
     try {
-      const result = await service.getMemberRoleChallenges('devtest1400', 'reviewer', {})
+      const result = await service.getMemberRoleChallenges('devtest1400', 'reviewer')
       const allSql = challengeSql.join('\n')
 
       allSql.should.include('cardinality(challenge."groups") = 0')
@@ -228,15 +225,13 @@ describe('special role service unit tests', () => {
       allSql.should.include('MAX(resource."createdAt") AS "resourceCreatedAt"')
       allSql.should.include('COALESCE(')
       allSql.should.include('challenge."endDate"')
-      allSql.should.include('LIMIT 100')
-      allSql.should.include('OFFSET 0')
+      allSql.should.not.include('LIMIT')
+      allSql.should.not.include('OFFSET')
+      challengeSql.should.have.length(1)
       REVIEWER_ROLE_NAMES.forEach(roleName => allSql.should.include(roleName))
       result.should.deep.equal({
         role: 'reviewer',
         total: 2,
-        page: 1,
-        perPage: 100,
-        totalPages: 1,
         challenges: [
           {
             id: 'review-2',
@@ -265,26 +260,84 @@ describe('special role service unit tests', () => {
     }
   })
 
-  it('getMemberRoleChallenges should paginate Copilot rows and aggregate visible terminal metrics', async () => {
+  it('getMemberRoleChallenges should not truncate histories beyond 100 challenges', async () => {
+    const challengeRows = Array.from({ length: 101 }, (_, index) => ({
+      id: `review-${index + 1}`,
+      name: `Review ${index + 1}`,
+      status: 'COMPLETED',
+      startDate: null,
+      endDate: null,
+      resourceCreatedAt: null,
+      trackId: 'dev',
+      trackName: 'Development',
+      typeId: 'challenge',
+      typeName: 'Challenge'
+    }))
+    let detailSql
     const { service, restore } = loadSpecialRoleService({
       onResourceQuery: async () => [],
       onChallengeQuery: async (sql) => {
-        if (sql.includes('SELECT COUNT(*)::int AS "challengeCount"')) {
-          return [{ challengeCount: 3 }]
-        }
+        detailSql = sql
+        return challengeRows
+      }
+    })
+
+    try {
+      const result = await service.getMemberRoleChallenges('devtest1400', 'reviewer')
+
+      detailSql.should.not.include('LIMIT')
+      detailSql.should.not.include('OFFSET')
+      result.total.should.equal(101)
+      result.challenges.should.have.length(101)
+      result.challenges[100].id.should.equal('review-101')
+    } finally {
+      restore()
+    }
+  })
+
+  it('getMemberRoleChallenges should return all Copilot rows and aggregate visible terminal metrics', async () => {
+    const { service, restore } = loadSpecialRoleService({
+      onResourceQuery: async () => [],
+      onChallengeQuery: async (sql) => {
         if (sql.includes('challengeType."name" AS "typeName"')) {
-          return [{
-            id: 'copilot-2',
-            name: 'Second Copilot Challenge',
-            status: 'CANCELLED_ZERO_SUBMISSIONS',
-            startDate: new Date('2024-02-01T00:00:00Z'),
-            endDate: null,
-            resourceCreatedAt: new Date('2024-02-02T00:00:00Z'),
-            trackId: 'dev',
-            trackName: 'Development',
-            typeId: 'challenge',
-            typeName: 'Challenge'
-          }]
+          return [
+            {
+              id: 'copilot-3',
+              name: 'Newest Copilot Challenge',
+              status: 'ACTIVE',
+              startDate: new Date('2024-03-01T00:00:00Z'),
+              endDate: null,
+              resourceCreatedAt: new Date('2024-03-02T00:00:00Z'),
+              trackId: 'design',
+              trackName: 'Design',
+              typeId: 'challenge',
+              typeName: 'Challenge'
+            },
+            {
+              id: 'copilot-2',
+              name: 'Second Copilot Challenge',
+              status: 'CANCELLED_ZERO_SUBMISSIONS',
+              startDate: new Date('2024-02-01T00:00:00Z'),
+              endDate: null,
+              resourceCreatedAt: new Date('2024-02-02T00:00:00Z'),
+              trackId: 'dev',
+              trackName: 'Development',
+              typeId: 'challenge',
+              typeName: 'Challenge'
+            },
+            {
+              id: 'copilot-1',
+              name: 'Oldest Copilot Challenge',
+              status: 'COMPLETED',
+              startDate: new Date('2024-01-01T00:00:00Z'),
+              endDate: new Date('2024-01-31T00:00:00Z'),
+              resourceCreatedAt: new Date('2024-01-02T00:00:00Z'),
+              trackId: 'dev',
+              trackName: 'Development',
+              typeId: 'challenge',
+              typeName: 'Challenge'
+            }
+          ]
         }
         if (sql.includes('challengeTrack."track"::text AS "track"')) {
           return [
@@ -316,15 +369,9 @@ describe('special role service unit tests', () => {
     })
 
     try {
-      const result = await service.getMemberRoleChallenges('devtest1400', 'copilot', {
-        page: 2,
-        perPage: 1
-      })
+      const result = await service.getMemberRoleChallenges('devtest1400', 'copilot')
 
       result.total.should.equal(3)
-      result.totalPages.should.equal(3)
-      result.page.should.equal(2)
-      result.perPage.should.equal(1)
       result.trackCounts.should.deep.equal({ DEVELOPMENT: 2, DESIGN: 1 })
       result.fulfillment.should.deep.equal({
         completed: 1,
@@ -332,7 +379,13 @@ describe('special role service unit tests', () => {
         total: 2,
         rate: 50
       })
-      result.challenges[0].should.deep.equal({
+      result.challenges.should.have.length(3)
+      result.challenges.map(challenge => challenge.id).should.deep.equal([
+        'copilot-3',
+        'copilot-2',
+        'copilot-1'
+      ])
+      result.challenges[1].should.deep.equal({
         id: 'copilot-2',
         name: 'Second Copilot Challenge',
         status: 'CANCELLED_ZERO_SUBMISSIONS',
@@ -373,7 +426,7 @@ describe('special role service unit tests', () => {
     })
 
     try {
-      await service.getMemberRoleChallenges('devtest1400', 'reviewer', {})
+      await service.getMemberRoleChallenges('devtest1400', 'reviewer')
       should.fail('Expected a service availability error')
     } catch (error) {
       error.httpStatus.should.equal(503)

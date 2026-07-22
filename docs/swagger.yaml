@@ -1687,21 +1687,19 @@ paths:
       tags:
         - Statistics
       description: >
-        Get one newest-first page of distinct challenges assigned to a member's
-        Copilot or Reviewer role. The default and maximum page size is 100.
-        Reviewer assignments use the exact role list documented on the summary
-        endpoint and multiple reviewer assignments for one challenge collapse
-        into one item. Ordering uses challenge end date, then start/creation
-        date fallbacks, followed by resource assignment time and challenge ID
-        tie-breakers. `resourceCreatedAt` is assignment creation time and is not
-        a review-completion timestamp.
+        Get every newest-first distinct challenge assigned to a member's Copilot
+        or Reviewer role in one response. Reviewer assignments use the exact
+        role list documented on the summary endpoint and multiple reviewer
+        assignments for one challenge collapse into one item. Ordering uses
+        challenge end date, then start/creation date fallbacks, followed by
+        resource assignment time and challenge ID tie-breakers.
+        `resourceCreatedAt` is assignment creation time and is not a
+        review-completion timestamp.
 
-        The response body embeds `page`, `perPage`, `total`, and `totalPages` and
-        the same values are returned in the standard `X-*` pagination headers
-        with a `Link` header. Detail totals, pages, items, Copilot track counts,
-        and fulfillment include only challenges visible to an anonymous
-        Challenge API caller: challenges have no groups, no user-whitelist rows,
-        and are not tasks. Restricted challenge IDs and names are never returned.
+        Detail totals, items, Copilot track counts, and fulfillment include only
+        challenges visible to an anonymous Challenge API caller: challenges have
+        no groups, no user-whitelist rows, and are not tasks. Restricted
+        challenge IDs and names are never returned.
 
         Copilot `trackCounts` includes only non-zero Development, Design,
         Quality Assurance, and Data Science keys. Fulfillment is
@@ -1730,58 +1728,13 @@ paths:
           enum:
             - copilot
             - reviewer
-        - in: query
-          name: page
-          required: false
-          type: integer
-          format: int32
-          minimum: 1
-          default: 1
-          description: One-based result page.
-        - in: query
-          name: perPage
-          required: false
-          type: integer
-          format: int32
-          minimum: 1
-          maximum: 100
-          default: 100
-          description: Number of challenges per page, up to 100.
       responses:
         '200':
           description: OK
-          headers:
-            X-Page:
-              type: integer
-              format: int32
-              description: Current one-based page.
-            X-Per-Page:
-              type: integer
-              format: int32
-              description: Requested page size.
-            X-Total:
-              type: integer
-              format: int32
-              description: Total anonymous-visible role challenges.
-            X-Total-Pages:
-              type: integer
-              format: int32
-              description: Total pages for the current page size.
-            X-Prev-Page:
-              type: integer
-              format: int32
-              description: Previous page when one exists.
-            X-Next-Page:
-              type: integer
-              format: int32
-              description: Next page when one exists.
-            Link:
-              type: string
-              description: RFC 5988 first, last, previous, and next page links.
           schema:
-            $ref: '#/definitions/SpecialRoleChallengePage'
+            $ref: '#/definitions/SpecialRoleChallenges'
         '400':
-          description: Invalid role or pagination data
+          description: Invalid role
           schema:
             $ref: '#/definitions/ErrorModel'
         '404':
@@ -2937,14 +2890,11 @@ definitions:
         description: >
           Latest matching Resource assignment creation time. This is not a
           review-completion timestamp.
-  SpecialRoleChallengePage:
+  SpecialRoleChallenges:
     type: object
     required:
       - role
       - total
-      - page
-      - perPage
-      - totalPages
       - challenges
     properties:
       role:
@@ -2957,20 +2907,6 @@ definitions:
         format: int32
         minimum: 0
         description: Total anonymous-visible distinct challenges for this role.
-      page:
-        type: integer
-        format: int32
-        minimum: 1
-      perPage:
-        type: integer
-        format: int32
-        minimum: 1
-        maximum: 100
-        default: 100
-      totalPages:
-        type: integer
-        format: int32
-        minimum: 0
       trackCounts:
         description: Present only for Copilot details.
         $ref: '#/definitions/SpecialRoleTrackCounts'
@@ -2979,7 +2915,6 @@ definitions:
         $ref: '#/definitions/SpecialRoleFulfillment'
       challenges:
         type: array
-        maxItems: 100
         items:
           $ref: '#/definitions/SpecialRoleChallenge'
   MemberStats:

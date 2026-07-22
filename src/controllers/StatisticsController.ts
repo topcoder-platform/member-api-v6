@@ -3,7 +3,6 @@
  */
 const service = require('../services/StatisticsService')
 const specialRoleService = require('../services/SpecialRoleService')
-const helper = require('../common/helper')
 
 /**
  * Get distribution statistics
@@ -70,21 +69,19 @@ async function getMemberRoleStats (req, res) {
 }
 
 /**
- * Get one public page of distinct challenges for a member's Copilot or Reviewer
- * role. Pagination and role validation are handled by the service and errors
- * are forwarded through the standard Express middleware.
- * @param {Object} req the request containing handle, role, and pagination query
- * @param {Object} res the response that receives the paginated challenge list
+ * Get every public distinct challenge for a member's Copilot or Reviewer role.
+ * Role validation is handled by the service and errors are forwarded through
+ * the standard Express middleware.
+ * @param {Object} req the request containing the member handle and role
+ * @param {Object} res the response that receives the complete challenge list
  * @returns {Promise<void>} resolves after the JSON response is sent
  * @throws {Error} propagates service validation and lookup errors
  */
 async function getMemberRoleChallenges (req, res) {
   const result = await specialRoleService.getMemberRoleChallenges(
     req.params.handle,
-    req.params.role,
-    req.query
+    req.params.role
   )
-  helper.setResHeaders(req, res, result)
   res.send(result)
 }
 
