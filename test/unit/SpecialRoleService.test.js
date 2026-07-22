@@ -143,31 +143,33 @@ describe('special role service unit tests', () => {
     delete require.cache[servicePath]
   })
 
-  it('getMemberRoleStats should return resource-only distinct counts for exact role families', async () => {
-    let resourceSql
-    let challengeQueryCalled = false
+  it('getMemberRoleStats should return anonymous-visible counts for exact role families', async () => {
+    const challengeSql = []
+    let resourceQueryCalled = false
     const { service, restore } = loadSpecialRoleService({
-      onResourceQuery: async (sql) => {
-        resourceSql = sql
-        return [
-          { role: 'copilot', challengeCount: 4 },
-          { role: 'reviewer', challengeCount: 3 }
-        ]
-      },
-      onChallengeQuery: async () => {
-        challengeQueryCalled = true
+      onResourceQuery: async () => {
+        resourceQueryCalled = true
         return []
+      },
+      onChallengeQuery: async (sql) => {
+        challengeSql.push(sql)
+        return [{ challengeCount: sql.includes('copilot') ? 4 : 3 }]
       }
     })
 
     try {
       const result = await service.getMemberRoleStats('devtest1400')
+      const allSql = challengeSql.join('\n')
 
-      resourceSql.should.include('COUNT(*)::int AS "challengeCount"')
-      resourceSql.should.include('GROUP BY 1, resource."challengeId"')
-      resourceSql.should.include('copilot')
-      REVIEWER_ROLE_NAMES.forEach(roleName => resourceSql.should.include(roleName))
-      should.equal(challengeQueryCalled, false)
+      challengeSql.length.should.equal(2)
+      allSql.should.include('COUNT(*)::int AS "challengeCount"')
+      allSql.should.include('GROUP BY resource."challengeId"')
+      allSql.should.include('cardinality(challenge."groups") = 0')
+      allSql.should.include('challenge."taskIsTask" = FALSE')
+      allSql.should.include('challenges."ChallengeUserWhitelist"')
+      allSql.should.include('copilot')
+      REVIEWER_ROLE_NAMES.forEach(roleName => allSql.should.include(roleName))
+      should.equal(resourceQueryCalled, false)
       result.should.deep.equal({
         copilot: { challengeCount: 4 },
         reviewer: { challengeCount: 3 }
@@ -400,15 +402,39 @@ describe('special role service unit tests', () => {
     }
   })
 
-  it('getMemberRoleStats should omit role keys with zero resource challenges', async () => {
+  it('getMemberRoleStats should omit role keys with zero visible challenges', async () => {
     const { service, restore } = loadSpecialRoleService({
-      onResourceQuery: async () => [{ role: 'reviewer', challengeCount: 2 }],
-      onChallengeQuery: async () => []
+      onResourceQuery: async () => [],
+      onChallengeQuery: async sql => [{
+        challengeCount: sql.includes('copilot') ? 0 : 2
+      }]
     })
 
     try {
       const result = await service.getMemberRoleStats('devtest1400')
       result.should.deep.equal({ reviewer: { challengeCount: 2 } })
+    } finally {
+      restore()
+    }
+  })
+
+  it('getMemberRoleStats should explain missing co-located schemas', async () => {
+    const missingRelationError = new Error('relation does not exist')
+    missingRelationError.code = 'P2010'
+    missingRelationError.meta = { code: '3F000' }
+    const { service, restore } = loadSpecialRoleService({
+      onResourceQuery: async () => [],
+      onChallengeQuery: async () => {
+        throw missingRelationError
+      }
+    })
+
+    try {
+      await service.getMemberRoleStats('devtest1400')
+      should.fail('Expected a service availability error')
+    } catch (error) {
+      error.httpStatus.should.equal(503)
+      error.message.should.include('schemas to be co-located')
     } finally {
       restore()
     }
