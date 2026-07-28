@@ -8,7 +8,8 @@ const config = require('config')
 const chai = require('chai')
 const fs = require('fs')
 const path = require('path')
-const awsMock = require('aws-sdk-mock')
+const { mockClient } = require('aws-sdk-client-mock')
+const { PutObjectCommand, S3Client } = require('@aws-sdk/client-s3')
 const axios = require('axios')
 
 const placeholderDbUrl = 'postgresql://user:pass@localhost:5432/topcoder?schema=public'
@@ -19,12 +20,14 @@ process.env.RESOURCES_DB_URL = process.env.RESOURCES_DB_URL || placeholderDbUrl
 process.env.ENGAGEMENTS_DB_URL = process.env.ENGAGEMENTS_DB_URL || placeholderDbUrl
 
 const service = require('../../src/services/MemberService')
+const helper = require('../../src/common/helper')
 const prisma = require('../../src/common/prisma').getClient()
 const testHelper = require('../testHelper')
 
 const should = chai.should()
 
 const photoContent = fs.readFileSync(path.join(__dirname, '../photo.png'))
+const s3Mock = mockClient(S3Client)
 
 describe('member service unit tests', () => {
   // test data
@@ -37,26 +40,24 @@ describe('member service unit tests', () => {
     member1 = data.member1
     member2 = data.member2
 
-    // mock S3 before creating S3 instance
-    awsMock.mock('S3', 'getObject', (params, callback) => {
-      callback(null, { Body: Buffer.from(photoContent) })
-    })
-
-    awsMock.mock('S3', 'upload', (params, callback) => {
-      callback(null)
-    })
+    // Mock the SDK v3 command before the lazy S3 client is first used.
+    s3Mock.reset()
+    s3Mock.on(PutObjectCommand).resolves({})
   })
 
   after(async () => {
     await testHelper.clearData()
 
-    awsMock.restore('S3')
+    s3Mock.restore()
   })
 
   describe('get member tests', () => {
     it('get member successfully 1', async () => {
       const result = await service.getMember({ isMachine: true }, member1.handle, {})
-      should.equal(_.isEqual(result.maxRating, member1.maxRating), true)
+      should.equal(_.isEqual(result.maxRating, {
+        ...member1.maxRating,
+        ratingColor: '#69C329'
+      }), true)
       should.equal(result.userId, member1.userId)
       should.equal(result.firstName, member1.firstName)
       should.equal(result.lastName, member1.lastName)
@@ -484,8 +485,16 @@ describe('member service unit tests', () => {
         availableForGigs: true
       })
       should.equal(result.availableForGigs, true)
-      should.exist(result.availableForGigsLastUpdateDate)
-      should.equal(testHelper.getDatesDiff(result.availableForGigsLastUpdateDate, new Date()), 0)
+      // The timestamp is tracked in storage but remains an internal response field.
+      should.not.exist(result.availableForGigsLastUpdateDate)
+      const updatedMember = await prisma.member.findUnique({
+        where: { userId: BigInt(member2.userId) }
+      })
+      should.exist(updatedMember.availableForGigsLastUpdateDate)
+      should.equal(Math.abs(testHelper.getDatesDiff(
+        updatedMember.availableForGigsLastUpdateDate,
+        new Date()
+      )) < 1000, true)
     })
 
     it('update member - availableForGigsLastUpdateDate not set when availableForGigs not changed', async () => {
@@ -499,15 +508,48 @@ describe('member service unit tests', () => {
 
   describe('upload photo tests', () => {
     it('upload photo successfully', async () => {
-      const result = await service.uploadPhoto({ handle: 'admin', roles: ['admin'] }, member2.handle, {
-        photo: {
-          data: photoContent,
-          mimetype: 'image/png',
-          name: 'photo.png',
-          size: photoContent.length
-        }
-      })
-      should.equal(result.photoURL.startsWith(config.PHOTO_URL_TEMPLATE.replace('<key>', '')), true)
+      const originalPhotoS3Bucket = config.AMAZON.PHOTO_S3_BUCKET
+      config.AMAZON.PHOTO_S3_BUCKET = 'test-photo-bucket/member/profile'
+      s3Mock.reset()
+      s3Mock.on(PutObjectCommand).resolves({})
+
+      try {
+        const result = await service.uploadPhoto({ handle: 'admin', roles: ['admin'] }, member2.handle, {
+          photo: {
+            data: photoContent,
+            mimetype: 'image/png',
+            name: 'photo.png',
+            size: photoContent.length
+          }
+        })
+        should.equal(result.photoURL.startsWith(config.PHOTO_URL_TEMPLATE.replace('<key>', '')), true)
+
+        const calls = s3Mock.commandCalls(PutObjectCommand)
+        should.equal(calls.length, 1)
+        should.equal(calls[0].args[0].input.Bucket, 'test-photo-bucket')
+        calls[0].args[0].input.Key.should.match(/^member\/profile\/.+\.png$/)
+      } finally {
+        config.AMAZON.PHOTO_S3_BUCKET = originalPhotoS3Bucket
+      }
+    })
+
+    it('upload photo successfully with a bare bucket name', async () => {
+      const originalPhotoS3Bucket = config.AMAZON.PHOTO_S3_BUCKET
+      config.AMAZON.PHOTO_S3_BUCKET = 'test-photo-bucket'
+      s3Mock.reset()
+      s3Mock.on(PutObjectCommand).resolves({})
+
+      try {
+        const result = await helper.uploadPhotoToS3(photoContent, 'image/png', 'photo.png')
+        should.equal(result, config.PHOTO_URL_TEMPLATE.replace('<key>', 'photo.png'))
+
+        const calls = s3Mock.commandCalls(PutObjectCommand)
+        should.equal(calls.length, 1)
+        should.equal(calls[0].args[0].input.Bucket, 'test-photo-bucket')
+        should.equal(calls[0].args[0].input.Key, 'photo.png')
+      } finally {
+        config.AMAZON.PHOTO_S3_BUCKET = originalPhotoS3Bucket
+      }
     })
 
     it('upload photo - not found', async () => {

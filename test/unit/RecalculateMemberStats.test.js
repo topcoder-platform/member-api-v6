@@ -265,6 +265,8 @@ describe('recalculateMemberStats unit tests', () => {
     capturedQueries[0].sql.should.include(
       `COUNT(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id END)::int AS "wins"`
     )
+    capturedQueries[0].sql.should.include(`AND cw."type" IN ('PLACEMENT', 'PASSED_REVIEW')`)
+    capturedQueries[0].sql.should.include("AND c.status::text = 'COMPLETED'")
     capturedQueries[0].params.should.deep.equal([global.BigInt(456)])
     result.should.have.length(1)
     chai.expect(result[0]).to.include({
@@ -276,6 +278,81 @@ describe('recalculateMemberStats unit tests', () => {
     result[0].userId.should.equal(global.BigInt(456))
     result[0].mostRecentEventDate.toISOString().should.equal('2024-03-05T00:00:00.000Z')
     result[0].mostRecentSubmission.toISOString().should.equal('2024-03-05T10:00:00.000Z')
+  })
+
+  it('should ignore empty legacy Marathon Match aggregate placeholders', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+    const membersClient = {
+      $queryRawUnsafe: async (sql) => {
+        if (sql.includes('"memberDevelopStats"')) {
+          return [{
+            memberStatsId: 1,
+            legacyRowId: 11,
+            subTrackId: 148,
+            name: 'DEVELOP_MARATHON_MATCH',
+            challenges: 40,
+            wins: 0,
+            submissions: 0,
+            passedReview: 0,
+            mostRecentSubmission: null,
+            mostRecentEventDate: '2024-11-11T13:00:23.000Z'
+          }]
+        }
+
+        if (sql.includes('"memberDesignStats"')) {
+          return []
+        }
+
+        if (sql.includes('"memberSrmStats"')) {
+          return []
+        }
+
+        if (sql.includes('"memberMarathonStats"')) {
+          return [{
+            memberStatsId: 1,
+            legacyRowId: 12,
+            challenges: 1,
+            wins: 0,
+            competitions: 0,
+            mostRecentSubmission: '1970-01-01T00:00:00.000Z',
+            mostRecentEventDate: null
+          }]
+        }
+
+        throw new Error(`Unexpected query: ${sql}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const result = await recalculateMemberStats.aggregateLegacyStatsForUser(
+      membersClient,
+      global.BigInt(456),
+      {},
+      [global.BigInt(1)]
+    )
+
+    result.should.deep.equal([])
   })
 
   it('should dedupe duplicate legacy aggregate parent snapshots by source subtrack', async () => {
@@ -994,6 +1071,14 @@ describe('recalculateMemberStats unit tests', () => {
         validSubmission: true,
         placement: 1,
         createdAt: '2024-03-03T10:00:00.000Z'
+      },
+      {
+        challengeId: 'active-challenge',
+        userId: '456',
+        submissionId: 'submission-3',
+        validSubmission: true,
+        placement: 1,
+        createdAt: '2024-03-04T10:00:00.000Z'
       }
     ]
     const challengeMetadataById = new Map([
@@ -1017,6 +1102,13 @@ describe('recalculateMemberStats unit tests', () => {
         typeId: 'type-challenge',
         status: 'COMPLETED',
         endDate: '2024-03-04T00:00:00.000Z'
+      }],
+      ['active-challenge', {
+        id: 'active-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'ACTIVE',
+        endDate: '2024-03-05T00:00:00.000Z'
       }]
     ])
 

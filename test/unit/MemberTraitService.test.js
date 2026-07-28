@@ -236,18 +236,18 @@ describe('member trait service unit tests', () => {
       should.not.equal(traits[0].traits.data[0].industry, '')
     })
 
-    it('update member traits - trait not found', async () => {
-      try {
-        await service.updateTraits({ isMachine: true, sub: 'sub1' }, member1.handle, [{
-          traitId: 'software',
-          categoryName: 'Software',
-          traits: { traitId: 'software', data: [{ softwareType: 'Browser', name: 'Chrome' }] }
-        }])
-      } catch (e) {
-        should.equal(e.message, 'The trait id software is not found for the member.')
-        return
-      }
-      throw new Error('should not reach here')
+    it('update member traits upserts a trait that is not found', async () => {
+      const result = await service.updateTraits({ isMachine: true, sub: 'sub1' }, member1.handle, [{
+        traitId: 'software',
+        categoryName: 'Software',
+        traits: { traitId: 'software', data: [{ softwareType: 'Browser', name: 'Chrome' }] }
+      }])
+
+      should.equal(result.length, 1)
+      should.equal(result[0].traitId, 'software')
+      const traits = await service.getTraits({}, member1.handle, { traitIds: 'software' })
+      should.equal(traits.length, 1)
+      should.equal(traits[0].traitId, 'software')
     })
 
     it('update member traits - member not found', async () => {

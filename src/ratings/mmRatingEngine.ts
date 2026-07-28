@@ -1,0 +1,2570 @@
+/**
+ * Re-rate unified member stats for rated DATA_SCIENCE / MARATHON_MATCH results.
+ *
+ * The engine reads final reviewSummation rows from review-api for Marathon
+ * Match rerates. Configured rating paths also include tagged or skilled
+ * Development / Challenge rows from challengeResult. In both cases it resolves challenge
+ * metadata from challenge-api, applies the Qubits math one challenge at a time,
+ * and persists the target member's rating state and placement metadata into
+ * memberStats, memberStatsHistory, and memberMaxRating.
+ */
+
+'use strict'
+
+const errors = require('../common/errors')
+const {
+  resolveChallengeResultRelation,
+  resolveReviewDbRelation
+} = require('../common/reviewDbHelper')
+const { Prisma } = require('../common/prisma')
+const {
+  clearChallengeDimensionLookupCache,
+  loadChallengeDimensionLookup,
+  resolveTrackIdFromLookup,
+  resolveTypeIdFromLookup
+} = require('../common/statsDimensionHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
+const { runQubitsRating, DEFAULT_VOLATILITY } = require('./qubitsAlgorithm')
+const { syncCurrentMemberMaxRating } = require('./memberMaxRatingSync')
+const {
+  RATING_METADATA_SELECT,
+  isChallengeRated
+} = require('./challengeRatingStatus')
+const {
+  buildRatingPathTypeId,
+  challengeMatchesRatingPath,
+  normalizeRatingPathName
+} = require('./ratingPathConfig')
+
+const TRACK_NAME = 'DATA_SCIENCE'
+const TYPE_NAME = 'MARATHON_MATCH'
+const CHALLENGE_TYPE_NAME = 'MARATHON_MATCH'
+const DEVELOPMENT_CHALLENGE_TRACK_NAME = 'DEVELOPMENT'
+const DATA_SCIENCE_CHALLENGE_TRACK_NAME = 'DATA_SCIENCE'
+const QUALITY_ASSURANCE_CHALLENGE_TRACK_NAME = 'QUALITY_ASSURANCE'
+const DEVELOPMENT_CHALLENGE_TYPE_NAME = 'Challenge'
+const RERATE_ACTOR = 'rerate-mm-stats'
+const SCORE_DIRECTION_MINIMIZE = 'MINIMIZE'
+const RATING_PATH_SOURCE_DEVELOPMENT = 'DEVELOPMENT_CHALLENGE'
+const RATING_PATH_SOURCE_DATA_SCIENCE_CHALLENGE = 'DATA_SCIENCE_CHALLENGE'
+const RATING_PATH_SOURCE_QUALITY_ASSURANCE_CHALLENGE = 'QUALITY_ASSURANCE_CHALLENGE'
+const RATING_PATH_SOURCE_MARATHON_MATCH = 'MARATHON_MATCH'
+const VALID_MM_SUBMISSION_STATUSES = ['ACTIVE', 'COMPLETED_WITHOUT_WIN', 'FAILED_REVIEW']
+const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
+const DEFAULT_MM_SCORING_CONFIG = Object.freeze({
+  relativeScoringEnabled: true,
+  scoreDirection: 'MAXIMIZE'
+})
+const READY_MM_REVIEW_SUMMATION_FILTER = `
+          AND (
+            rs."metadata"->'testProgressDetails' IS NULL
+            OR (
+              rs."reviewedDate" IS NOT NULL
+              AND rs."metadata"->'testProgressDetails'->>'status' = 'SUCCESS'
+            )
+          )
+        `
+
+/**
+ * Build the default Marathon Match scoring configuration used for historical
+ * reviewSummation replay. Historical data is sourced from review-api only.
+ * aggregateScore is treated as the already-normalized higher-is-better result
+ * when it is usable, with submission finalScore available as a fallback for
+ * legacy rows whose summation score is a placeholder.
+ * @returns {Object} scoring configuration for MM participant normalization
+ */
+function getDefaultMmScoringConfig () {
+  return {
+    relativeScoringEnabled: DEFAULT_MM_SCORING_CONFIG.relativeScoringEnabled,
+    scoreDirection: DEFAULT_MM_SCORING_CONFIG.scoreDirection
+  }
+}
+
+/**
+ * Determine whether the supplied value is a BigInt.
+ * @param {*} value value to inspect
+ * @returns {boolean} true when the value is a BigInt
+ */
+function isBigIntValue (value) {
+  return Object.prototype.toString.call(value) === '[object BigInt]'
+}
+
+/**
+ * Normalize a user identifier into BigInt form for member table lookups.
+ * @param {string|number|BigInt} value member identifier
+ * @returns {BigInt} normalized member identifier
+ * @throws {Error} if BigInt is unavailable in the runtime
+ */
+function toBigIntUserId (value) {
+  if (isBigIntValue(value)) {
+    return value
+  }
+
+  if (typeof global.BigInt !== 'function') {
+    throw new Error('BigInt is not supported in this runtime')
+  }
+
+  return global.BigInt(String(value).trim())
+}
+
+/**
+ * Normalize a date-like value with a fallback.
+ * @param {*} value primary date value
+ * @param {*} fallbackValue fallback date value
+ * @returns {Date|null} normalized Date or null when parsing fails
+ */
+function normalizeDate (value, fallbackValue) {
+  const date = value ? new Date(value) : new Date(fallbackValue)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+  return date
+}
+
+/**
+ * Create the default unrated participant state for the Qubits engine.
+ * @returns {Object} empty rating state
+ */
+function createDefaultState () {
+  return {
+    rating: 0,
+    volatility: 0,
+    numRatings: 0
+  }
+}
+
+/**
+ * Add a non-empty challenge identifier candidate to the supplied set.
+ * @param {Set<string>} candidates target candidate set
+ * @param {*} value challenge identifier value
+ * @returns {void}
+ */
+function addChallengeIdCandidate (candidates, value) {
+  if (value === null || value === undefined) {
+    return
+  }
+
+  const normalized = String(value).trim()
+  if (normalized) {
+    candidates.add(normalized)
+  }
+}
+
+/**
+ * Build all review-database challenge identifiers known for a challenge entry.
+ * Challenge-api exposes canonical UUIDs while migrated review rows may still
+ * store legacy numeric ids, so replay queries need to try each stable alias.
+ * @param {*} challengeRef challenge id, challenge metadata row, or history entry
+ * @returns {Array<string>} unique challenge id candidates
+ */
+function buildChallengeIdCandidates (challengeRef) {
+  const candidates = new Set<string>()
+
+  if (Array.isArray(challengeRef)) {
+    challengeRef.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    return Array.from(candidates)
+  }
+
+  if (challengeRef && typeof challengeRef === 'object' && !(challengeRef instanceof Date)) {
+    addChallengeIdCandidate(candidates, challengeRef.challengeId)
+    addChallengeIdCandidate(candidates, challengeRef.id)
+    addChallengeIdCandidate(candidates, challengeRef.legacyId)
+
+    if (Array.isArray(challengeRef.reviewChallengeIds)) {
+      challengeRef.reviewChallengeIds.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (Array.isArray(challengeRef.challengeIds)) {
+      challengeRef.challengeIds.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (Array.isArray(challengeRef.challengeIdCandidates)) {
+      challengeRef.challengeIdCandidates.forEach((candidate) => addChallengeIdCandidate(candidates, candidate))
+    }
+    if (challengeRef.legacyRecord) {
+      addChallengeIdCandidate(candidates, challengeRef.legacyRecord.legacySystemId)
+    }
+
+    return Array.from(candidates)
+  }
+
+  addChallengeIdCandidate(candidates, challengeRef)
+  return Array.from(candidates)
+}
+
+/**
+ * Merge challenge metadata aliases with an optional source row id.
+ * @param {Object} challenge challenge-api metadata row
+ * @param {*} [sourceChallengeId] challenge id observed in review data
+ * @returns {Array<string>} unique review challenge id candidates
+ */
+function buildReviewChallengeIds (challenge, sourceChallengeId?: any) {
+  const candidates = new Set<string>()
+  addChallengeIdCandidate(candidates, sourceChallengeId)
+  buildChallengeIdCandidates(challenge).forEach((candidate) => candidates.add(candidate))
+  return Array.from(candidates)
+}
+
+/**
+ * Test whether a history entry can be addressed by the supplied challenge id.
+ * @param {Object} historyEntry rerate history entry
+ * @param {*} challengeId requested challenge id
+ * @returns {boolean} true when the entry has the challenge id as an alias
+ */
+function historyEntryMatchesChallengeId (historyEntry, challengeId) {
+  const normalizedChallengeId = String(challengeId).trim()
+  return buildChallengeIdCandidates(historyEntry).includes(normalizedChallengeId)
+}
+
+/**
+ * Determine whether challenge metadata is complete enough to use for rerating.
+ * Older test fixtures omit status, so a missing status is treated as completed;
+ * production Challenge rows include status and must be explicitly completed.
+ * @param {Object} challenge challenge metadata row
+ * @returns {boolean} true when the challenge can be consumed by a rating replay
+ */
+function isCompletedChallenge (challenge) {
+  const status = challenge && challenge.status
+  if (status === null || status === undefined || String(status).trim() === '') {
+    return true
+  }
+
+  return String(status).trim().toUpperCase() === COMPLETED_CHALLENGE_STATUS
+}
+
+/**
+ * Clone a rating state into the normalized shape expected by the Qubits engine.
+ * @param {Object} state source state
+ * @returns {Object} normalized rating state
+ */
+function cloneState (state) {
+  if (!state) {
+    return createDefaultState()
+  }
+
+  return {
+    rating: Number.isFinite(Number(state.rating)) ? Number(state.rating) : 0,
+    volatility: Number.isFinite(Number(state.volatility)) ? Number(state.volatility) : 0,
+    numRatings: Number.isFinite(Number(state.numRatings)) ? Math.max(0, Number(state.numRatings)) : 0
+  }
+}
+
+/**
+ * Normalize a nullable integer value from persisted rating checkpoints.
+ * Empty values such as null must stay unavailable instead of becoming zero.
+ * @param {*} value candidate integer value
+ * @returns {number|null} integer value, or null when unavailable
+ */
+function toOptionalInteger (value) {
+  if (value === null || value === undefined || value === '') {
+    return null
+  }
+
+  const rating = Number(value)
+  return Number.isFinite(rating) ? Math.trunc(rating) : null
+}
+
+/**
+ * Normalize a rating value for rating-bound calculations.
+ * @param {*} value candidate rating value
+ * @returns {number|null} integer rating, or null when unavailable
+ */
+function toOptionalRating (value) {
+  return toOptionalInteger(value)
+}
+
+/**
+ * Determine whether a challenge id is a numeric legacy stats-history id.
+ * @param {*} value candidate challenge id
+ * @returns {boolean} true when the id is a legacy numeric id
+ */
+function isLegacyNumericChallengeId (value) {
+  return /^\d+$/.test(String(value || '').trim())
+}
+
+/**
+ * Add one rating to a mutable min/max rating bounds object.
+ * @param {{minRating: number|null, maxRating: number|null}} bounds current bounds
+ * @param {*} value candidate rating value
+ * @returns {{minRating: number|null, maxRating: number|null}} updated bounds
+ */
+function extendRatingBounds (bounds, value) {
+  const rating = toOptionalRating(value)
+  if (rating === null) {
+    return bounds
+  }
+
+  bounds.minRating = bounds.minRating === null ? rating : Math.min(bounds.minRating, rating)
+  bounds.maxRating = bounds.maxRating === null ? rating : Math.max(bounds.maxRating, rating)
+  return bounds
+}
+
+/**
+ * Build min/max rating bounds from existing canonical history rows before a rerate
+ * start point. Numeric legacy import rows are ignored when any UUID history exists,
+ * because rerated MM aggregates should describe the canonical replayed timeline.
+ * @param {Array<Object>} historyRows existing memberStatsHistory rows sorted by event date
+ * @param {number} seedIndex last existing row before the rerate start
+ * @returns {{minRating: number|null, maxRating: number|null}} rating bounds
+ */
+function buildSeedRatingBounds (historyRows, seedIndex) {
+  const bounds = {
+    minRating: null,
+    maxRating: null
+  }
+  if (!Array.isArray(historyRows) || seedIndex < 0) {
+    return bounds
+  }
+
+  const seedRows = historyRows.slice(0, seedIndex + 1)
+  const ratingRows = selectLegacyPreferredMarathonHistoryRows(seedRows)
+
+  ratingRows.forEach(row => extendRatingBounds(bounds, row && row.newRating))
+  return bounds
+}
+
+/**
+ * Determine whether a canonical MM history row was written by the native rerater.
+ * @param {Object} row memberStatsHistory row
+ * @returns {boolean} true when the row is a rerated canonical UUID checkpoint
+ */
+function isReratedCanonicalHistoryRow (row) {
+  return !!(
+    row &&
+    !isLegacyNumericChallengeId(row.challengeId) &&
+    (row.createdBy === RERATE_ACTOR || row.updatedBy === RERATE_ACTOR)
+  )
+}
+
+/**
+ * Extract a Marathon Match round number from a legacy or canonical challenge name.
+ * @param {*} value challenge display name
+ * @returns {string|null} Marathon Match number, or null when unavailable
+ */
+function extractMarathonMatchNumber (value) {
+  const name = String(value || '').trim()
+  if (!name) {
+    return null
+  }
+
+  const match = name.match(/\b(?:MM|MARATHON\s+MATCH)\s*#?\s*(\d+)\b/i)
+  return match ? match[1] : null
+}
+
+/**
+ * Build a conservative title alias for duplicate MM history detection.
+ * @param {*} value challenge display name
+ * @returns {string|null} normalized title prefix alias, or null when unavailable
+ */
+function getMarathonHistoryTitleAlias (value) {
+  const normalized = String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+
+  return normalized.length >= 20 ? `title:${normalized.slice(0, 24)}` : null
+}
+
+/**
+ * Build non-id aliases that can let a complete canonical rerate replace a
+ * migrated numeric MM history row.
+ * @param {Object} row memberStatsHistory row with optional challengeName
+ * @returns {Array<string>} replacement aliases for duplicate detection
+ */
+function getMarathonHistoryReplacementAliasKeys (row) {
+  const keys = []
+  const matchNumber = extractMarathonMatchNumber(row && row.challengeName)
+  if (matchNumber) {
+    keys.push(`match:${matchNumber}`)
+  }
+
+  const titleAlias = getMarathonHistoryTitleAlias(row && row.challengeName)
+  if (titleAlias) {
+    keys.push(titleAlias)
+  }
+
+  return keys
+}
+
+/**
+ * Determine whether a canonical MM history row has enough rerated state to seed
+ * future rerates in place of a duplicate legacy numeric row.
+ * @param {Object} row memberStatsHistory row
+ * @returns {boolean} true when the row is an authoritative canonical checkpoint
+ */
+function isAuthoritativeCanonicalHistoryRow (row) {
+  return isReratedCanonicalHistoryRow(row) && toOptionalRating(row && row.newRating) !== null
+}
+
+/**
+ * Build duplicate-detection aliases covered by authoritative canonical MM rows.
+ * @param {Array<Object>} rows memberStatsHistory rows ordered by event date
+ * @returns {Set<string>} aliases covered by complete canonical rerates
+ */
+function buildAuthoritativeCanonicalHistoryAliasSet (rows) {
+  const aliases = new Set()
+
+  ;(rows || []).forEach((row) => {
+    if (!isAuthoritativeCanonicalHistoryRow(row)) {
+      return
+    }
+
+    getMarathonHistoryReplacementAliasKeys(row).forEach(key => aliases.add(key))
+  })
+
+  return aliases
+}
+
+/**
+ * Build duplicate-detection aliases covered by imported numeric MM rows.
+ * @param {Array<Object>} rows memberStatsHistory rows ordered by event date
+ * @returns {Set<string>} aliases covered by legacy rows
+ */
+function buildLegacyHistoryAliasSet (rows) {
+  const aliases = new Set()
+
+  ;(rows || []).forEach((row) => {
+    if (!isLegacyNumericChallengeId(row && row.challengeId) || toOptionalRating(row && row.newRating) === null) {
+      return
+    }
+
+    getMarathonHistoryReplacementAliasKeys(row).forEach(key => aliases.add(key))
+  })
+
+  return aliases
+}
+
+/**
+ * Keep only one seed row for migrated/canonical MM duplicates.
+ * Complete canonical rerates replace migrated numeric rows for the same MM
+ * number or long title. Incomplete canonical rows stay hidden behind imported
+ * legacy rows so old migrations still provide a fallback rating seed.
+ * @param {Array<Object>} historyRows memberStatsHistory rows ordered by event date
+ * @returns {Array<Object>} rows with duplicate migrated/canonical rows removed
+ */
+function selectLegacyPreferredMarathonHistoryRows (historyRows) {
+  const rows = historyRows || []
+  const canonicalAliases = buildAuthoritativeCanonicalHistoryAliasSet(rows)
+  const legacyAliases = buildLegacyHistoryAliasSet(rows)
+
+  return rows.filter((row) => {
+    if (!row) {
+      return true
+    }
+
+    const replacementAliases = getMarathonHistoryReplacementAliasKeys(row)
+    if (isLegacyNumericChallengeId(row.challengeId)) {
+      return !replacementAliases.some(key => canonicalAliases.has(key))
+    }
+
+    if (!isReratedCanonicalHistoryRow(row)) {
+      return true
+    }
+
+    if (!replacementAliases.some(key => legacyAliases.has(key))) {
+      return true
+    }
+
+    return isAuthoritativeCanonicalHistoryRow(row)
+  })
+}
+
+/**
+ * Build the cache key used for participant state maps.
+ * @param {string|number|BigInt} userId participant identifier
+ * @returns {string} normalized cache key
+ */
+function buildUserStateKey (userId) {
+  return String(userId)
+}
+
+/**
+ * Compare persisted history ids that may be numbers, strings, or BigInts.
+ * @param {*} left left history id
+ * @param {*} right right history id
+ * @returns {number} negative when left sorts before right
+ */
+function compareValuesForHistoryRefresh (left, right) {
+  if (isBigIntValue(left) || isBigIntValue(right)) {
+    const leftValue = toBigIntUserId(left)
+    const rightValue = toBigIntUserId(right)
+    if (leftValue === rightValue) {
+      return 0
+    }
+    return leftValue > rightValue ? 1 : -1
+  }
+
+  if (left === right) {
+    return 0
+  }
+
+  return left > right ? 1 : -1
+}
+
+/**
+ * Find an existing ChallengeType row matching a configured rating path name.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Promise<string|undefined>} ChallengeType id when found
+ */
+async function findRatingPathTypeId (challengeClient, ratingPath) {
+  const normalizedName = normalizeRatingPathName(ratingPath && ratingPath.name)
+  if (!normalizedName || typeof challengeClient.$queryRawUnsafe !== 'function') {
+    return undefined
+  }
+
+  const rows = await challengeClient.$queryRawUnsafe(
+    `
+      SELECT "id"
+      FROM "ChallengeType"
+      WHERE UPPER("name") = $1
+         OR UPPER("abbreviation") = $1
+      ORDER BY CASE
+        WHEN UPPER("name") = $1 THEN 0
+        ELSE 1
+      END
+      LIMIT 1
+    `,
+    normalizedName
+  )
+
+  return rows && rows[0] ? String(rows[0].id) : undefined
+}
+
+/**
+ * Create or reuse the ChallengeType row needed by a configured rating path.
+ * The insert is deterministic and idempotent so concurrent rerate runs converge
+ * on the same custom type id.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Promise<string>} ChallengeType id for the rating path
+ * @throws {Error} when the challenge client cannot provision custom dimensions
+ */
+async function ensureRatingPathTypeId (challengeClient, ratingPath) {
+  const existingTypeId = await findRatingPathTypeId(challengeClient, ratingPath)
+  if (existingTypeId) {
+    return existingTypeId
+  }
+
+  if (typeof challengeClient.$queryRawUnsafe !== 'function') {
+    throw new Error(`Unable to provision ChallengeType for rating path '${ratingPath.name}'`)
+  }
+
+  const typeId = buildRatingPathTypeId(ratingPath)
+  const rows = await challengeClient.$queryRawUnsafe(
+    `
+      INSERT INTO "ChallengeType" (
+        "id",
+        "name",
+        "description",
+        "isActive",
+        "isTask",
+        "abbreviation",
+        "createdAt",
+        "createdBy",
+        "updatedAt",
+        "updatedBy"
+      )
+      VALUES ($1, $2, $3, true, false, $4, NOW(), $5, NOW(), $5)
+      ON CONFLICT ("id") DO UPDATE SET
+        "name" = EXCLUDED."name",
+        "description" = EXCLUDED."description",
+        "abbreviation" = EXCLUDED."abbreviation",
+        "updatedAt" = NOW(),
+        "updatedBy" = EXCLUDED."updatedBy"
+      RETURNING "id"
+    `,
+    typeId,
+    ratingPath.name,
+    `Configured rating path: ${ratingPath.name}`,
+    ratingPath.name,
+    RERATE_ACTOR
+  )
+
+  clearChallengeDimensionLookupCache()
+  return rows && rows[0] ? String(rows[0].id) : typeId
+}
+
+/**
+ * Resolve the unified track/type identifiers used for MM rating rows.
+ * Configured rating paths use the configured destination track and a custom
+ * ChallengeType row named after the rating path.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Promise<{trackId: string, typeId: string, trackName: string, typeName: string}>} resolved unified ids
+ */
+async function resolveUnifiedDimensionIds (challengeClient, ratingPath: any = null) {
+  const dimensionLookup = await loadChallengeDimensionLookup(challengeClient)
+  const trackName = ratingPath ? ratingPath.trackName : TRACK_NAME
+  const trackId = resolveTrackIdFromLookup(dimensionLookup, trackName)
+  const typeId = ratingPath
+    ? (resolveTypeIdFromLookup(dimensionLookup, ratingPath.name) || await ensureRatingPathTypeId(challengeClient, ratingPath))
+    : resolveTypeIdFromLookup(dimensionLookup, TYPE_NAME)
+
+  if (!trackId || !typeId) {
+    throw new Error(`Unable to resolve unified dimension ids for ${trackName}/${ratingPath ? ratingPath.name : TYPE_NAME}`)
+  }
+
+  return {
+    trackId,
+    typeId,
+    trackName,
+    typeName: ratingPath ? ratingPath.name : TYPE_NAME,
+    dimensionLookup
+  }
+}
+
+/**
+ * Build a rerate seed state from the latest authoritative history row before a challenge.
+ * Historical volatility is used when available. Older history rows that predate
+ * volatility checkpoints fall back to the default Qubits volatility. Placement-only
+ * history rows without a stored rating do not count as prior rated contests.
+ * @param {Array<Object>} historyRows participant history rows sorted by event date and id
+ * @param {number} seedIndex index of the last history row before the target challenge
+ * @returns {Object} seeded rating state
+ */
+function createHistorySeedState (historyRows, seedIndex) {
+  if (!Array.isArray(historyRows) || seedIndex < 0 || !historyRows[seedIndex]) {
+    return createDefaultState()
+  }
+
+  let seedRating = null
+  let seedVolatility = null
+  let ratedHistoryCount = 0
+
+  for (let index = 0; index <= seedIndex; index += 1) {
+    const rating = toOptionalRating(historyRows[index] && historyRows[index].newRating)
+    if (rating === null) {
+      continue
+    }
+
+    ratedHistoryCount += 1
+    seedRating = rating
+    seedVolatility = toOptionalInteger(historyRows[index] && historyRows[index].newVolatility)
+  }
+
+  if (seedRating === null) {
+    return createDefaultState()
+  }
+
+  return {
+    rating: seedRating,
+    volatility: seedVolatility === null ? DEFAULT_VOLATILITY : seedVolatility,
+    numRatings: ratedHistoryCount
+  }
+}
+
+/**
+ * Fill missing history newRating values from the following row's oldRating.
+ * Migrated MM history may store the post-event rating as the oldRating of the
+ * next event. Rerate seeding needs that value so opponent states do not collapse
+ * to unrated defaults before the native MM rerate has rewritten every row.
+ * @param {Array<Object>} historyRows participant history sorted by event date
+ * @returns {Array<Object>} cloned history rows with recoverable ratings filled
+ */
+function backfillHistoryRatingsFromNextOldRating (historyRows) {
+  const rows = (historyRows || []).map(row => ({ ...row }))
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    if (rows[index].newRating === null || rows[index].newRating === undefined) {
+      rows[index].newRating = rows[index + 1].oldRating
+    }
+    if (rows[index].newVolatility === null || rows[index].newVolatility === undefined) {
+      rows[index].newVolatility = rows[index + 1].oldVolatility
+    }
+  }
+  return rows
+}
+
+/**
+ * Find the history row index for a challenge within one participant timeline.
+ * @param {Array<Object>} historyRows participant history rows sorted by event date and id
+ * @param {string|Object} challengeId challenge identifier or history entry with aliases
+ * @returns {number} index of the matching row or -1 when absent
+ */
+function findHistoryIndexForChallenge (historyRows, challengeId) {
+  const challengeIds = new Set(buildChallengeIdCandidates(challengeId))
+
+  for (let index = historyRows.length - 1; index >= 0; index -= 1) {
+    if (challengeIds.has(String(historyRows[index].challengeId))) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+/**
+ * Find the last history row that is safely before the supplied challenge boundary.
+ * When the current challenge already has a history row, the immediately preceding row is
+ * authoritative. Otherwise the unified history table only exposes eventDate ordering, so
+ * same-day rows without the current challenge checkpoint are excluded conservatively.
+ * @param {Array<Object>} historyRows participant history rows sorted by event date and id
+ * @param {Object} challengeEntry rerate challenge metadata
+ * @returns {number} index of the latest pre-challenge history row or -1
+ */
+function findHistorySeedIndexForChallenge (historyRows, challengeEntry) {
+  if (!Array.isArray(historyRows) || historyRows.length === 0) {
+    return -1
+  }
+
+  const currentChallengeIndex = findHistoryIndexForChallenge(historyRows, challengeEntry)
+  if (currentChallengeIndex >= 0) {
+    return currentChallengeIndex - 1
+  }
+
+  const challengeEventDate = challengeEntry && challengeEntry.eventDate
+  if (!challengeEventDate) {
+    return -1
+  }
+
+  const challengeTimestamp = challengeEventDate.getTime()
+  let seedIndex = -1
+
+  for (let index = 0; index < historyRows.length; index += 1) {
+    if (historyRows[index].eventDate.getTime() < challengeTimestamp) {
+      seedIndex = index
+      continue
+    }
+
+    break
+  }
+
+  return seedIndex
+}
+
+/**
+ * Normalize challenge track/type names into comparison-friendly enum-like values.
+ * @param {*} value challenge dimension value
+ * @returns {string} normalized uppercase identifier with underscores
+ */
+function normalizeChallengeDimension (value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_')
+}
+
+/**
+ * Resolve whether challenge metadata belongs to the MM scoring source.
+ * Marathon Match is identified by type because some imported challenge rows
+ * carry the Development track while still belonging to the MM rating stream.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge uses the MM rating source
+ */
+function isMarathonMatchChallenge (challenge) {
+  return !!(
+    challenge &&
+    challenge.type &&
+    normalizeChallengeDimension(challenge.type.name) === CHALLENGE_TYPE_NAME
+  )
+}
+
+/**
+ * Resolve whether challenge metadata belongs to the Development Challenge source.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge uses the Development Challenge rating source
+ */
+function isDevelopmentChallenge (challenge) {
+  return !!(
+    challenge &&
+    challenge.track &&
+    challenge.type &&
+    normalizeChallengeDimension(challenge.track.name) === DEVELOPMENT_CHALLENGE_TRACK_NAME &&
+    normalizeChallengeDimension(challenge.type.name) === normalizeChallengeDimension(DEVELOPMENT_CHALLENGE_TYPE_NAME)
+  )
+}
+
+/**
+ * Resolve whether challenge metadata belongs to the Data Science Challenge source.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge uses the Data Science Challenge rating source
+ */
+function isDataScienceChallenge (challenge) {
+  return !!(
+    challenge &&
+    challenge.track &&
+    challenge.type &&
+    normalizeChallengeDimension(challenge.track.name) === DATA_SCIENCE_CHALLENGE_TRACK_NAME &&
+    normalizeChallengeDimension(challenge.type.name) === normalizeChallengeDimension(DEVELOPMENT_CHALLENGE_TYPE_NAME)
+  )
+}
+
+/**
+ * Resolve whether challenge metadata belongs to the Quality Assurance Challenge source.
+ * @param {Object} challenge challenge metadata record
+ * @returns {boolean} true when the challenge uses the QA Challenge rating source
+ */
+function isQualityAssuranceChallenge (challenge) {
+  const trackName = normalizeChallengeDimension(challenge && challenge.track && challenge.track.name)
+  return !!(
+    challenge &&
+    challenge.track &&
+    challenge.type &&
+    (trackName === QUALITY_ASSURANCE_CHALLENGE_TRACK_NAME || trackName === 'QA') &&
+    normalizeChallengeDimension(challenge.type.name) === normalizeChallengeDimension(DEVELOPMENT_CHALLENGE_TYPE_NAME)
+  )
+}
+
+/**
+ * Resolve the supported rating source for a tagged challenge path event.
+ * @param {Object} challenge challenge metadata record
+ * @returns {string|null} rating path source name or null when unsupported
+ */
+function resolveRatingPathSource (challenge) {
+  if (isDevelopmentChallenge(challenge)) {
+    return RATING_PATH_SOURCE_DEVELOPMENT
+  }
+
+  if (isDataScienceChallenge(challenge)) {
+    return RATING_PATH_SOURCE_DATA_SCIENCE_CHALLENGE
+  }
+
+  if (isQualityAssuranceChallenge(challenge)) {
+    return RATING_PATH_SOURCE_QUALITY_ASSURANCE_CHALLENGE
+  }
+
+  if (isMarathonMatchChallenge(challenge)) {
+    return RATING_PATH_SOURCE_MARATHON_MATCH
+  }
+
+  return null
+}
+
+/**
+ * Determine whether a rating path source reads challengeResult rows.
+ * @param {string} source rating path source identifier
+ * @returns {boolean} true when participant rows use userId/finalScore/placement
+ */
+function isChallengeResultRatingPathSource (source) {
+  return source === RATING_PATH_SOURCE_DEVELOPMENT ||
+    source === RATING_PATH_SOURCE_DATA_SCIENCE_CHALLENGE ||
+    source === RATING_PATH_SOURCE_QUALITY_ASSURANCE_CHALLENGE
+}
+
+/**
+ * Determine whether a challenge has complete placement data for score ordering.
+ * Partial placement backfills are common in older MM imports; if only some rows
+ * have placements, aggregate scores are the only comparable value across all
+ * participants.
+ * @param {Array<Object>} participantRows challenge participant rows
+ * @returns {boolean} true when every participant has a positive placement
+ */
+function shouldUsePlacementScores (participantRows) {
+  return (participantRows || []).length > 0 &&
+    (participantRows || []).every(row => !!toOptionalPlacement(row && row.placement))
+}
+
+/**
+ * Normalize one Marathon Match score for Qubits ordering.
+ * Complete source placements are authoritative final standings. Otherwise,
+ * relative-scoring scores are treated as higher-is-better, while non-relative
+ * MINIMIZE challenges need inversion to match standings order. Placement is
+ * only a fallback when the row does not have a usable score.
+ * @param {Object} row participant result row
+ * @param {Object} scoringConfig relative scoring configuration for the challenge
+ * @param {Object} [options] score normalization options
+ * @param {boolean} [options.usePlacementScore=false] whether to rank by placement
+ * @returns {number} normalized Qubits score
+ */
+function normalizeScore (row, scoringConfig, options: any = {}) {
+  const placement = toOptionalPlacement(row && row.placement)
+  if (options.usePlacementScore && placement) {
+    return -placement
+  }
+
+  const score = getMmResultScore(row)
+  if (!Number.isFinite(score)) {
+    return placement ? -placement : 0
+  }
+
+  if (
+    scoringConfig &&
+    scoringConfig.relativeScoringEnabled === false &&
+    scoringConfig.scoreDirection === SCORE_DIRECTION_MINIMIZE
+  ) {
+    return -score
+  }
+
+  return score
+}
+
+/**
+ * Normalize one challengeResult score for Qubits ordering.
+ * @param {Object} row challengeResult participant row
+ * @returns {number} normalized Qubits score
+ */
+function normalizeDevelopmentScore (row) {
+  const finalScore = Number(row.finalScore)
+  if (Number.isFinite(finalScore)) {
+    return finalScore
+  }
+
+  const placement = Number(row.placement)
+  if (Number.isFinite(placement)) {
+    return -placement
+  }
+
+  return 0
+}
+
+/**
+ * Resolve whether a challengeResult participant should count toward rerating.
+ * Invalid zero-score backfill rows represent non-submissions and must not enter
+ * the Qubits participant pool. Passed and failed review rows remain eligible
+ * when they carry a positive score or a positive placement.
+ * @param {Object} row challengeResult participant row
+ * @returns {boolean} true when the participant has a usable score or placement
+ */
+function isDevelopmentParticipantEligibleForRating (row) {
+  if (!row || row.validSubmission === false) {
+    return false
+  }
+
+  const placement = Number(row && row.placement)
+  if (Number.isInteger(placement) && placement > 0) {
+    return true
+  }
+
+  const finalScore = Number(row && row.finalScore)
+  if (Number.isFinite(finalScore) && finalScore > 0) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Normalize a placement value so only positive integer ranks are persisted.
+ * @param {*} value raw source placement value
+ * @returns {number|undefined} positive placement or undefined when unavailable
+ */
+function toOptionalPlacement (value) {
+  const placement = Number(value)
+  return Number.isInteger(placement) && placement > 0 ? placement : undefined
+}
+
+/**
+ * Determine whether a Marathon Match submission status can contribute to final standings.
+ * Deleted submissions can retain historical system-test summations, but they are
+ * not authoritative standings rows and must not replace active placed submissions.
+ * Rows without a status are accepted for older in-memory callers; production
+ * review-api queries always provide and filter the status column.
+ * @param {*} value submission status value
+ * @returns {boolean} true when the submission is eligible for MM ratings/history
+ */
+function isEligibleMmSubmissionStatus (value) {
+  if (value === null || value === undefined) {
+    return true
+  }
+
+  return VALID_MM_SUBMISSION_STATUSES.includes(String(value || '').trim().toUpperCase())
+}
+
+/**
+ * Resolve the best available Marathon Match score from a review result row.
+ * Positive aggregate scores keep the higher-precision summation value, while
+ * positive submission or challengeResult final scores recover rows whose
+ * aggregateScore is a zero or -1 placeholder.
+ * @param {Object} row candidate result row
+ * @returns {number} score value, or NaN when no numeric score is available
+ */
+function getMmResultScore (row) {
+  const aggregateScore = Number(row && row.aggregateScore)
+  const finalScore = Number(row && row.finalScore)
+  const challengeResultFinalScore = Number(row && row.challengeResultFinalScore)
+
+  if (Number.isFinite(aggregateScore) && aggregateScore > 0) {
+    return aggregateScore
+  }
+
+  if (Number.isFinite(finalScore) && finalScore > 0) {
+    return finalScore
+  }
+
+  if (Number.isFinite(challengeResultFinalScore) && challengeResultFinalScore > 0) {
+    return challengeResultFinalScore
+  }
+
+  return aggregateScore
+}
+
+/**
+ * Resolve whether a Marathon Match participant should enter ratings.
+ * Active placeholder submissions with no placement and non-positive scores are
+ * not final-standing rows; including them makes otherwise complete placement
+ * data look partial and can reorder rated competitors.
+ * @param {Object} row candidate result row
+ * @returns {boolean} true when the row has a usable placement or score
+ */
+function isMmParticipantEligibleForRating (row) {
+  if (!row || !isEligibleMmSubmissionStatus(row && row.submissionStatus)) {
+    return false
+  }
+
+  if (toOptionalPlacement(row.placement)) {
+    return true
+  }
+
+  const score = getMmResultScore(row)
+  return Number.isFinite(score) && score > 0
+}
+
+/**
+ * Convert a date-like value into a comparable timestamp.
+ * @param {*} value source date value
+ * @returns {number} timestamp milliseconds, or 0 when unavailable
+ */
+function toTimestampSortValue (value) {
+  if (!value) {
+    return 0
+  }
+
+  const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+/**
+ * Compare two eligible MM result rows by final-standing priority.
+ * Placement rows are authoritative; otherwise higher usable MM score wins, with
+ * review and submission recency used only as deterministic tie-breakers.
+ * @param {Object} left candidate result row
+ * @param {Object} right candidate result row
+ * @returns {number} negative when left is a better standings row
+ */
+function compareMmResultRows (left, right) {
+  const leftPlacement = toOptionalPlacement(left && left.placement)
+  const rightPlacement = toOptionalPlacement(right && right.placement)
+
+  if (leftPlacement && !rightPlacement) {
+    return -1
+  }
+  if (!leftPlacement && rightPlacement) {
+    return 1
+  }
+  if (leftPlacement && rightPlacement && leftPlacement !== rightPlacement) {
+    return leftPlacement - rightPlacement
+  }
+
+  const leftScore = getMmResultScore(left)
+  const rightScore = getMmResultScore(right)
+  const hasLeftScore = Number.isFinite(leftScore)
+  const hasRightScore = Number.isFinite(rightScore)
+  if (hasLeftScore && !hasRightScore) {
+    return -1
+  }
+  if (!hasLeftScore && hasRightScore) {
+    return 1
+  }
+  if (hasLeftScore && hasRightScore && leftScore !== rightScore) {
+    return rightScore - leftScore
+  }
+
+  const leftReviewedAt = toTimestampSortValue((left && left.reviewedDate) || (left && left.createdAt))
+  const rightReviewedAt = toTimestampSortValue((right && right.reviewedDate) || (right && right.createdAt))
+  if (leftReviewedAt !== rightReviewedAt) {
+    return rightReviewedAt - leftReviewedAt
+  }
+
+  const leftSubmittedAt = toTimestampSortValue(left && left.submissionCreatedAt)
+  const rightSubmittedAt = toTimestampSortValue(right && right.submissionCreatedAt)
+  if (leftSubmittedAt !== rightSubmittedAt) {
+    return rightSubmittedAt - leftSubmittedAt
+  }
+
+  return String(right && right.submissionId).localeCompare(String(left && left.submissionId))
+}
+
+/**
+ * Select the best standings row for each Marathon Match challenge/member key.
+ * @param {Array<Object>} rows latest summation rows for candidate submissions
+ * @param {Function} keySelector returns the grouping key for one result row
+ * @returns {Array<Object>} one eligible result row per key
+ */
+function selectBestMmResultRows (rows, keySelector) {
+  const bestRowsByKey = new Map()
+  const candidateRows = rows || []
+
+  candidateRows.forEach((row) => {
+    if (!isMmParticipantEligibleForRating(row)) {
+      return
+    }
+
+    const key = String(keySelector(row) || '').trim()
+    if (!key) {
+      return
+    }
+
+    const existing = bestRowsByKey.get(key)
+    if (!existing || compareMmResultRows(row, existing) < 0) {
+      bestRowsByKey.set(key, row)
+    }
+  })
+
+  return Array.from(bestRowsByKey.values())
+}
+
+/**
+ * Compute deterministic competition placements from participant scores.
+ * @param {Array<Object>} participants Qubits participants containing coderId and score
+ * @returns {Map<string, number>} placement keyed by coder id
+ */
+function computePlacementByCoderId (participants) {
+  const placementByCoderId = new Map()
+  const sortedParticipants = (participants || []).slice().sort((left, right) => {
+    const leftScore = Number.isFinite(Number(left.score)) ? Number(left.score) : 0
+    const rightScore = Number.isFinite(Number(right.score)) ? Number(right.score) : 0
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore
+    }
+
+    return String(left.coderId).localeCompare(String(right.coderId))
+  })
+
+  let currentPlacement = 0
+  let previousScore
+  sortedParticipants.forEach((participant, index) => {
+    const score = Number(participant.score)
+    if (index === 0 || score !== previousScore) {
+      currentPlacement = index + 1
+      previousScore = score
+    }
+
+    placementByCoderId.set(String(participant.coderId), currentPlacement)
+  })
+
+  return placementByCoderId
+}
+
+/**
+ * Build optional history metadata for the target participant.
+ * Placement is computed from the same normalized scores used by the rating run,
+ * with the source placement kept as a fallback when computed placement is absent.
+ * @param {Array<Object>} participants rated participant states for one challenge
+ * @param {string} targetUserKey normalized target user id
+ * @param {Object} sourceRow source participant row for the target user
+ * @returns {Object} persisted memberStatsHistory metadata
+ */
+function buildHistoryResultFields (participants, targetUserKey, sourceRow): any {
+  const computedPlacement = computePlacementByCoderId(participants).get(String(targetUserKey))
+  const sourcePlacement = toOptionalPlacement(sourceRow && sourceRow.placement)
+  return omitUndefinedFields({
+    placement: computedPlacement || sourcePlacement
+  })
+}
+
+/**
+ * Resolve the timestamp used as the latest submission marker for a rating-path
+ * source row. Challenge-result-backed rows and Marathon Match rows both use
+ * their source createdAt as the closest persisted participation timestamp.
+ * @param {Object} sourceRow target participant source row
+ * @param {Object} historyEntry rating path challenge entry
+ * @returns {Date|null} normalized submission timestamp when available
+ */
+function resolveRatingPathSubmissionDate (sourceRow, historyEntry) {
+  return normalizeDate(
+    sourceRow && sourceRow.createdAt,
+    historyEntry && historyEntry.eventDate
+  )
+}
+
+/**
+ * Return the later of two nullable dates.
+ * @param {Date|null|undefined} currentDate previously selected date
+ * @param {Date|null|undefined} candidateDate candidate date
+ * @returns {Date|null|undefined} latest date, preserving empty values when both are empty
+ */
+function maxDate (currentDate, candidateDate) {
+  if (!candidateDate) {
+    return currentDate
+  }
+
+  if (!currentDate || candidateDate > currentDate) {
+    return candidateDate
+  }
+
+  return currentDate
+}
+
+/**
+ * Fetch all final Marathon Match system results for the target member.
+ * The reviewSummation table is submission-scoped, so the latest final summation
+ * per submission is selected before replay history is built. Deleted
+ * submissions are ignored, and each challenge keeps the best eligible standings
+ * row for the target member. Some imported MM
+ * summations have a null isFinal flag; those are treated as final unless the
+ * row is explicitly marked false. Modern MM system-test summations expose
+ * testProgressDetails while scoring is still in flight, so those rows are not
+ * replayed until the system test completed successfully.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {BigInt} userId target member identifier
+ * @returns {Promise<Array<Object>>} ordered result rows for the member
+ */
+async function fetchMmResultsForUser (reviewDbClient, userId) {
+  const reviewSummationRelation = await resolveReviewDbRelation(reviewDbClient, 'reviewSummation')
+  const submissionRelation = await resolveReviewDbRelation(reviewDbClient, 'submission')
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
+  const result = await reviewDbClient.query(
+    `
+      WITH "latestSubmissionSummation" AS (
+        SELECT
+          rs."submissionId",
+          s."memberId",
+          COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
+          s."legacyChallengeId",
+          s."placement",
+          s."finalScore",
+          s."status"::text AS "submissionStatus",
+          s."createdAt" AS "submissionCreatedAt",
+          rs."aggregateScore",
+          rs."reviewedDate",
+          rs."createdAt",
+          CASE
+            WHEN jsonb_typeof(rs."metadata") = 'object' AND rs."metadata" ? 'rated'
+              THEN rs."metadata"->>'rated'
+            WHEN jsonb_typeof(rs."metadata") = 'object' AND rs."metadata" ? 'isRated'
+              THEN rs."metadata"->>'isRated'
+            ELSE NULL
+          END AS "rated",
+          ROW_NUMBER() OVER (
+            PARTITION BY rs."submissionId"
+            ORDER BY
+              COALESCE(rs."reviewedDate", rs."createdAt") DESC NULLS LAST,
+              rs."createdAt" DESC,
+              rs."aggregateScore" DESC
+          ) AS "summationRank"
+        FROM ${reviewSummationRelation} rs
+        INNER JOIN ${submissionRelation} s
+          ON s."id" = rs."submissionId"
+        WHERE s."memberId" = $1
+          AND s."status"::text = ANY($2::text[])
+          AND (s."challengeId" IS NOT NULL OR s."legacyChallengeId" IS NOT NULL)
+          AND rs."isFinal" IS NOT FALSE
+          ${READY_MM_REVIEW_SUMMATION_FILTER}
+      ),
+      "challengeResultScore" AS (
+        SELECT DISTINCT ON ("challengeId")
+          "challengeId",
+          "placement",
+          "finalScore"
+        FROM ${challengeResultRelation}
+        WHERE "userId" IS NOT NULL
+          AND "userId"::text = $1
+          AND "validSubmission" IS DISTINCT FROM FALSE
+          AND (
+            "finalScore" IS NOT NULL OR
+            ("placement" IS NOT NULL AND "placement" > 0)
+          )
+        ORDER BY "challengeId", "placement" ASC NULLS LAST, "finalScore" DESC NULLS LAST, "createdAt" DESC
+      )
+      SELECT
+        lss."submissionId",
+        lss."memberId",
+        lss."challengeId",
+        lss."legacyChallengeId",
+        COALESCE(crs."placement", lss."placement") AS "placement",
+        lss."finalScore",
+        crs."finalScore" AS "challengeResultFinalScore",
+        lss."submissionStatus",
+        lss."submissionCreatedAt",
+        lss."aggregateScore",
+        lss."reviewedDate",
+        lss."createdAt",
+        lss."rated"
+      FROM "latestSubmissionSummation" lss
+      LEFT JOIN "challengeResultScore" crs
+        ON crs."challengeId" = lss."challengeId"
+      WHERE lss."summationRank" = 1
+      ORDER BY COALESCE(lss."reviewedDate", lss."createdAt") ASC, lss."submissionId" ASC
+    `,
+    [String(userId), VALID_MM_SUBMISSION_STATUSES]
+  )
+
+  return selectBestMmResultRows(result.rows, row => row.challengeId)
+}
+
+/**
+ * Fetch all challenge participants using the best eligible standings submission per member.
+ * Historical Marathon Match data is read from review-api only; deleted submissions
+ * are ignored, placement-bearing rows are preferred, and ready reviewSummation
+ * aggregateScore is treated as already normalized for higher-is-better ordering
+ * when usable. Submission finalScore backs up legacy placeholder summations.
+ * Both submission.challengeId and submission.legacyChallengeId are considered.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|Object} challengeId challenge identifier or history entry with legacy aliases
+ * @returns {Promise<Object>} participant rows and scoring config for the challenge
+ */
+async function fetchMmParticipantsForChallenge (reviewDbClient, challengeId) {
+  const challengeIds = buildChallengeIdCandidates(challengeId)
+  if (challengeIds.length === 0) {
+    return {
+      participantRows: [],
+      scoringConfig: getDefaultMmScoringConfig()
+    }
+  }
+
+  const reviewSummationRelation = await resolveReviewDbRelation(reviewDbClient, 'reviewSummation')
+  const submissionRelation = await resolveReviewDbRelation(reviewDbClient, 'submission')
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
+  const result = await reviewDbClient.query(
+    `
+      WITH "latestSubmissionSummation" AS (
+        SELECT
+          rs."submissionId",
+          s."memberId",
+          COALESCE(s."challengeId", s."legacyChallengeId"::text) AS "challengeId",
+          s."legacyChallengeId",
+          s."placement",
+          s."finalScore",
+          s."status"::text AS "submissionStatus",
+          s."createdAt" AS "submissionCreatedAt",
+          rs."aggregateScore",
+          rs."reviewedDate",
+          rs."createdAt",
+          ROW_NUMBER() OVER (
+            PARTITION BY rs."submissionId"
+            ORDER BY
+              COALESCE(rs."reviewedDate", rs."createdAt") DESC NULLS LAST,
+              rs."createdAt" DESC,
+              rs."aggregateScore" DESC
+          ) AS "summationRank"
+        FROM ${reviewSummationRelation} rs
+        INNER JOIN ${submissionRelation} s
+          ON s."id" = rs."submissionId"
+        WHERE (
+            s."challengeId" = ANY($1::text[])
+            OR s."legacyChallengeId"::text = ANY($1::text[])
+          )
+          AND s."memberId" IS NOT NULL
+          AND s."status"::text = ANY($2::text[])
+          AND rs."isFinal" IS NOT FALSE
+          ${READY_MM_REVIEW_SUMMATION_FILTER}
+      ),
+      "challengeResultScore" AS (
+        SELECT DISTINCT ON ("userId")
+          "userId",
+          "placement",
+          "finalScore"
+        FROM ${challengeResultRelation}
+        WHERE "challengeId" = ANY($1::text[])
+          AND "userId" IS NOT NULL
+          AND "validSubmission" IS DISTINCT FROM FALSE
+          AND (
+            "finalScore" IS NOT NULL OR
+            ("placement" IS NOT NULL AND "placement" > 0)
+          )
+        ORDER BY "userId", "placement" ASC NULLS LAST, "finalScore" DESC NULLS LAST, "createdAt" DESC
+      )
+      SELECT
+        lss."submissionId",
+        lss."memberId",
+        lss."challengeId",
+        lss."legacyChallengeId",
+        COALESCE(crs."placement", lss."placement") AS "placement",
+        lss."finalScore",
+        crs."finalScore" AS "challengeResultFinalScore",
+        lss."submissionStatus",
+        lss."aggregateScore",
+        lss."reviewedDate",
+        lss."createdAt",
+        lss."submissionCreatedAt"
+      FROM "latestSubmissionSummation" lss
+      LEFT JOIN "challengeResultScore" crs
+        ON crs."userId"::text = lss."memberId"::text
+      WHERE lss."summationRank" = 1
+      ORDER BY lss."submissionCreatedAt" ASC, lss."submissionId" ASC
+    `,
+    [challengeIds, VALID_MM_SUBMISSION_STATUSES]
+  )
+
+  return {
+    participantRows: selectBestMmResultRows(result.rows, row => row.memberId),
+    scoringConfig: getDefaultMmScoringConfig()
+  }
+}
+
+/**
+ * Fetch all scored Challenge participants from challengeResult.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string} challengeId challenge identifier
+ * @returns {Promise<Array<Object>>} eligible participant rows
+ */
+async function fetchDevelopmentParticipantsForChallenge (reviewDbClient, challengeId) {
+  const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
+  const result = await reviewDbClient.query(
+    `
+      SELECT "challengeId", "userId", "finalScore", "placement", "rated", "passedReview", "validSubmission", "createdAt"
+      FROM ${challengeResultRelation}
+      WHERE "challengeId" = $1
+      ORDER BY "placement" ASC, "finalScore" DESC, "createdAt" ASC
+    `,
+    [String(challengeId)]
+  )
+
+  return result.rows.filter((row) => isDevelopmentParticipantEligibleForRating(row))
+}
+
+/**
+ * Load challenge metadata required for MM rerating from challenge-api.
+ * Rated metadata is loaded defensively from challenge metadata key/value rows
+ * when no top-level rated flag is available. The returned map is keyed by both
+ * canonical UUID id and legacy numeric aliases so migrated review rows resolve.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Array<string>} challengeIds challenge identifiers
+ * @returns {Promise<Map<string, Object>>} challenge metadata keyed by UUID and legacy id
+ */
+async function fetchChallengeMetadataMap (challengeClient, challengeIds) {
+  const normalizedChallengeIds = buildChallengeIdCandidates(challengeIds)
+  if (normalizedChallengeIds.length === 0) {
+    return new Map()
+  }
+
+  const numericChallengeIds = normalizedChallengeIds
+    .filter((challengeId) => /^\d+$/.test(challengeId))
+    .map((challengeId) => Number(challengeId))
+    .filter(Number.isSafeInteger)
+
+  const whereClauses: any[] = [{
+    id: {
+      in: normalizedChallengeIds
+    }
+  }]
+
+  if (numericChallengeIds.length > 0) {
+    whereClauses.push({
+      legacyId: {
+        in: numericChallengeIds
+      }
+    })
+    whereClauses.push({
+      legacyRecord: {
+        is: {
+          legacySystemId: {
+            in: numericChallengeIds
+          }
+        }
+      }
+    })
+  }
+
+  const challenges = await challengeClient.challenge.findMany({
+    where: whereClauses.length === 1 ? whereClauses[0] : { OR: whereClauses },
+    select: {
+      id: true,
+      legacyId: true,
+      endDate: true,
+      status: true,
+      track: {
+        select: {
+          name: true
+        }
+      },
+      type: {
+        select: {
+          name: true
+        }
+      },
+      tags: true,
+      metadata: RATING_METADATA_SELECT,
+      legacyRecord: {
+        select: {
+          legacySystemId: true
+        }
+      }
+    }
+  })
+
+  const metadataByChallengeId = new Map()
+  challenges.forEach((challenge) => {
+    buildReviewChallengeIds(challenge).forEach((candidate) => {
+      metadataByChallengeId.set(candidate, challenge)
+    })
+  })
+
+  return metadataByChallengeId
+}
+
+/**
+ * Build the ordered rerate history for the target member.
+ * Multiple submission-level rows for one challenge are collapsed to the best
+ * eligible final system result so the rating pass replays each challenge only once.
+ * Challenge-level rating metadata decides whether the challenge is rated.
+ * @param {Array<Object>} mmResultRows submission-level MM result rows
+ * @param {Map<string, Object>} challengeMetadataById challenge metadata keyed by id
+ * @returns {Array<Object>} ordered challenge history entries for rerating
+ */
+function buildTargetHistory (mmResultRows, challengeMetadataById, ratingPath: any = null) {
+  const historyByChallengeId = new Map()
+
+  mmResultRows.forEach((row) => {
+    const challenge = challengeMetadataById.get(String(row.challengeId))
+    if (!challenge || !challenge.endDate) {
+      return
+    }
+
+    if (!isCompletedChallenge(challenge)) {
+      return
+    }
+
+    if (!isChallengeRated(challenge)) {
+      return
+    }
+
+    if (!isMarathonMatchChallenge(challenge)) {
+      return
+    }
+
+    if (ratingPath && !challengeMatchesRatingPath(challenge, ratingPath)) {
+      return
+    }
+
+    const scoreDate = normalizeDate(row.reviewedDate, row.createdAt)
+    const eventDate = normalizeDate(challenge.endDate, scoreDate)
+    if (!eventDate || !scoreDate) {
+      return
+    }
+
+    const canonicalChallengeId = String(challenge.id)
+    historyByChallengeId.set(canonicalChallengeId, {
+      challengeId: canonicalChallengeId,
+      reviewChallengeIds: buildReviewChallengeIds(challenge, row.challengeId),
+      createdAt: scoreDate,
+      endDate: normalizeDate(challenge.endDate, scoreDate),
+      eventDate,
+      placement: toOptionalPlacement(row.placement)
+    })
+  })
+
+  const history = Array.from(historyByChallengeId.values())
+
+  history.sort((left, right) => {
+    const leftEventDate = left.eventDate ? left.eventDate.getTime() : 0
+    const rightEventDate = right.eventDate ? right.eventDate.getTime() : 0
+    if (leftEventDate !== rightEventDate) {
+      return leftEventDate - rightEventDate
+    }
+
+    const leftCreatedAt = left.createdAt ? left.createdAt.getTime() : 0
+    const rightCreatedAt = right.createdAt ? right.createdAt.getTime() : 0
+    if (leftCreatedAt !== rightCreatedAt) {
+      return leftCreatedAt - rightCreatedAt
+    }
+
+    return left.challengeId.localeCompare(right.challengeId)
+  })
+
+  return history
+}
+
+/**
+ * Load canonical Challenge names for existing UUID history rows.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Array<Object>} rows memberStatsHistory rows
+ * @returns {Promise<Map<string, string>>} challenge names keyed by challenge id
+ */
+async function fetchCanonicalHistoryChallengeNames (challengeClient, rows) {
+  const challengeIds = Array.from(new Set(
+    (rows || [])
+      .map(row => row && row.challengeId)
+      .filter(challengeId => challengeId && !isLegacyNumericChallengeId(challengeId))
+      .map(challengeId => String(challengeId))
+  ))
+
+  if (challengeIds.length === 0 || !challengeClient || !challengeClient.challenge || typeof challengeClient.challenge.findMany !== 'function') {
+    return new Map()
+  }
+
+  const challenges = await challengeClient.challenge.findMany({
+    where: {
+      id: {
+        in: challengeIds
+      }
+    },
+    select: {
+      id: true,
+      name: true
+    }
+  })
+
+  return new Map(
+    (challenges || [])
+      .filter(challenge => challenge && challenge.id && challenge.name)
+      .map(challenge => [String(challenge.id), challenge.name])
+  )
+}
+
+/**
+ * Load migrated legacy Marathon Match names for numeric history rows.
+ * @param {Object} membersClient prisma members client
+ * @param {Array<Object>} rows memberStatsHistory rows
+ * @returns {Promise<Map<string, string>>} challenge names keyed by numeric challenge id
+ */
+async function fetchLegacyHistoryChallengeNames (membersClient, rows) {
+  const challengeIds = Array.from(new Set(
+    (rows || [])
+      .map(row => row && row.challengeId)
+      .filter(challengeId => challengeId && isLegacyNumericChallengeId(challengeId))
+      .map(challengeId => toBigIntUserId(challengeId))
+  ))
+
+  if (challengeIds.length === 0 || !membersClient || typeof membersClient.$queryRaw !== 'function') {
+    return new Map()
+  }
+
+  const legacyRows = await membersClient.$queryRaw`
+    SELECT "challengeId"::text AS "challengeId", MIN("challengeName") AS "challengeName"
+    FROM "members"."memberDataScienceHistoryStats"
+    WHERE "subTrack" = 'MARATHON_MATCH'
+      AND "challengeId" IN (${Prisma.join(challengeIds)})
+      AND "challengeName" IS NOT NULL
+    GROUP BY "challengeId"
+  `
+
+  return new Map(
+    (legacyRows || [])
+      .filter(row => row && row.challengeId && row.challengeName)
+      .map(row => [String(row.challengeId), row.challengeName])
+  )
+}
+
+/**
+ * Hydrate MM history rows with challenge names before duplicate seed selection.
+ * The names let rerates treat migrated numeric rows such as "MM 145" and
+ * canonical rows such as "Marathon Match 145" as the same round.
+ * @param {Object} membersClient prisma members client
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Array<Object>} rows memberStatsHistory rows
+ * @returns {Promise<Array<Object>>} cloned rows with challengeName when available
+ */
+async function hydrateMarathonHistoryRowsForDuplicateSelection (membersClient, challengeClient, rows) {
+  const clonedRows = (rows || []).map(row => ({ ...row }))
+  if (clonedRows.length === 0) {
+    return clonedRows
+  }
+
+  const [
+    canonicalNamesByChallengeId,
+    legacyNamesByChallengeId
+  ] = await Promise.all([
+    fetchCanonicalHistoryChallengeNames(challengeClient, clonedRows),
+    fetchLegacyHistoryChallengeNames(membersClient, clonedRows)
+  ])
+
+  return clonedRows.map((row) => ({
+    ...row,
+    challengeName: row.challengeName ||
+      canonicalNamesByChallengeId.get(String(row.challengeId)) ||
+      legacyNamesByChallengeId.get(String(row.challengeId))
+  }))
+}
+
+/**
+ * Cache the unified history timeline for participants needed during the rerate span.
+ * @param {Object} membersClient prisma members client
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Array<BigInt>} participantIds participant identifiers
+ * @param {Map<string, Array<Object>>} historyByUserId cached history rows per participant
+ * @returns {Promise<void>} resolves when the requested history rows are cached
+ */
+async function loadParticipantHistoryCache (membersClient, challengeClient, participantIds, historyByUserId, dimensionIds) {
+  const idsToLoad = participantIds.filter((participantId) => !historyByUserId.has(buildUserStateKey(participantId)))
+  if (idsToLoad.length === 0) {
+    return
+  }
+
+  const historyRows = await membersClient.memberStatsHistory.findMany({
+    where: {
+      userId: {
+        in: idsToLoad
+      },
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId
+    },
+    orderBy: [{ userId: 'asc' }, { eventDate: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      userId: true,
+      challengeId: true,
+      oldRating: true,
+      newRating: true,
+      oldVolatility: true,
+      newVolatility: true,
+      eventDate: true,
+      placement: true,
+      createdBy: true,
+      updatedBy: true
+    }
+  })
+
+  idsToLoad.forEach((participantId) => {
+    historyByUserId.set(buildUserStateKey(participantId), [])
+  })
+
+  const groupedRows = new Map()
+  historyRows.forEach((row) => {
+    const stateKey = buildUserStateKey(row.userId)
+    const eventDate = normalizeDate(row.eventDate, row.eventDate)
+
+    if (!historyByUserId.has(stateKey) || !eventDate) {
+      return
+    }
+
+    const cachedRows = groupedRows.get(stateKey) || []
+    cachedRows.push({
+      id: row.id,
+      userId: row.userId,
+      challengeId: String(row.challengeId),
+      oldRating: row.oldRating,
+      newRating: row.newRating,
+      oldVolatility: row.oldVolatility,
+      newVolatility: row.newVolatility,
+      eventDate,
+      placement: row.placement,
+      createdBy: row.createdBy,
+      updatedBy: row.updatedBy
+    })
+    groupedRows.set(stateKey, cachedRows)
+  })
+
+  const hydratedRows = await hydrateMarathonHistoryRowsForDuplicateSelection(
+    membersClient,
+    challengeClient,
+    Array.from(groupedRows.values()).flat()
+  )
+  const hydratedRowsByStateKey = new Map()
+  hydratedRows.forEach((row) => {
+    const stateKey = buildUserStateKey(row.userId)
+    const rows = hydratedRowsByStateKey.get(stateKey) || []
+    rows.push(row)
+    hydratedRowsByStateKey.set(stateKey, rows)
+  })
+
+  groupedRows.forEach((rows, stateKey) => {
+    const hydratedGroupRows = hydratedRowsByStateKey.get(stateKey) || rows
+    historyByUserId.set(
+      stateKey,
+      selectLegacyPreferredMarathonHistoryRows(backfillHistoryRatingsFromNextOldRating(hydratedGroupRows))
+    )
+  })
+}
+
+/**
+ * Remove undefined fields before passing dynamic stats data to Prisma writes.
+ * @param {Object} data write payload
+ * @returns {Object} shallow copy without undefined values
+ */
+function omitUndefinedFields (data) {
+  const result = {}
+  Object.keys(data || {}).forEach((key) => {
+    if (data[key] !== undefined) {
+      result[key] = data[key]
+    }
+  })
+  return result
+}
+
+/**
+ * Insert or update the current rating stats row for one rating dimension.
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId member identifier
+ * @param {Object} updatedTarget Qubits participant state after the challenge
+ * @param {Object} dimensionIds unified stats track/type identifiers
+ * @param {Object} statsFields optional aggregate fields for the rating dimension
+ * @returns {Promise<void>} resolves when the stats row is written
+ */
+async function upsertRatingStatsRow (tx, userId, updatedTarget, dimensionIds, statsFields = {}) {
+  await tx.memberStats.upsert({
+    where: {
+      userId_trackId_typeId: {
+        userId,
+        trackId: dimensionIds.trackId,
+        typeId: dimensionIds.typeId
+      }
+    },
+    create: omitUndefinedFields({
+      userId,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
+      rating: updatedTarget.rating,
+      volatility: updatedTarget.volatility,
+      isPrivate: false,
+      ...statsFields,
+      createdBy: RERATE_ACTOR,
+      updatedBy: RERATE_ACTOR
+    }),
+    update: omitUndefinedFields({
+      rating: updatedTarget.rating,
+      volatility: updatedTarget.volatility,
+      isPrivate: false,
+      ...statsFields,
+      updatedBy: RERATE_ACTOR
+    })
+  })
+}
+
+/**
+ * Insert or update the member's history checkpoint for one rerated challenge.
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId member identifier
+ * @param {string} challengeId challenge identifier
+ * @param {Object} previousState target state before the challenge
+ * @param {Object} updatedState target state after the challenge
+ * @param {Date} eventDate challenge event date
+ * @param {Object} historyFields optional placement and percentile history metadata
+ * @returns {Promise<void>} resolves when the history row is written
+ */
+async function upsertHistoryRow (tx, userId, challengeId, previousState, updatedState, eventDate, dimensionIds, historyFields: any = {}) {
+  const hasPreviousRating = previousState && previousState.numRatings > 0
+  const oldRating = hasPreviousRating ? previousState.rating : null
+  const oldVolatility = hasPreviousRating ? previousState.volatility : null
+  const existingHistory = await tx.memberStatsHistory.findFirst({
+    where: {
+      userId,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
+      challengeId
+    },
+    select: {
+      id: true
+    }
+  })
+  const historyData = omitUndefinedFields({
+    oldRating,
+    newRating: updatedState.rating,
+    placement: historyFields.placement,
+    percentile: historyFields.percentile,
+    oldVolatility,
+    newVolatility: updatedState.volatility,
+    eventDate,
+    updatedBy: RERATE_ACTOR
+  })
+
+  if (existingHistory) {
+    await tx.memberStatsHistory.update({
+      where: {
+        id: existingHistory.id
+      },
+      data: historyData
+    })
+    return
+  }
+
+  await tx.memberStatsHistory.create({
+    data: {
+      userId,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId,
+      challengeId,
+      mostRecent: false,
+      ...historyData,
+      createdBy: RERATE_ACTOR,
+      updatedBy: RERATE_ACTOR
+    }
+  })
+}
+
+/**
+ * Persist the member's global max rating row after an MM or rating-path update.
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId member identifier
+ * @param {Object} dimensionIds unified rating dimensions
+ * @returns {Promise<void>} resolves when max rating is stored
+ */
+async function updateMaxRating (tx, userId, dimensionIds) {
+  await syncCurrentMemberMaxRating(tx, userId, {
+    actor: RERATE_ACTOR,
+    currentDimension: dimensionIds,
+    dimensionLookup: dimensionIds.dimensionLookup
+  })
+}
+
+/**
+ * Mark the newest MM history row as mostRecent and align its rating snapshot.
+ * @param {Object} tx prisma transaction client
+ * @param {BigInt} userId member identifier
+ * @param {Object} challengeClient prisma challenge client
+ * @returns {Promise<void>} resolves when history flags are refreshed
+ */
+async function refreshMostRecentHistoryFlag (tx, userId, dimensionIds, challengeClient) {
+  const historyWhere = {
+    userId,
+    trackId: dimensionIds.trackId,
+    typeId: dimensionIds.typeId
+  }
+  const historyRows = await tx.memberStatsHistory.findMany({
+    where: historyWhere,
+    orderBy: [{ eventDate: 'asc' }, { id: 'asc' }],
+    select: {
+      id: true,
+      userId: true,
+      challengeId: true,
+      newRating: true,
+      newVolatility: true,
+      eventDate: true,
+      placement: true,
+      createdBy: true,
+      updatedBy: true
+    }
+  })
+  const hydratedHistoryRows = await hydrateMarathonHistoryRowsForDuplicateSelection(
+    tx,
+    challengeClient,
+    historyRows.map((row) => ({
+      ...row,
+      eventDate: normalizeDate(row.eventDate, row.eventDate)
+    }))
+  )
+  const visibleHistoryRows = selectLegacyPreferredMarathonHistoryRows(
+    hydratedHistoryRows
+  ).sort((left, right) => {
+    const leftEventDate = left.eventDate ? left.eventDate.getTime() : 0
+    const rightEventDate = right.eventDate ? right.eventDate.getTime() : 0
+    if (leftEventDate !== rightEventDate) {
+      return rightEventDate - leftEventDate
+    }
+
+    return compareValuesForHistoryRefresh(right.id, left.id)
+  })
+
+  await tx.memberStatsHistory.updateMany({
+    where: {
+      ...historyWhere,
+      mostRecent: true
+    },
+    data: {
+      mostRecent: false,
+      updatedBy: RERATE_ACTOR
+    }
+  })
+
+  const latestHistory = visibleHistoryRows[0]
+
+  if (!latestHistory) {
+    return
+  }
+
+  const currentStats = await tx.memberStats.findFirst({
+    where: {
+      userId,
+      trackId: dimensionIds.trackId,
+      typeId: dimensionIds.typeId
+    },
+    select: {
+      rating: true,
+      volatility: true
+    }
+  })
+
+  const previousHistory = visibleHistoryRows[1]
+
+  const latestUpdate: any = {
+    mostRecent: true,
+    oldRating: previousHistory ? previousHistory.newRating : null,
+    oldVolatility: previousHistory ? previousHistory.newVolatility : null,
+    updatedBy: RERATE_ACTOR
+  }
+
+  if (!isLegacyNumericChallengeId(latestHistory.challengeId) && currentStats && currentStats.rating !== null) {
+    latestUpdate.newRating = currentStats.rating
+  }
+  if (!isLegacyNumericChallengeId(latestHistory.challengeId) && currentStats && currentStats.volatility !== null) {
+    latestUpdate.newVolatility = currentStats.volatility
+  }
+
+  await tx.memberStatsHistory.update({
+    where: {
+      id: latestHistory.id
+    },
+    data: latestUpdate
+  })
+}
+
+/**
+ * Build the Challenge API where clause for a configured rating path.
+ * Tags are queried as any-of filters. Skill ids are queried as an all-of
+ * combination by requiring a ChallengeSkill row for each configured skill id.
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Object} Prisma where clause for candidate challenges
+ */
+function buildRatingPathChallengeWhere (ratingPath) {
+  const conditions = []
+
+  if (ratingPath && Array.isArray(ratingPath.tags) && ratingPath.tags.length > 0) {
+    conditions.push({
+      tags: {
+        hasSome: ratingPath.tags
+      }
+    })
+  }
+
+  if (ratingPath && Array.isArray(ratingPath.skillIds) && ratingPath.skillIds.length > 0) {
+    ratingPath.skillIds.forEach((skillId) => {
+      conditions.push({
+        skills: {
+          some: {
+            skillId
+          }
+        }
+      })
+    })
+  }
+
+  if (conditions.length === 1) {
+    return conditions[0]
+  }
+
+  return {
+    AND: conditions
+  }
+}
+
+/**
+ * Load completed, rated challenges that belong to a configured rating path.
+ * The Challenge API stores tags on the challenge row and skill links in
+ * ChallengeSkill rows, while rated state is kept in metadata for some historical
+ * imports. Supported sources are Development / Challenge, DATA_SCIENCE /
+ * Challenge, QA / Challenge, and DATA_SCIENCE / MARATHON_MATCH. Entries include
+ * canonical and legacy challenge id aliases for review-api lookups.
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object} ratingPath normalized rating path config
+ * @returns {Promise<Array<Object>>} ordered challenge entries for the rating path
+ */
+async function fetchRatingPathHistory (challengeClient, ratingPath) {
+  const challenges = await challengeClient.challenge.findMany({
+    where: buildRatingPathChallengeWhere(ratingPath),
+    select: {
+      id: true,
+      legacyId: true,
+      endDate: true,
+      status: true,
+      track: {
+        select: {
+          name: true
+        }
+      },
+      type: {
+        select: {
+          name: true
+        }
+      },
+      tags: true,
+      skills: {
+        select: {
+          skillId: true
+        }
+      },
+      metadata: RATING_METADATA_SELECT,
+      legacyRecord: {
+        select: {
+          legacySystemId: true
+        }
+      }
+    }
+  })
+
+  const history = []
+  challenges.forEach((challenge) => {
+    if (!challenge || !challenge.endDate) {
+      return
+    }
+
+    if (!isCompletedChallenge(challenge)) {
+      return
+    }
+
+    if (!isChallengeRated(challenge)) {
+      return
+    }
+
+    if (!challengeMatchesRatingPath(challenge, ratingPath)) {
+      return
+    }
+
+    const source = resolveRatingPathSource(challenge)
+    if (!source) {
+      return
+    }
+
+    const eventDate = normalizeDate(challenge.endDate, challenge.endDate)
+    if (!eventDate) {
+      return
+    }
+
+    history.push({
+      challengeId: String(challenge.id),
+      reviewChallengeIds: buildReviewChallengeIds(challenge),
+      eventDate,
+      source
+    })
+  })
+
+  history.sort((left, right) => {
+    const leftEventDate = left.eventDate ? left.eventDate.getTime() : 0
+    const rightEventDate = right.eventDate ? right.eventDate.getTime() : 0
+    if (leftEventDate !== rightEventDate) {
+      return leftEventDate - rightEventDate
+    }
+
+    return left.challengeId.localeCompare(right.challengeId)
+  })
+
+  return history
+}
+
+/**
+ * Fetch participants for one tagged rating path event from its source table.
+ * The second argument is retained for older callers that passed an MM client;
+ * it is ignored because historical MM replay no longer reads marathon-match-api.
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {Object|null} maybeMmDbClientOrHistoryEntry ignored MM client or rating path challenge entry
+ * @param {Object} [maybeHistoryEntry] rating path challenge entry
+ * @returns {Promise<Object>} participant rows and optional MM scoring config
+ */
+async function fetchRatingPathParticipantsForChallenge (reviewDbClient, maybeMmDbClientOrHistoryEntry, maybeHistoryEntry) {
+  const historyEntry = maybeHistoryEntry || maybeMmDbClientOrHistoryEntry
+
+  if (isChallengeResultRatingPathSource(historyEntry.source)) {
+    return {
+      participantRows: await fetchDevelopmentParticipantsForChallenge(reviewDbClient, historyEntry.challengeId),
+      scoringConfig: null
+    }
+  }
+
+  if (historyEntry.source === RATING_PATH_SOURCE_MARATHON_MATCH) {
+    return fetchMmParticipantsForChallenge(reviewDbClient, historyEntry)
+  }
+
+  return {
+    participantRows: [],
+    scoringConfig: null
+  }
+}
+
+/**
+ * Resolve a rating path participant's member id.
+ * @param {Object} row participant source row
+ * @param {string} source rating path source
+ * @returns {BigInt} participant member id
+ */
+function resolveRatingPathParticipantId (row, source) {
+  return toBigIntUserId(source === RATING_PATH_SOURCE_MARATHON_MATCH ? row.memberId : row.userId)
+}
+
+/**
+ * Normalize a rating path participant's score based on its source.
+ * @param {Object} row participant source row
+ * @param {string} source rating path source
+ * @param {Object} scoringConfig MM scoring config when source is Marathon Match
+ * @param {Object} [options] score normalization options
+ * @returns {number} normalized Qubits score
+ */
+function normalizeRatingPathScore (row, source, scoringConfig, options = {}) {
+  if (isChallengeResultRatingPathSource(source)) {
+    return normalizeDevelopmentScore(row)
+  }
+
+  return normalizeScore(row, scoringConfig, options)
+}
+
+/**
+ * Re-rate one target member on a configured rating path.
+ * The path is replayed from its first matching challenge in memory so opponent
+ * states are correct even before their custom rating histories have been stored.
+ * Only the requested target member's stats/history rows are persisted. Tag
+ * predicates match any configured tag; skill predicates require every configured
+ * skill id to be present on the challenge.
+ * @param {Object} membersClient prisma members client
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object|null} mmDbClient ignored legacy Marathon Match client parameter
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|number|BigInt} userId target member identifier
+ * @param {string|number} fromChallengeId starting challenge identifier
+ * @param {Object} ratingPath normalized rating path config
+ * @param {Object} [options] rerate controls
+ * @param {boolean} [options.recalculateRanks=true] recompute ranks after this member rerate
+ * @returns {Promise<Object>} rerate summary counts
+ * @throws {errors.BadRequestError} when the start challenge is not in the member's path
+ */
+async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId, ratingPath, options: any = {}) {
+  const normalizedUserId = toBigIntUserId(userId)
+  const targetUserKey = buildUserStateKey(normalizedUserId)
+  const pathHistory = await fetchRatingPathHistory(challengeClient, ratingPath)
+  if (pathHistory.length === 0) {
+    return {
+      challengesProcessed: 0,
+      ratingPathChallengesProcessed: 0,
+      ratingsUpdated: 0
+    }
+  }
+
+  let startIndex = 0
+  if (fromChallengeId) {
+    startIndex = pathHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
+    if (startIndex < 0) {
+      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${ratingPath.name} event`)
+    }
+  }
+
+  const dimensionIds = await resolveUnifiedDimensionIds(challengeClient, ratingPath)
+  const stateByUserId = new Map()
+  let targetChallengeCount = 0
+  let targetWinCount = 0
+  let targetMostRecentEventDate
+  let targetMostRecentSubmission
+  let challengesProcessed = 0
+  let ratingPathChallengesProcessed = 0
+  let ratingsUpdated = 0
+  const targetRatingBounds = {
+    minRating: null,
+    maxRating: null
+  }
+  const shouldRecalculateRanks = options.recalculateRanks !== false
+
+  for (let index = 0; index < pathHistory.length; index += 1) {
+    const historyEntry = pathHistory[index]
+    const { participantRows, scoringConfig } = await fetchRatingPathParticipantsForChallenge(
+      reviewDbClient,
+      mmDbClient,
+      historyEntry
+    )
+
+    if (participantRows.length === 0) {
+      if (fromChallengeId && index === startIndex) {
+        throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${ratingPath.name} event for this member`)
+      }
+      continue
+    }
+
+    ratingPathChallengesProcessed += 1
+
+    const usePlacementScore = historyEntry.source === RATING_PATH_SOURCE_MARATHON_MATCH &&
+      shouldUsePlacementScores(participantRows)
+    const targetStateBeforeRun = cloneState(stateByUserId.get(targetUserKey))
+    const participantRowsByUserId = new Map()
+    const participants = participantRows.map((row) => {
+      const participantUserId = resolveRatingPathParticipantId(row, historyEntry.source)
+      const participantState = stateByUserId.get(buildUserStateKey(participantUserId)) || createDefaultState()
+      participantRowsByUserId.set(buildUserStateKey(participantUserId), row)
+
+      return {
+        coderId: String(participantUserId),
+        rating: participantState.rating,
+        volatility: participantState.volatility,
+        numRatings: participantState.numRatings,
+        score: normalizeRatingPathScore(row, historyEntry.source, scoringConfig, { usePlacementScore })
+      }
+    })
+
+    runQubitsRating(participants)
+
+    participants.forEach((participant) => {
+      stateByUserId.set(buildUserStateKey(participant.coderId), cloneState(participant))
+    })
+
+    const updatedTarget = participants.find((participant) => participant.coderId === String(normalizedUserId))
+    if (!updatedTarget) {
+      if (fromChallengeId && index === startIndex) {
+        throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${ratingPath.name} event for this member`)
+      }
+      continue
+    }
+
+    targetChallengeCount += 1
+    targetMostRecentEventDate = historyEntry.eventDate
+    extendRatingBounds(targetRatingBounds, updatedTarget.rating)
+    const targetHistoryFields = buildHistoryResultFields(
+      participants,
+      targetUserKey,
+      participantRowsByUserId.get(targetUserKey)
+    )
+    if (targetHistoryFields.placement === 1) {
+      targetWinCount += 1
+    }
+    targetMostRecentSubmission = maxDate(
+      targetMostRecentSubmission,
+      resolveRatingPathSubmissionDate(participantRowsByUserId.get(targetUserKey), historyEntry)
+    )
+
+    if (index < startIndex) {
+      continue
+    }
+
+    challengesProcessed += 1
+    ratingsUpdated += 1
+
+    await membersClient.$transaction(async (tx) => {
+      await upsertRatingStatsRow(
+        tx,
+        normalizedUserId,
+        updatedTarget,
+        dimensionIds,
+        {
+          challenges: targetChallengeCount,
+          wins: targetWinCount,
+          mostRecentSubmission: targetMostRecentSubmission,
+          mostRecentEventDate: targetMostRecentEventDate,
+          maxRating: targetRatingBounds.maxRating,
+          minRating: targetRatingBounds.minRating
+        }
+      )
+
+      await upsertHistoryRow(
+        tx,
+        normalizedUserId,
+        historyEntry.challengeId,
+        targetStateBeforeRun,
+        updatedTarget,
+        historyEntry.eventDate,
+        dimensionIds,
+        targetHistoryFields
+      )
+    })
+  }
+
+  if (ratingsUpdated > 0) {
+    await membersClient.$transaction(async (tx) => {
+      await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds, challengeClient)
+      await updateMaxRating(tx, normalizedUserId, dimensionIds)
+    })
+
+    if (shouldRecalculateRanks) {
+      await recalculateRatingRanks(membersClient, dimensionIds, { updatedBy: RERATE_ACTOR })
+    }
+  }
+
+  return {
+    challengesProcessed,
+    ratingPathChallengesProcessed,
+    ratingsUpdated
+  }
+}
+
+/**
+ * Re-rate one member's Marathon Match timeline beginning at the requested challenge.
+ * Each challenge is replayed forward with the latest final MM system score per participant,
+ * and the current stats row is aligned with the target member's full rated MM timeline.
+ * Rank recalculation is enabled by default for direct rerates, but bulk scripts
+ * can disable it and run one final rank update after all member rows are stored.
+ * @param {Object} membersClient prisma members client
+ * @param {Object} challengeClient prisma challenge client
+ * @param {Object|null} mmDbClient ignored legacy Marathon Match client parameter
+ * @param {Object} reviewDbClient raw pg review database client
+ * @param {string|number|BigInt} userId target member identifier
+ * @param {string|number} fromChallengeId starting challenge identifier
+ * @param {Object} options optional rerate controls
+ * @param {Object} options.ratingPath normalized rating path config
+ * @param {Array<Object>} [options.pathHistory] ordered completed MM timeline to replay
+ * @param {boolean} [options.recalculateRanks=true] recompute ranks after this member rerate
+ * @returns {Promise<Object>} rerate summary counts
+ * @throws {Error} when the required review database connection is missing
+ * @throws {errors.BadRequestError} when the start challenge is not a rated MM event for the member
+ */
+async function rerateMmTrack (membersClient, challengeClient, mmDbClient, reviewDbClient, userId, fromChallengeId, options: any = {}) {
+  if (!reviewDbClient) {
+    throw new Error('REVIEW_DB_URL must be configured to rerate marathon match stats')
+  }
+
+  const ratingPath = options.ratingPath || null
+  if (ratingPath) {
+    return rerateMmRatingPath(
+      membersClient,
+      challengeClient,
+      mmDbClient,
+      reviewDbClient,
+      userId,
+      fromChallengeId,
+      ratingPath,
+      options
+    )
+  }
+
+  const normalizedUserId = toBigIntUserId(userId)
+  const targetUserKey = buildUserStateKey(normalizedUserId)
+  const mmResultRows = await fetchMmResultsForUser(reviewDbClient, normalizedUserId)
+  if (mmResultRows.length === 0) {
+    return {
+      challengesProcessed: 0,
+      ratingsUpdated: 0
+    }
+  }
+
+  const challengeMetadataById = await fetchChallengeMetadataMap(
+    challengeClient,
+    Array.from(new Set(mmResultRows.map((row) => String(row.challengeId))))
+  )
+
+  const targetHistory = buildTargetHistory(mmResultRows, challengeMetadataById)
+  if (targetHistory.length === 0) {
+    return {
+      challengesProcessed: 0,
+      ratingsUpdated: 0
+    }
+  }
+
+  const dimensionIds = await resolveUnifiedDimensionIds(challengeClient)
+  const latestTargetHistoryEntry = targetHistory[targetHistory.length - 1]
+  const targetHistoryHasPlacements = targetHistory.some((entry) => entry.placement)
+  const targetAggregateFields = {
+    challenges: targetHistory.length,
+    ...(targetHistoryHasPlacements ? {
+      wins: targetHistory.filter((entry) => entry.placement === 1).length
+    } : {}),
+    mostRecentEventDate: latestTargetHistoryEntry.eventDate,
+    mostRecentSubmission: latestTargetHistoryEntry.createdAt
+  }
+  const ratingHistory = Array.isArray(options.pathHistory) && options.pathHistory.length > 0
+    ? options.pathHistory
+      .map((entry) => ({
+        ...entry,
+        challengeId: String(entry.challengeId),
+        eventDate: normalizeDate(entry.eventDate, entry.eventDate),
+        createdAt: normalizeDate(entry.createdAt, entry.eventDate)
+      }))
+      .filter(entry => entry.challengeId && entry.eventDate)
+      .sort((left, right) => {
+        const leftEventDate = left.eventDate.getTime()
+        const rightEventDate = right.eventDate.getTime()
+        if (leftEventDate !== rightEventDate) {
+          return leftEventDate - rightEventDate
+        }
+        return left.challengeId.localeCompare(right.challengeId)
+      })
+    : targetHistory
+
+  let startIndex = 0
+  if (fromChallengeId) {
+    startIndex = ratingHistory.findIndex((entry) => historyEntryMatchesChallengeId(entry, fromChallengeId))
+    if (startIndex < 0) {
+      throw new errors.BadRequestError(`Challenge ${fromChallengeId} is not a rated ${TRACK_NAME}/${TYPE_NAME} event for this member`)
+    }
+  }
+
+  const participantHistoryByUserId = new Map()
+  let targetState = createDefaultState()
+  let targetSeedHistoryRows = []
+  let targetSeedIndex = -1
+
+  if (startIndex > 0) {
+    await loadParticipantHistoryCache(membersClient, challengeClient, [normalizedUserId], participantHistoryByUserId, dimensionIds)
+
+    targetSeedHistoryRows = participantHistoryByUserId.get(targetUserKey) || []
+    targetSeedIndex = findHistoryIndexForChallenge(targetSeedHistoryRows, ratingHistory[startIndex - 1])
+
+    if (targetSeedIndex < 0) {
+      targetSeedIndex = findHistorySeedIndexForChallenge(targetSeedHistoryRows, ratingHistory[startIndex])
+    }
+
+    targetState = createHistorySeedState(targetSeedHistoryRows, targetSeedIndex)
+  }
+
+  let challengesProcessed = 0
+  let ratingsUpdated = 0
+  const targetRatingBounds = buildSeedRatingBounds(targetSeedHistoryRows, targetSeedIndex)
+  const shouldRecalculateRanks = options.recalculateRanks !== false
+  const stateByUserId = new Map()
+  stateByUserId.set(targetUserKey, cloneState(targetState))
+
+  for (let index = startIndex; index < ratingHistory.length; index += 1) {
+    const historyEntry = ratingHistory[index]
+    const { participantRows, scoringConfig } = await fetchMmParticipantsForChallenge(
+      reviewDbClient,
+      historyEntry
+    )
+    if (participantRows.length === 0) {
+      continue
+    }
+
+    const participantIds = participantRows.map((row) => toBigIntUserId(row.memberId))
+    const usePlacementScore = shouldUsePlacementScores(participantRows)
+    const missingParticipantIds = participantIds.filter((participantId) => !stateByUserId.has(buildUserStateKey(participantId)))
+    if (missingParticipantIds.length > 0) {
+      await loadParticipantHistoryCache(membersClient, challengeClient, missingParticipantIds, participantHistoryByUserId, dimensionIds)
+      missingParticipantIds.forEach((participantId) => {
+        const stateKey = buildUserStateKey(participantId)
+        const historyRows = participantHistoryByUserId.get(stateKey) || []
+        const seedIndex = findHistorySeedIndexForChallenge(historyRows, historyEntry)
+        stateByUserId.set(stateKey, createHistorySeedState(historyRows, seedIndex))
+      })
+    }
+
+    const targetStateBeforeRun = cloneState(stateByUserId.get(targetUserKey) || targetState)
+    const participantRowsByUserId = new Map()
+    const participants = participantRows.map((row) => {
+      const participantUserId = toBigIntUserId(row.memberId)
+      const participantState = stateByUserId.get(buildUserStateKey(participantUserId)) || createDefaultState()
+      participantRowsByUserId.set(buildUserStateKey(participantUserId), row)
+
+      return {
+        coderId: String(participantUserId),
+        rating: participantState.rating,
+        volatility: participantState.volatility,
+        numRatings: participantState.numRatings,
+        score: normalizeScore(row, scoringConfig, { usePlacementScore })
+      }
+    })
+
+    runQubitsRating(participants)
+    participants.forEach((participant) => {
+      stateByUserId.set(buildUserStateKey(participant.coderId), cloneState(participant))
+    })
+
+    const updatedTarget = participants.find((participant) => participant.coderId === String(normalizedUserId))
+    if (!updatedTarget) {
+      continue
+    }
+
+    targetState = cloneState(updatedTarget)
+    extendRatingBounds(targetRatingBounds, updatedTarget.rating)
+    challengesProcessed += 1
+    ratingsUpdated += 1
+    const targetHistoryFields = buildHistoryResultFields(
+      participants,
+      targetUserKey,
+      participantRowsByUserId.get(targetUserKey)
+    )
+
+    await membersClient.$transaction(async (tx) => {
+      await upsertRatingStatsRow(
+        tx,
+        normalizedUserId,
+        updatedTarget,
+        dimensionIds,
+        {
+          ...targetAggregateFields,
+          maxRating: targetRatingBounds.maxRating,
+          minRating: targetRatingBounds.minRating
+        }
+      )
+
+      await upsertHistoryRow(
+        tx,
+        normalizedUserId,
+        historyEntry.challengeId,
+        targetStateBeforeRun,
+        updatedTarget,
+        historyEntry.eventDate,
+        dimensionIds,
+        targetHistoryFields
+      )
+    })
+  }
+
+  if (ratingsUpdated > 0) {
+    await membersClient.$transaction(async (tx) => {
+      await refreshMostRecentHistoryFlag(tx, normalizedUserId, dimensionIds, challengeClient)
+      await updateMaxRating(tx, normalizedUserId, dimensionIds)
+    })
+
+    if (shouldRecalculateRanks) {
+      await recalculateRatingRanks(membersClient, dimensionIds, { updatedBy: RERATE_ACTOR })
+    }
+  }
+
+  return {
+    challengesProcessed,
+    ratingsUpdated
+  }
+}
+
+module.exports = {
+  fetchRatingPathHistory,
+  fetchRatingPathParticipantsForChallenge,
+  resolveRatingPathParticipantId,
+  rerateMmTrack
+}

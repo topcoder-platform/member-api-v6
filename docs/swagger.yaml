@@ -152,12 +152,16 @@ paths:
     get:
       tags:
         - Health
-      description: Get member distribution statistics
+      description: Check service readiness using the primary members database
       responses:
         '200':
           description: OK
           schema:
             $ref: '#/definitions/Health'
+        '503':
+          description: Members database is unavailable or responding too slowly
+          schema:
+            $ref: '#/definitions/ErrorModel'
         '400':
           description: Bad request data
           schema:
@@ -1637,6 +1641,119 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats/roles':
+    get:
+      tags:
+        - Statistics
+      description: >
+        Get the count-only Copilot and Reviewer special-role summary displayed
+        on a member profile. Counts use the same anonymous-visible challenge
+        set as the role detail endpoints: challenges have no groups, no
+        user-whitelist rows, and are not tasks. A challenge with more than one
+        matching reviewer role is counted once, and a role key is omitted when
+        its count is zero. Reviewer assignments include exactly Iterative
+        Reviewer, Primary Reviewer, Reviewer, Failure Reviewer, Final Reviewer,
+        Aggregator, Stress Reviewer, Accuracy Reviewer, Primary Screener,
+        Checkpoint Screener, and Checkpoint Reviewer. Copilot assignments use
+        the Copilot resource role. The summary does not load challenge names or
+        Copilot track/fulfillment details.
+
+        Authorization:
+          - Public: Anonymous callers may retrieve the count-only summary.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/SpecialRoleStats'
+        '400':
+          description: Bad request data
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Member not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '503':
+          description: Required co-located challenges/resources schemas are unavailable
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
+  '/members/{handle}/stats/roles/{role}/challenges':
+    get:
+      tags:
+        - Statistics
+      description: >
+        Get every newest-first distinct challenge assigned to a member's Copilot
+        or Reviewer role in one response. Reviewer assignments use the exact
+        role list documented on the summary endpoint and multiple reviewer
+        assignments for one challenge collapse into one item. Ordering uses
+        challenge end date, then start/creation date fallbacks, followed by
+        resource assignment time and challenge ID tie-breakers.
+        `resourceCreatedAt` is assignment creation time and is not a
+        review-completion timestamp.
+
+        Detail totals, items, Copilot track counts, and fulfillment include only
+        challenges visible to an anonymous Challenge API caller: challenges have
+        no groups, no user-whitelist rows, and are not tasks. Restricted
+        challenge IDs and names are never returned.
+
+        Copilot `trackCounts` includes only non-zero Development, Design,
+        Quality Assurance, and Data Science keys. Fulfillment is
+        `COMPLETED / (COMPLETED + CANCELLED*) * 100`; `CANCELLED` and every
+        `CANCELLED_*` status count as cancelled, non-terminal statuses are
+        excluded, a zero denominator returns 0, and the percentage is rounded
+        to two decimal places on a 0-100 scale.
+
+        Cross-schema special-role queries require the `challenges` and `resources`
+        schemas to be co-located in the challenge database, as in the supported
+        deployment. A split-database deployment receives `503 Service
+        Unavailable` for summary and detail requests.
+
+        Authorization:
+          - Public: Anonymous callers may retrieve anonymous-visible challenges.
+          - M2M scopes: `read:user_profiles` or `all:user_profiles`.
+      parameters:
+        - in: path
+          name: handle
+          required: true
+          type: string
+        - in: path
+          name: role
+          required: true
+          type: string
+          enum:
+            - copilot
+            - reviewer
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/SpecialRoleChallenges'
+        '400':
+          description: Invalid role
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '404':
+          description: Member not found
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '503':
+          description: Required co-located challenges/resources schemas are unavailable
+          schema:
+            $ref: '#/definitions/ErrorModel'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/ErrorModel'
   '/members/{handle}/stats/history':
     get:
       tags:
@@ -2660,6 +2777,151 @@ definitions:
       ratingsUpdated:
         type: integer
         format: int32
+  SpecialRoleStats:
+    type: object
+    description: >
+      Count-only special-role summary. `copilot` and `reviewer` are omitted when
+      their anonymous-visible distinct challenge count is zero.
+    properties:
+      copilot:
+        $ref: '#/definitions/SpecialRoleCount'
+      reviewer:
+        $ref: '#/definitions/SpecialRoleCount'
+  SpecialRoleCount:
+    type: object
+    required:
+      - challengeCount
+    properties:
+      challengeCount:
+        type: integer
+        format: int32
+        minimum: 1
+        description: Anonymous-visible distinct challenge count for this role family.
+  SpecialRoleTrackCounts:
+    type: object
+    description: >
+      Non-zero Copilot challenge counts by challenge track. A zero-count track
+      is omitted.
+    properties:
+      DEVELOPMENT:
+        type: integer
+        format: int32
+        minimum: 1
+      DESIGN:
+        type: integer
+        format: int32
+        minimum: 1
+      QUALITY_ASSURANCE:
+        type: integer
+        format: int32
+        minimum: 1
+      DATA_SCIENCE:
+        type: integer
+        format: int32
+        minimum: 1
+  SpecialRoleFulfillment:
+    type: object
+    required:
+      - completed
+      - cancelled
+      - total
+      - rate
+    properties:
+      completed:
+        type: integer
+        format: int32
+        minimum: 0
+        description: Anonymous-visible Copilot challenges in COMPLETED status.
+      cancelled:
+        type: integer
+        format: int32
+        minimum: 0
+        description: >
+          Anonymous-visible Copilot challenges in CANCELLED or any CANCELLED_*
+          status.
+      total:
+        type: integer
+        format: int32
+        minimum: 0
+        description: Completed plus cancelled terminal challenges.
+      rate:
+        type: number
+        format: double
+        minimum: 0
+        maximum: 100
+        description: >
+          Completed percentage on a 0-100 scale, rounded to two decimals; zero
+          when there are no terminal outcomes.
+  SpecialRoleChallengeDimension:
+    type: object
+    required:
+      - id
+      - name
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+  SpecialRoleChallenge:
+    type: object
+    required:
+      - id
+      - name
+      - status
+    properties:
+      id:
+        type: string
+        description: Anonymous-visible challenge UUID used to build its URL.
+      name:
+        type: string
+      status:
+        type: string
+      track:
+        $ref: '#/definitions/SpecialRoleChallengeDimension'
+      type:
+        $ref: '#/definitions/SpecialRoleChallengeDimension'
+      startDate:
+        type: string
+        format: date-time
+        x-nullable: true
+      endDate:
+        type: string
+        format: date-time
+        x-nullable: true
+      resourceCreatedAt:
+        type: string
+        format: date-time
+        x-nullable: true
+        description: >
+          Latest matching Resource assignment creation time. This is not a
+          review-completion timestamp.
+  SpecialRoleChallenges:
+    type: object
+    required:
+      - role
+      - total
+      - challenges
+    properties:
+      role:
+        type: string
+        enum:
+          - copilot
+          - reviewer
+      total:
+        type: integer
+        format: int32
+        minimum: 0
+        description: Total anonymous-visible distinct challenges for this role.
+      trackCounts:
+        description: Present only for Copilot details.
+        $ref: '#/definitions/SpecialRoleTrackCounts'
+      fulfillment:
+        description: Present only for Copilot details.
+        $ref: '#/definitions/SpecialRoleFulfillment'
+      challenges:
+        type: array
+        items:
+          $ref: '#/definitions/SpecialRoleChallenge'
   MemberStats:
     type: object
     properties:
