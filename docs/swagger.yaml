@@ -182,7 +182,8 @@ paths:
         Replace the stored point awards for one challenge. This endpoint mirrors point-based challenge prize payouts into member-api so member profiles can return challenge point totals and per-challenge details.
 
         Authorization:
-          - M2M scopes: `update:user_profiles` or `all:user_profiles`.
+          - M2M scopes: `update:user_profiles`, `refresh:member_stats`, or `all:user_profiles`.
+          - User roles: `administrator` or `admin`.
       security:
         - bearer: []
       parameters:
