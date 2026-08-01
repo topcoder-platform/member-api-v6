@@ -69,6 +69,18 @@ describe('app routes unit tests', () => {
     delete require.cache[appRoutesPath]
   })
 
+  it('challenge points route should accept stats refresh M2M calls and restrict user calls to admins', () => {
+    const config = require(configPath)
+    const routes = require(routesPath)
+    const challengePointsRoute = routes['/members/challenge-points/:challengeId'].put
+    const scopes = challengePointsRoute.scopes
+
+    scopes.should.include(config.SCOPES.MEMBERS.UPDATE)
+    scopes.should.include(config.SCOPES.MEMBERS.STATS_REFRESH)
+    scopes.should.include(config.SCOPES.MEMBERS.ALL)
+    challengePointsRoute.access.should.deep.equal(['administrator', 'admin'])
+  })
+
   it('public routes should skip optional JWT authentication when no authorization header is present', async () => {
     const originalEntries = {
       [appRoutesPath]: require.cache[appRoutesPath],
