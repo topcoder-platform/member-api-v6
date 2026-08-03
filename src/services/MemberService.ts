@@ -23,7 +23,7 @@ const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const { htmlToText } = require('../common/htmlUtils')
-const { buildProfileActivityStats } = require('../common/profileStats')
+const { buildProfileActivityStatsFromRequests } = require('../common/profileStats')
 const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
@@ -1758,7 +1758,8 @@ async function getMemberRoles (userId) {
 
 /**
  * Fetch the member stats and history used by Profiles and map them for the PDF.
- * Failures are logged and return no activity rows so profile generation can continue.
+ * Required stats failures are logged and return no activity rows so profile generation
+ * can continue; optional history failures fall back to aggregate counters.
  * @param {Object} currentUser the user who performs the profile download
  * @param {String} handle member handle
  * @returns {Promise<Array<{ trackName: string, wins: number, submissions?: number, challenges?: number, rating?: number, competitions?: number }>>}
@@ -1766,22 +1767,12 @@ async function getMemberRoles (userId) {
 async function fetchMemberStatsByTrack (currentUser, handle) {
   try {
     const StatisticsService = require('./StatisticsService')
-    const [statsOutcome, historyOutcome] = await Promise.allSettled([
+    const statsByTrack = await buildProfileActivityStatsFromRequests(
       StatisticsService.getMemberStats(currentUser, handle, {}),
-      StatisticsService.getHistoryStats(currentUser, handle, {})
-    ])
-    if (statsOutcome.status === 'rejected') {
-      throw statsOutcome.reason
-    }
-    if (historyOutcome.status === 'rejected') {
-      logger.warn(`fetchMemberStatsByTrack history lookup failed for ${handle}: ${historyOutcome.reason.message}`)
-    }
-    const statsResult = statsOutcome.value
-    const historyResult = historyOutcome.status === 'fulfilled' ? historyOutcome.value : []
-    return buildProfileActivityStats(
-      Array.isArray(statsResult) ? statsResult[0] : undefined,
-      Array.isArray(historyResult) ? historyResult[0] : undefined
+      StatisticsService.getHistoryStats(currentUser, handle, {}),
+      error => logger.warn(`fetchMemberStatsByTrack history lookup failed for ${handle}: ${error.message}`)
     )
+    return statsByTrack
   } catch (err) {
     logger.warn(`fetchMemberStatsByTrack failed for ${handle}: ${err.message}`)
     return []

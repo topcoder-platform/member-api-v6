@@ -16,6 +16,19 @@ const AI_ENGINEERING_TRACK_NAMES = new Set([
   'AI_ENGINEER',
   'AI_ENGINEERING'
 ])
+const NATIVE_DATA_SCIENCE_SUBTRACK_NAMES = [
+  'Challenge',
+  'MARATHON_MATCH'
+]
+const NATIVE_DATA_SCIENCE_STATS_KEYS = new Set([
+  ...NATIVE_DATA_SCIENCE_SUBTRACK_NAMES,
+  'SRM',
+  'challenges',
+  'mostRecentEventDate',
+  'mostRecentEventName',
+  'mostRecentSubmission',
+  'wins'
+])
 
 /**
  * Return a finite numeric value without coercing strings or nullish values.
@@ -134,13 +147,9 @@ function getAIEngineeringSource (stats) {
       subTrack: { ...subTrack, name },
       trackName: 'DATA_SCIENCE'
     }))
-    .sort((left, right) => (
-      (getFiniteNumber(right.subTrack.rank && right.subTrack.rank.rating) ?? 0) -
-      (getFiniteNumber(left.subTrack.rank && left.subTrack.rank.rating) ?? 0)
-    ))
 
   if (dataScienceCandidates.length > 0) {
-    return dataScienceCandidates[0]
+    return getDataScienceSummarySource(dataScienceCandidates)
   }
 
   const topLevelName = ['AI_ENGINEERING', 'AI', 'AI_ENGINEER']
@@ -265,10 +274,67 @@ function getDevelopmentTrackSummary (sources, statsHistory) {
 }
 
 /**
+ * Pick the Data Science subtrack whose rating Profiles displays.
+ * Rating, percentile, and challenge count are descending tie breakers.
+ * @param {Array<Object>} sources active rated Data Science sources
+ * @returns {Object|undefined} source with the strongest visible rating
+ */
+function getDataScienceSummarySource (sources) {
+  return [...sources].sort((left, right) => {
+    const leftRank = left.subTrack.rank || {}
+    const rightRank = right.subTrack.rank || {}
+
+    return (getFiniteNumber(rightRank.rating) ?? 0) - (getFiniteNumber(leftRank.rating) ?? 0) ||
+      (getFiniteNumber(rightRank.percentile) ?? 0) - (getFiniteNumber(leftRank.percentile) ?? 0) ||
+      (getFiniteNumber(right.subTrack.challenges) ?? 0) - (getFiniteNumber(left.subTrack.challenges) ?? 0)
+  })[0]
+}
+
+/**
+ * Build the independently rated, non-native Data Science rows shown by Profiles.
+ * Native Challenge, Marathon Match, and SRM rows are handled by their parent
+ * tracks, while AI Engineering aliases remain grouped under Development.
+ * @param {Object} stats member stats response for one public group
+ * @param {Object|undefined} statsHistory member stats history response for the same group
+ * @returns {Array<{trackName: string, rating: number, wins: number, submissions: number, challenges: number}>} custom rated rows
+ */
+function getDataScienceRatingPathRows (stats, statsHistory) {
+  const dataScienceStats: Record<string, any> = stats.DATA_SCIENCE
+  if (!dataScienceStats || typeof dataScienceStats !== 'object') {
+    return []
+  }
+
+  return Object.entries(dataScienceStats)
+    .filter(([name, subTrack]) => (
+      !NATIVE_DATA_SCIENCE_STATS_KEYS.has(name) &&
+      !isAIEngineeringTrackName(name) &&
+      subTrack && typeof subTrack === 'object' &&
+      getFiniteNumber(subTrack.rank && subTrack.rank.rating) !== undefined
+    ))
+    .sort(([, left], [, right]) => (
+      (getFiniteNumber(right.wins) ?? 0) - (getFiniteNumber(left.wins) ?? 0) ||
+      (getSubTrackDisplaySubmissionCount(right) ?? 0) - (getSubTrackDisplaySubmissionCount(left) ?? 0)
+    ))
+    .map(([name, subTrack]) => {
+      const source = {
+        subTrack: { ...subTrack, name },
+        trackName: 'DATA_SCIENCE'
+      }
+
+      return {
+        trackName: name,
+        rating: getFiniteNumber(subTrack.rank && subTrack.rank.rating) ?? 0,
+        ...getSubTrackSummary(source, statsHistory),
+        challenges: getFiniteNumber(subTrack.challenges) ?? 0
+      }
+    })
+}
+
+/**
  * Convert member stats and history responses into downloaded-profile activity rows.
- * The PDF uses this mapper to match the Development, Design, Testing, and
- * Competitive Programming values shown by Profiles. Competitive Programming is
- * emitted only for active SRM stats; other Data Science activity is not relabeled.
+ * The PDF uses this mapper to match the Development, Design, Testing, Data
+ * Science, configured rating-path, and Competitive Programming values shown by
+ * Profiles. Competitive Programming is emitted only for active SRM stats.
  * This function does not mutate its inputs or throw for missing response fields.
  * @param {Object|undefined} stats member stats response for one public group
  * @param {Object|undefined} statsHistory member stats history response for the same group
@@ -325,6 +391,26 @@ function buildProfileActivityStats (stats, statsHistory) {
     })
   }
 
+  const dataScienceStats: Record<string, any> = stats.DATA_SCIENCE || {}
+  const dataScienceSources = NATIVE_DATA_SCIENCE_SUBTRACK_NAMES
+    .filter(name => (
+      dataScienceStats[name] &&
+      typeof dataScienceStats[name] === 'object' &&
+      (getFiniteNumber(dataScienceStats[name].challenges) ?? 0) > 0
+    ))
+    .map(name => ({
+      subTrack: { ...dataScienceStats[name], name },
+      trackName: 'DATA_SCIENCE'
+    }))
+  if (dataScienceSources.length > 0) {
+    const summarySource = getDataScienceSummarySource(dataScienceSources)
+    result.push({
+      trackName: 'Data Science',
+      rating: getFiniteNumber(summarySource && summarySource.subTrack.rank && summarySource.subTrack.rank.rating) ?? 0,
+      ...getStandardTrackSummary(dataScienceSources, statsHistory)
+    })
+  }
+
   const srmStats = stats.DATA_SCIENCE && stats.DATA_SCIENCE.SRM
   const competitions = getFiniteNumber(srmStats && srmStats.challenges) ?? 0
   if (competitions > 0) {
@@ -336,9 +422,41 @@ function buildProfileActivityStats (stats, statsHistory) {
     })
   }
 
+  result.push(...getDataScienceRatingPathRows(stats, statsHistory))
+
   return result
 }
 
+/**
+ * Resolve stats requests and build downloaded-profile activity rows.
+ * Member stats are required; history is optional and falls back to aggregate
+ * counters when its request fails. Promise.all is compatible with the Bluebird
+ * global used by the application bootstrap.
+ * @param {Promise<Array<Object>>} statsRequest member stats request
+ * @param {Promise<Array<Object>>} historyRequest member stats history request
+ * @param {Function} [onHistoryFailure] optional history error callback
+ * @returns {Promise<Array<{trackName: string, wins: number, submissions?: number, challenges?: number, rating?: number, competitions?: number}>>} PDF activity rows
+ * @throws {*} when the required member stats request fails
+ */
+async function buildProfileActivityStatsFromRequests (statsRequest, historyRequest, onHistoryFailure) {
+  const safeHistoryRequest = Promise.resolve(historyRequest).catch((error) => {
+    if (typeof onHistoryFailure === 'function') {
+      onHistoryFailure(error)
+    }
+    return []
+  })
+  const [statsResult, historyResult] = await Promise.all([
+    statsRequest,
+    safeHistoryRequest
+  ])
+
+  return buildProfileActivityStats(
+    Array.isArray(statsResult) ? statsResult[0] : undefined,
+    Array.isArray(historyResult) ? historyResult[0] : undefined
+  )
+}
+
 module.exports = {
-  buildProfileActivityStats
+  buildProfileActivityStats,
+  buildProfileActivityStatsFromRequests
 }
