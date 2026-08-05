@@ -297,7 +297,7 @@ function createCategorySkillsBlock (categoryName, skillNames) {
 }
 
 /**
- * Build the PDF template for member profile
+ * Build the PDF template for a member profile, including rated activity rows.
  * @param {Object} pdfData the aggregated PDF data
  * @returns {Object} React element tree
  */
@@ -515,13 +515,14 @@ function buildProfileTemplate (pdfData) {
       const statsItems = topcoderActivity.statsByTrack.map((stat, index) => {
         const isCompetitiveProgramming = stat.trackName === 'Competitive Programming'
         const rating = stat.rating == null ? 0 : stat.rating
+        const hasTrackRating = !isCompetitiveProgramming && rating > 0
         const wins = stat.wins == null ? 0 : stat.wins
         const competitions = stat.competitions == null ? 0 : stat.competitions
         const submissions = stat.submissions == null ? 0 : stat.submissions
         const challenges = stat.challenges == null ? 0 : stat.challenges
         const valueText = isCompetitiveProgramming
           ? `${rating} rating, ${wins} wins, ${competitions} competitions`
-          : `${wins} ${wins === 1 ? 'win' : 'wins'}, ${submissions} ${submissions === 1 ? 'submission' : 'submissions'}, ${challenges} ${challenges === 1 ? 'challenge' : 'challenges'}`
+          : `${hasTrackRating ? `${rating} rating, ` : ''}${wins} ${wins === 1 ? 'win' : 'wins'}, ${submissions} ${submissions === 1 ? 'submission' : 'submissions'}, ${challenges} ${challenges === 1 ? 'challenge' : 'challenges'}`
         return React.createElement(
           Text,
           { key: `stats-track-${index}`, style: styles.activityItem },

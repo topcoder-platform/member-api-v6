@@ -174,6 +174,10 @@ Content-Type: application/json
 }
 ```
 
+The endpoint accepts M2M tokens with `refresh:member_stats`, `update:user_profiles`,
+or `all:user_profiles`. Autopilot uses the stats refresh scope when synchronizing
+completed challenge results. User tokens require the `administrator` or `admin` role.
+
 `GET /v6/members/{handle}` includes a public `challengePoints` object by default:
 
 ```json

@@ -23,6 +23,7 @@ const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const { htmlToText } = require('../common/htmlUtils')
+const { buildProfileActivityStatsFromRequests } = require('../common/profileStats')
 const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
 const prismaManager = require('../common/prisma')
@@ -1755,126 +1756,25 @@ async function getMemberRoles (userId) {
   }
 }
 
-/** Track enum to display name for member PDF activity stats. */
-const TRACK_DISPLAY_NAMES = {
-  DEVELOPMENT: 'Development',
-  DESIGN: 'Design',
-  DATA_SCIENCE: 'Competitive Programming',
-  QUALITY_ASSURANCE: 'Quality Assurance'
-}
-
 /**
- * Fetch member stats by challenge track for PDF: wins and submissions from ChallengeWinner,
- * registrations (challenges count) from resources schema, grouped by track.
- * @param {Number} userId member userId
- * @param {Object} challengesPrisma challenges Prisma client
- * @param {Object} resourcesPrisma resources Prisma client
+ * Fetch the member stats and history used by Profiles and map them for the PDF.
+ * Required stats failures are logged and return no activity rows so profile generation
+ * can continue; optional history failures fall back to aggregate counters.
+ * @param {Object} currentUser the user who performs the profile download
+ * @param {String} handle member handle
  * @returns {Promise<Array<{ trackName: string, wins: number, submissions?: number, challenges?: number, rating?: number, competitions?: number }>>}
  */
-async function fetchMemberStatsByTrack (userId, challengesPrisma, resourcesPrisma) {
-  const trackMap: Record<string, any> = {} // track enum -> standard counts or competitive programming counts
-
+async function fetchMemberStatsByTrack (currentUser, handle) {
   try {
-    const numUserId = Object.prototype.toString.call(userId) === '[object BigInt]'
-      ? helper.bigIntToNumber(userId)
-      : userId
-
-    const winnerRows = await challengesPrisma.ChallengeWinner.findMany({
-      where: {
-        userId: numUserId,
-        type: { in: ['PLACEMENT', 'PASSED_REVIEW'] }
-      },
-      include: {
-        challenge: {
-          include: { track: true }
-        }
-      }
-    })
-
-    for (const w of winnerRows) {
-      const trackEnum = _.get(w, 'challenge.track.track')
-      if (!trackEnum) continue
-      if (!trackMap[trackEnum]) {
-        const isCompetitiveProgramming = trackEnum === 'DATA_SCIENCE'
-        trackMap[trackEnum] = isCompetitiveProgramming
-          ? { wins: 0, competitions: 0, rating: undefined }
-          : { wins: 0, submissions: 0, challenges: 0 }
-      }
-      const row = trackMap[trackEnum]
-      if (w.type === 'PLACEMENT') row.wins += 1
-      if (w.type === 'PASSED_REVIEW' && row.submissions !== undefined) row.submissions += 1
-    }
-
-    // 2) Resources: registrations (distinct challenges) by track
-    const memberIdStr = String(userId)
-    const resources = await resourcesPrisma.resource.findMany({
-      where: {
-        memberId: memberIdStr,
-        resourceRole: {
-          nameLower: 'submitter'
-        }
-      },
-      select: { challengeId: true }
-    })
-    const challengeIds: any[] = [...new Set(resources.map(r => r.challengeId).filter(Boolean))]
-    if (challengeIds.length > 0) {
-      const challenges = await challengesPrisma.Challenge.findMany({
-        where: { id: { in: challengeIds } },
-        include: { track: true }
-      })
-      const challengeIdToTrack: Record<string, any> = {}
-      for (const c of challenges) {
-        const trackEnum = _.get(c, 'track.track')
-        if (trackEnum) challengeIdToTrack[c.id] = trackEnum
-      }
-      const challengesPerTrack: Record<string, any> = {}
-      for (const cid of challengeIds) {
-        const trackEnum = challengeIdToTrack[cid]
-        if (!trackEnum) continue
-        if (!challengesPerTrack[trackEnum]) challengesPerTrack[trackEnum] = 0
-        challengesPerTrack[trackEnum] += 1
-      }
-      for (const [trackEnum, count] of Object.entries(challengesPerTrack)) {
-        if (!trackMap[trackEnum]) {
-          const isCompetitiveProgramming = trackEnum === 'DATA_SCIENCE'
-          trackMap[trackEnum] = isCompetitiveProgramming
-            ? { wins: 0, competitions: count, rating: undefined }
-            : { wins: 0, submissions: 0, challenges: count }
-        } else {
-          if (trackMap[trackEnum].challenges !== undefined) {
-            trackMap[trackEnum].challenges = count
-          }
-          if (trackMap[trackEnum].competitions !== undefined) {
-            trackMap[trackEnum].competitions = count
-          }
-        }
-      }
-    }
-
-    const statsByTrack = []
-    for (const [trackEnum, counts] of Object.entries(trackMap)) {
-      const trackName = TRACK_DISPLAY_NAMES[trackEnum] || trackEnum
-      const hasAny = Object.values(counts).some(v => typeof v === 'number' && v > 0)
-      if (!hasAny && (counts.rating == null || counts.rating === 0)) continue
-      if (trackEnum === 'DATA_SCIENCE') {
-        statsByTrack.push({
-          trackName,
-          rating: counts.rating == null ? 0 : counts.rating,
-          wins: counts.wins == null ? 0 : counts.wins,
-          competitions: counts.competitions == null ? 0 : counts.competitions
-        })
-      } else {
-        statsByTrack.push({
-          trackName,
-          wins: counts.wins == null ? 0 : counts.wins,
-          submissions: counts.submissions == null ? 0 : counts.submissions,
-          challenges: counts.challenges == null ? 0 : counts.challenges
-        })
-      }
-    }
+    const StatisticsService = require('./StatisticsService')
+    const statsByTrack = await buildProfileActivityStatsFromRequests(
+      StatisticsService.getMemberStats(currentUser, handle, {}),
+      StatisticsService.getHistoryStats(currentUser, handle, {}),
+      error => logger.warn(`fetchMemberStatsByTrack history lookup failed for ${handle}: ${error.message}`)
+    )
     return statsByTrack
   } catch (err) {
-    logger.warn(`fetchMemberStatsByTrack failed for user ${userId}: ${err.message}`)
+    logger.warn(`fetchMemberStatsByTrack failed for ${handle}: ${err.message}`)
     return []
   }
 }
@@ -1979,36 +1879,8 @@ async function aggregatePDFData (currentUser, handle) {
   // Fetch gamification achievements
   const achievements = await fetchGamificationAchievements(userId)
 
-  // Fetch member stats by track (wins, submissions, challenges from ChallengeWinner + resources)
-  let statsByTrack = []
-  try {
-    statsByTrack = await fetchMemberStatsByTrack(userId, challengesPrisma, resourcesPrisma)
-  } catch (err) {
-    logger.warn(`aggregatePDFData: statsByTrack failed for ${handle}: ${err.message}`)
-  }
-
-  // Merge Competitive Programming rating from the stats service into PDF activity data.
-  try {
-    const StatisticsService = require('./StatisticsService')
-    const statsResult = await StatisticsService.getMemberStats(currentUser, handle, {})
-    const statsResponse = Array.isArray(statsResult) && statsResult.length > 0 ? statsResult[0] : null
-    if (statsResponse && statsResponse.DATA_SCIENCE) {
-      const ds = statsResponse.DATA_SCIENCE
-      const rating = (ds.SRM && ds.SRM.rank && ds.SRM.rank.rating != null)
-        ? ds.SRM.rank.rating
-        : (ds.MARATHON_MATCH && ds.MARATHON_MATCH.rank && ds.MARATHON_MATCH.rank.rating != null)
-          ? ds.MARATHON_MATCH.rank.rating
-          : 0
-      const cpEntry = statsByTrack.find(entry => entry.trackName === 'Competitive Programming')
-      if (cpEntry) {
-        cpEntry.rating = rating
-      } else if (rating > 0) {
-        statsByTrack.push({ trackName: 'Competitive Programming', rating, wins: 0, competitions: 0 })
-      }
-    }
-  } catch (err) {
-    logger.warn(`aggregatePDFData: getMemberStats for rating failed for ${handle}: ${err.message}`)
-  }
+  // Use the same member stats and history sources as the Profiles UI.
+  const statsByTrack = await fetchMemberStatsByTrack(currentUser, handle)
 
   // Fetch certifications and courses
   const { certifications, courses } = await fetchCertificationsAndCourses(userId)

@@ -73,7 +73,8 @@ module.exports = {
       controller: 'MemberController',
       method: 'updateChallengePoints',
       auth: 'jwt',
-      scopes: [MEMBERS.UPDATE, MEMBERS.ALL]
+      scopes: [MEMBERS.UPDATE, STATS_REFRESH, MEMBERS.ALL],
+      access: constants.ADMIN_ROLES
     }
   },
   '/members/:handle': {
