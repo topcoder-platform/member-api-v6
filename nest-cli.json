@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "entryFile": "main",
+  "sourceRoot": ".",
+  "compilerOptions": {
+    "deleteOutDir": true,
+    "assets": [
+      {
+        "include": "docs/**/*",
+        "outDir": "dist"
+      },
+      {
+        "include": "src/fonts/**/*",
+        "outDir": "dist"
+      },
+      {
+        "include": "src/images/**/*",
+        "outDir": "dist"
+      },
+      {
+        "include": "prisma/generated/**/*",
+        "outDir": "dist"
+      }
+    ]
+  }
+}

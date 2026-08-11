@@ -6,7 +6,7 @@
  *
  * Required environment variables:
  * - DATABASE_URL (member database)
- * - CHALLENGES_DB_URL (challenge database)
+ * - CHALLENGES_DB_URL or CHALLENGE_DB_URL (challenge database)
  * - REVIEW_DB_URL (review database, required for challengeResult aggregates and rerates)
  *
  * Optional environment variables:
@@ -37,7 +37,9 @@
  * - Rating and rank fields are backfilled from the legacy member stat sub-tables.
  * - Public aggregate rows start from legacy member stats tables when they exist, are
  *   supplemented with review-api challengeResult rows that extend those timelines, and
- *   fall back to review-api challengeResult or ChallengeWinner when legacy rows do not exist.
+ *   fall back to review-api challengeResult or completed ChallengeWinner rows when legacy rows do not exist.
+ * - Empty legacy Marathon Match placeholders are ignored so default rows with no
+ *   competitions do not surface as member submissions.
  * - Legacy design subtracks collapse to Design + Challenge, except DESIGN_FIRST_2_FINISH,
  *   which maps to Design + First2Finish.
  * - mostRecentSubmission uses review-api challengeResult timestamps whenever review rows
@@ -45,6 +47,8 @@
  * - memberStatsHistory is seeded from legacy history tables and supplemented with
  *   completed review-api challengeResult and ChallengeWinner rows when newer
  *   challenges never existed in the legacy history source tables.
+ * - memberStatsHistory placement and percentile values are preserved from legacy
+ *   history and review-api placement sources when those fields are available.
  * - memberStatsHistory.mostRecent is recalculated from latest eventDate per (userId, trackId, typeId).
  * - memberStatsHistory.newRating on the mostRecent row is synchronized from memberStats.rating.
  * - memberMaxRating is synchronized from the highest current memberStats.rating
@@ -52,10 +56,14 @@
  * - --skip-history skips the legacy history backfill pass.
  * - --skip-ratings skips the legacy rating/rank enrichment pass and the Qubits rerate backfill.
  * - --skip-rerate skips the expensive Development rerate replay while still preserving
- *   legacy rating/rank fields on the rebuilt aggregate rows.
+ *   legacy rating/rank fields on the rebuilt aggregate rows. When rerates are
+ *   enabled, legacy-backed review rows preserve challengeResult oldRating/newRating
+ *   because those rows already carry authoritative legacy rating output.
+ * - Development rank recalculation runs once per batch after concurrent member rerates
+ *   complete, avoiding per-user rank update contention.
  * - --concurrency controls how many users are processed in parallel within each batch.
  * - Batch logs include timing breakdowns for preload queries, user aggregation,
- *   stats/history writes, rerates, and processed-user checkpoint writes.
+ *   stats/history writes, rerates, rank recalculation, and processed-user checkpoint writes.
  * - Slow-user samples are emitted for aggregate/history/rerate phases so the
  *   worst outliers can be investigated first.
  * - Processed member user IDs are written after each completed batch so long runs can
@@ -74,9 +82,11 @@ const { getMembersClient, getChallengesClient } = require('../common/prisma')
 const helper = require('../common/helper')
 const reviewDb = require('../common/reviewDb')
 const { assertChallengeResultRelation, resolveChallengeResultRelation } = require('../common/reviewDbHelper')
+const { recalculateRatingRanks } = require('../common/ratingRankHelper')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const {
   TYPE_NAMES,
+  clearChallengeDimensionLookupCache,
   getCanonicalTypeName: resolveTypeName,
   loadChallengeDimensionLookup,
   normalizeLookupKey,
@@ -91,8 +101,15 @@ const CREATED_BY = process.env.CREATED_BY || DEFAULT_ACTOR
 const UPDATED_BY = process.env.UPDATED_BY || DEFAULT_ACTOR
 const USER_BATCH_SIZE = 100
 const DEFAULT_CONCURRENCY = 4
+const MAX_RAW_QUERY_PARAMS = 10000
+const MEMBER_STATS_BULK_UPSERT_PARAM_COUNT = 22
+const HISTORY_BULK_UPDATE_PARAM_COUNT = 6
+const HISTORY_BULK_INSERT_PARAM_COUNT = 11
+const CHALLENGE_WINNER_HISTORY_TYPES = ['PLACEMENT', 'PASSED_REVIEW']
+const CHALLENGE_WINNER_HISTORY_TYPE_SQL = CHALLENGE_WINNER_HISTORY_TYPES.map(type => `'${type}'`).join(', ')
 const DEFAULT_PROCESSED_USER_IDS_PATH = 'recalculateMemberStats.processedUserIds.json'
 const COMPLETED_CHALLENGE_STATUS = 'COMPLETED'
+const RERATE_ACTOR = 'rerate-member-stats'
 const NULL_PRESERVED_STAT_FIELDS = [
   'rating',
   'avgRank',
@@ -318,6 +335,16 @@ function toOptionalFloat (value) {
 }
 
 /**
+ * Normalize a challenge placement so only positive integer ranks are written.
+ * @param {*} value raw placement value
+ * @returns {number|null} positive placement or null when unavailable
+ */
+function toOptionalPlacement (value) {
+  const placement = toOptionalInt(value)
+  return Number.isInteger(placement) && placement > 0 ? placement : null
+}
+
+/**
  * Build the composite lookup key shared by unified stats and history rows.
  * @param {string} trackId unified track id
  * @param {string} typeId unified type id
@@ -325,6 +352,117 @@ function toOptionalFloat (value) {
  */
 function buildTrackTypeKey (trackId, typeId) {
   return `${trackId}::${typeId}`
+}
+
+/**
+ * Check whether a ChallengeType id/name represents Marathon Match.
+ * @param {*} typeId raw ChallengeType id or name
+ * @returns {boolean} true when the type maps to Marathon Match
+ */
+function isMarathonMatchTypeId (typeId) {
+  const typeName = resolveTypeNameFromLookup(legacyLookupCache, typeId) || typeId
+  return resolveTypeName(typeName) === TYPE_NAMES.MARATHON_MATCH
+}
+
+/**
+ * Normalize challenge metadata dimensions into the public stats dimensions.
+ * Marathon Match stats/history belong to DATA_SCIENCE even when the source
+ * challenge row was imported with a Development track. QA Challenge rows belong
+ * to the first-class QA / Challenge dimension.
+ * @param {*} trackId raw ChallengeTrack id
+ * @param {*} typeId raw ChallengeType id
+ * @returns {Object} normalized trackId/typeId pair
+ */
+function normalizeChallengeStatsDimension (trackId, typeId) {
+  const normalizedTypeId = String(typeId)
+  if (legacyLookupCache && isMarathonMatchTypeId(normalizedTypeId) && legacyLookupCache.trackIds.DATA_SCIENCE) {
+    return {
+      trackId: legacyLookupCache.trackIds.DATA_SCIENCE,
+      typeId: normalizedTypeId
+    }
+  }
+
+  const trackName = resolveTrackNameFromLookup(legacyLookupCache, trackId)
+  const typeName = resolveTypeNameFromLookup(legacyLookupCache, normalizedTypeId) || resolveTypeName(normalizedTypeId)
+  const normalizedTrackName = normalizeLookupKey(trackName).replace(/[\s-]+/g, '_')
+  if (legacyLookupCache &&
+    (normalizedTrackName === 'QUALITY_ASSURANCE' || normalizedTrackName === 'QA') &&
+    typeName === TYPE_NAMES.CHALLENGE &&
+    legacyLookupCache.trackIds.QA &&
+    legacyLookupCache.typeIds.CHALLENGE) {
+    return {
+      trackId: legacyLookupCache.trackIds.QA,
+      typeId: legacyLookupCache.typeIds.CHALLENGE
+    }
+  }
+
+  return {
+    trackId: String(trackId),
+    typeId: normalizedTypeId
+  }
+}
+
+/**
+ * Apply optional script track/type filters after challenge dimensions are normalized.
+ * @param {Object} dimension normalized track/type pair
+ * @param {Object} options script filters
+ * @returns {boolean} true when the row should be kept
+ */
+function matchesNormalizedStatsFilters (dimension, options) {
+  if (options.trackId && dimension.trackId !== options.trackId) {
+    return false
+  }
+
+  if (options.typeId && dimension.typeId !== options.typeId) {
+    return false
+  }
+
+  return true
+}
+
+/**
+ * Determine whether a review-api challengeResult row represents a real submission.
+ * Rows explicitly marked invalid, or rows from queries that expose an empty
+ * submissionId, are placeholders and should not create stats/history activity.
+ * Older in-memory callers that do not provide submission fields are treated as
+ * unknown instead of invalid so legacy fixture data can still exercise mapping.
+ * @param {Object} row raw challengeResult row
+ * @returns {boolean} true when the row can be used for stats/history backfill
+ */
+function isUsableReviewChallengeResultRow (row) {
+  if (!row || row.validSubmission === false) {
+    return false
+  }
+
+  if (Object.prototype.hasOwnProperty.call(row, 'submissionId')) {
+    const submissionId = row.submissionId === null || row.submissionId === undefined
+      ? ''
+      : String(row.submissionId).trim()
+    if (!submissionId) {
+      return false
+    }
+  }
+
+  return true
+}
+
+/**
+ * Determine whether a challenge metadata row can be counted by aggregate stats.
+ * Metadata fetched from challenge-api exposes status; tests and older in-memory
+ * callers may omit it, in which case the caller's fixture is treated as usable.
+ * @param {Object} challenge challenge metadata for a review-api result
+ * @returns {boolean} true when the challenge is completed or status is unavailable
+ */
+function isUsableAggregateChallenge (challenge) {
+  if (!challenge) {
+    return false
+  }
+
+  if (Object.prototype.hasOwnProperty.call(challenge, 'status')) {
+    return isCompletedChallengeStatus(challenge.status)
+  }
+
+  return true
 }
 
 /**
@@ -361,11 +499,13 @@ async function initializeLegacyLookupCache (challengesClient) {
     return legacyLookupCache
   }
 
+  clearChallengeDimensionLookupCache()
   legacyLookupCache = await loadChallengeDimensionLookup(challengesClient)
 
   if (!legacyLookupCache.trackIds.DEVELOP ||
     !legacyLookupCache.trackIds.DESIGN ||
     !legacyLookupCache.trackIds.DATA_SCIENCE) {
+    legacyLookupCache = null
     throw new Error('Unable to resolve required challenge track ids for legacy stats migration')
   }
 
@@ -427,6 +567,8 @@ function resolveLegacyDesignTypeId (typeValue, fallbackValue) {
 
 /**
  * Merge non-null stat values into the keyed legacy rating lookup.
+ * Legacy rating queries order duplicate snapshots newest-first, so existing
+ * non-null values win and older snapshots only fill fields missing upstream.
  * @param {Map<string, Object>} lookup keyed legacy stat lookup
  * @param {string} key unified track/type lookup key
  * @param {Object} values legacy rating/rank values for the key
@@ -436,7 +578,8 @@ function mergeLegacyStatLookup (lookup, key, values) {
   const merged = { ...existing }
 
   Object.keys(values).forEach((field) => {
-    if (values[field] !== null && values[field] !== undefined) {
+    if (values[field] !== null && values[field] !== undefined &&
+      (merged[field] === null || merged[field] === undefined)) {
       merged[field] = values[field]
     }
   })
@@ -567,6 +710,111 @@ function buildAggregateRecord (userId, trackId, typeId, row) {
   }
 }
 
+/**
+ * Build an internal challenge-id set for aggregate rows that are derived from
+ * completed participation sources.
+ * @param {*} value raw challenge id or array of challenge ids
+ * @returns {Set<string>} normalized non-empty challenge ids
+ */
+function buildChallengeIdSet (value) {
+  const values = Array.isArray(value) ? value : [value]
+  return new Set(
+    values
+      .map((challengeId) => (challengeId === null || challengeId === undefined ? '' : String(challengeId).trim()))
+      .filter(Boolean)
+  )
+}
+
+/**
+ * Resolve whether a stats dimension should prefer completed participation rows
+ * over legacy Development child counters.
+ *
+ * Legacy First2Finish counters can include historical private Tasks, while
+ * Task counters did not exist as a first-class legacy child row. For these
+ * dimensions, completed review and winner data is the safer aggregate source.
+ * @param {*} trackId unified stats track id
+ * @param {*} typeId unified stats type id
+ * @returns {boolean} true when completed participation rows should replace legacy counters
+ */
+function shouldPreferCompletedParticipationAggregate (trackId, typeId) {
+  if (!legacyLookupCache || String(trackId) !== String(legacyLookupCache.trackIds.DEVELOP)) {
+    return false
+  }
+
+  const typeName = resolveTypeName(resolveTypeNameFromLookup(legacyLookupCache, typeId) || typeId)
+  return typeName === TYPE_NAMES.FIRST2FINISH || typeName === TYPE_NAMES.TASK
+}
+
+/**
+ * Build the set of legacy aggregate keys that have completed participation
+ * replacements.
+ * @param {Array<Object>} participationRows review/challenge-winner aggregate rows
+ * @returns {Set<string>} track/type keys to replace
+ */
+function getCompletedParticipationReplacementKeys (participationRows) {
+  return new Set(
+    (participationRows || [])
+      .filter(row => row && toInt(row.challenges) > 0 &&
+        shouldPreferCompletedParticipationAggregate(row.trackId, row.typeId))
+      .map(row => buildTrackTypeKey(row.trackId, row.typeId))
+  )
+}
+
+/**
+ * Remove stale legacy rows for dimensions that have completed participation
+ * replacements.
+ * @param {Array<Object>} legacyRows legacy aggregate rows
+ * @param {Array<Object>} participationRows completed participation aggregate rows
+ * @returns {Array<Object>} legacy rows that should still seed aggregate output
+ */
+function filterLegacyRowsReplacedByCompletedParticipation (legacyRows, participationRows) {
+  const replacementKeys = getCompletedParticipationReplacementKeys(participationRows)
+  if (replacementKeys.size === 0) {
+    return legacyRows || []
+  }
+
+  return (legacyRows || []).filter((row) => (
+    !replacementKeys.has(buildTrackTypeKey(row.trackId, row.typeId))
+  ))
+}
+
+/**
+ * Detect legacy Development Marathon rows that only contain registration-style
+ * challenge counters and no actual submission activity. These rows should not
+ * create Marathon Match submission aggregates.
+ * @param {Object} row legacy memberDevelopStatsItem row
+ * @returns {boolean} true when the row represents no submitted Marathon activity
+ */
+function isZeroSubmissionLegacyDevelopMarathonRow (row) {
+  const typeName = resolveTypeName(row && row.name)
+  if (typeName !== TYPE_NAMES.MARATHON_MATCH) {
+    return false
+  }
+
+  const submissions = toOptionalInt(row && row.submissions)
+  const passedReview = toOptionalInt(row && row.passedReview)
+  const wins = toOptionalInt(row && row.wins)
+
+  return submissions === 0 && (passedReview === null || passedReview === 0) && (wins === null || wins === 0)
+}
+
+/**
+ * Detect whether a legacy Marathon Match stats row has real competition
+ * activity. Legacy imports can contain a default row with challenges=1,
+ * competitions=0, rating=0, and a 1970 submission date for members with no MM
+ * submissions; those placeholders must not become public aggregate rows.
+ * @param {Object} row legacy memberMarathonStats row
+ * @returns {boolean} true when the row should count as Marathon activity
+ */
+function hasLegacyMarathonCompetitionActivity (row) {
+  const competitions = toOptionalInt(row && row.competitions)
+  if (competitions !== null) {
+    return competitions > 0
+  }
+
+  return toInt(row && row.challenges) > 0
+}
+
 function mergeAggregateRecord (lookup, record) {
   const key = buildTrackTypeKey(record.trackId, record.typeId)
   const existing = lookup.get(key)
@@ -576,8 +824,21 @@ function mergeAggregateRecord (lookup, record) {
     return
   }
 
-  existing.challenges = toInt(existing.challenges) + toInt(record.challenges)
-  existing.wins = toInt(existing.wins) + toInt(record.wins)
+  if (existing._challengeIds instanceof Set && record._challengeIds instanceof Set) {
+    record._challengeIds.forEach(challengeId => existing._challengeIds.add(challengeId))
+    existing.challenges = existing._challengeIds.size
+
+    if (!(existing._winChallengeIds instanceof Set)) {
+      existing._winChallengeIds = new Set()
+    }
+    if (record._winChallengeIds instanceof Set) {
+      record._winChallengeIds.forEach(challengeId => existing._winChallengeIds.add(challengeId))
+    }
+    existing.wins = existing._winChallengeIds.size
+  } else {
+    existing.challenges = toInt(existing.challenges) + toInt(record.challenges)
+    existing.wins = toInt(existing.wins) + toInt(record.wins)
+  }
 
   if (record.mostRecentEventDate &&
     (!existing.mostRecentEventDate || record.mostRecentEventDate > existing.mostRecentEventDate)) {
@@ -588,6 +849,99 @@ function mergeAggregateRecord (lookup, record) {
     (!existing.mostRecentSubmission || record.mostRecentSubmission > existing.mostRecentSubmission)) {
     existing.mostRecentSubmission = record.mostRecentSubmission
   }
+}
+
+/**
+ * Merge only aggregate records whose track/type pair is not already present.
+ * This lets completed ChallengeWinner rows fill Task/QA gaps without
+ * double-counting rows already represented by legacy or review aggregates.
+ * @param {Map<string, Object>} lookup aggregate lookup keyed by track/type
+ * @param {Array<Object>} records candidate aggregate rows
+ */
+function mergeMissingAggregateRecords (lookup, records) {
+  ;(records || []).forEach((record) => {
+    const key = buildTrackTypeKey(record.trackId, record.typeId)
+    if (!lookup.has(key)) {
+      mergeAggregateRecord(lookup, record)
+    }
+  })
+}
+
+/**
+ * Normalize a legacy snapshot id for deterministic newest-row comparisons.
+ * @param {*} value raw memberStats or child row id value
+ * @returns {BigInt} normalized id, or zero when the source row did not expose one
+ */
+function toLegacySnapshotSortId (value) {
+  if (value === null || value === undefined || value === '') {
+    return global.BigInt(0)
+  }
+
+  return normalizeBigInt(value, 'legacy snapshot id')
+}
+
+/**
+ * Determine whether a candidate legacy aggregate row is newer than the selected row.
+ * Parent memberStats id wins first because duplicate legacy imports create a new
+ * parent snapshot; child row id is a stable tie-breaker within the same parent.
+ * @param {Object} candidate candidate legacy aggregate row
+ * @param {Object} selected currently selected legacy aggregate row
+ * @returns {boolean} true when candidate should replace selected
+ */
+function isNewerLegacyAggregateRow (candidate, selected) {
+  const candidateParentId = toLegacySnapshotSortId(candidate.memberStatsId)
+  const selectedParentId = toLegacySnapshotSortId(selected.memberStatsId)
+
+  if (candidateParentId !== selectedParentId) {
+    return candidateParentId > selectedParentId
+  }
+
+  return toLegacySnapshotSortId(candidate.legacyRowId) > toLegacySnapshotSortId(selected.legacyRowId)
+}
+
+/**
+ * Keep the latest legacy aggregate snapshot for each source child dimension.
+ * Duplicate public memberStats parents can contain identical legacy child rows;
+ * summing those snapshots doubles counters. The key builder must include the
+ * source child dimension, not only the final unified track/type, because some
+ * distinct legacy subtracks intentionally collapse into one public API type.
+ * @param {Array<Object>} rows raw legacy aggregate rows from one source table
+ * @param {Function} keyBuilder builds the source child dimension key for a row
+ * @returns {Array<Object>} latest aggregate rows per source child dimension
+ */
+function selectLatestLegacyAggregateRows (rows, keyBuilder) {
+  const selectedByKey = new Map()
+  const sourceRows = rows || []
+
+  sourceRows.forEach((row) => {
+    const key = keyBuilder(row)
+    if (!key) {
+      return
+    }
+
+    const selected = selectedByKey.get(key)
+    if (!selected || isNewerLegacyAggregateRow(row, selected)) {
+      selectedByKey.set(key, row)
+    }
+  })
+
+  return Array.from(selectedByKey.values())
+}
+
+/**
+ * Build a source child dimension key for deduping legacy subtrack aggregates.
+ * @param {Object} row raw legacy aggregate row
+ * @param {string} source legacy source category
+ * @returns {string} key scoped by user, source table, and source child dimension
+ */
+function buildLegacyChildAggregateKey (row, source) {
+  const userKey = row && row.userId !== undefined && row.userId !== null
+    ? normalizeBigInt(row.userId, 'user id').toString()
+    : ''
+  const subTrackKey = normalizeLookupKey(row && row.subTrackId)
+  const nameKey = normalizeLookupKey(row && row.name)
+
+  return `${userKey}::${source}::${subTrackKey || nameKey}::${nameKey}`
 }
 
 function getAggregateLookupForUser (aggregateLookupsByUserId, userId) {
@@ -665,25 +1019,26 @@ function getLatestAggregateTimestamp (record) {
 }
 
 /**
- * Normalize one review-api challengeResult row into the unified aggregate shape.
+ * Normalize one completed review-api challengeResult row into the unified aggregate shape.
  * @param {Object} row raw challengeResult row
  * @param {Object|null|undefined} challenge challenge-api metadata for the row
  * @param {Object} options script filters
  * @returns {Object|null} normalized aggregate delta or null when the row cannot be used
  */
 function buildReviewAggregateRecord (row, challenge, options) {
-  if (!challenge || !challenge.trackId || !challenge.typeId) {
+  if (!isUsableReviewChallengeResultRow(row)) {
     return null
   }
 
-  const trackId = String(challenge.trackId)
-  const typeId = String(challenge.typeId)
-
-  if (options.trackId && trackId !== options.trackId) {
+  if (!challenge || !isUsableAggregateChallenge(challenge) || !challenge.trackId || !challenge.typeId) {
     return null
   }
 
-  if (options.typeId && typeId !== options.typeId) {
+  const dimension = normalizeChallengeStatsDimension(challenge.trackId, challenge.typeId)
+  const trackId = dimension.trackId
+  const typeId = dimension.typeId
+
+  if (!matchesNormalizedStatsFilters(dimension, options)) {
     return null
   }
 
@@ -696,6 +1051,10 @@ function buildReviewAggregateRecord (row, challenge, options) {
     typeId,
     challenges: 1,
     wins: toInt(row.placement) === 1 ? 1 : 0,
+    _challengeIds: buildChallengeIdSet(challenge.id || row.challengeId),
+    _winChallengeIds: toInt(row.placement) === 1
+      ? buildChallengeIdSet(challenge.id || row.challengeId)
+      : new Set(),
     mostRecentEventDate: eventDate,
     mostRecentSubmission: submissionDate,
     rating: null,
@@ -747,7 +1106,8 @@ function buildAggregatedStatsFromReviewResults (reviewRows, challengeMetadataByI
     const existingTimestamp = getLatestAggregateTimestamp(existingRow)
     const reviewTimestamp = getLatestAggregateTimestamp(aggregateRecord)
 
-    if (existingTimestamp && reviewTimestamp && reviewTimestamp <= existingTimestamp) {
+    if (!shouldPreferCompletedParticipationAggregate(aggregateRecord.trackId, aggregateRecord.typeId) &&
+      existingTimestamp && reviewTimestamp && reviewTimestamp <= existingTimestamp) {
       return
     }
 
@@ -767,9 +1127,12 @@ async function fetchReviewChallengeResultsForUser (reviewDbClient, userId) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "placement", "createdAt"
+      SELECT "challengeId", "userId", "submissionId", "placement",
+             "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = $1
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
       ORDER BY "createdAt" ASC, "challengeId" ASC
     `,
     [String(userId)]
@@ -799,9 +1162,12 @@ async function fetchReviewChallengeResultsByUserIds (reviewDbClient, userIds) {
   const challengeResultRelation = await resolveChallengeResultRelation(reviewDbClient)
   const result = await reviewDbClient.query(
     `
-      SELECT "challengeId", "userId", "placement", "createdAt"
+      SELECT "challengeId", "userId", "submissionId", "placement",
+             "validSubmission", "createdAt"
       FROM ${challengeResultRelation}
       WHERE "userId" = ANY($1::text[])
+        AND "validSubmission" IS DISTINCT FROM FALSE
+        AND "submissionId" IS NOT NULL
       ORDER BY "userId" ASC, "createdAt" ASC, "challengeId" ASC
     `,
     [normalizedUserIds]
@@ -886,9 +1252,21 @@ async function getFilteredChallengeIds (challengesClient, options) {
     return null
   }
 
+  const includeMarathonByType = legacyLookupCache &&
+    options.trackId === legacyLookupCache.trackIds.DATA_SCIENCE &&
+    legacyLookupCache.typeIds.MARATHON_MATCH
+
   const rows = await challengesClient.challenge.findMany({
     where: {
-      ...(options.trackId ? { trackId: options.trackId } : {}),
+      ...(options.trackId && !includeMarathonByType ? { trackId: options.trackId } : {}),
+      ...(includeMarathonByType
+        ? {
+          OR: [
+            { trackId: options.trackId },
+            { typeId: legacyLookupCache.typeIds.MARATHON_MATCH }
+          ]
+        }
+        : {}),
       ...(options.typeId ? { typeId: options.typeId } : {})
     },
     select: {
@@ -924,6 +1302,8 @@ async function getReviewUserIds (reviewDbClient, challengesClient, options) {
         SELECT DISTINCT "userId"
         FROM ${challengeResultRelation}
         WHERE "userId" ~ '^[0-9]+$'
+          AND "validSubmission" IS DISTINCT FROM FALSE
+          AND "submissionId" IS NOT NULL
         ORDER BY "userId" ASC
       `
     )
@@ -942,6 +1322,8 @@ async function getReviewUserIds (reviewDbClient, challengesClient, options) {
           FROM ${challengeResultRelation}
           WHERE "userId" ~ '^[0-9]+$'
             AND "challengeId" = ANY($1::text[])
+            AND "validSubmission" IS DISTINCT FROM FALSE
+            AND "submissionId" IS NOT NULL
         `,
         [challengeIds]
       )
@@ -1022,10 +1404,14 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
         mdi."wins" AS "wins",
+        mdi."submissions" AS "submissions",
+        mdi."passedReview" AS "passedReview",
         mdi."mostRecentSubmission" AS "mostRecentSubmission",
         mdi."mostRecentEventDate" AS "mostRecentEventDate"
       FROM "members"."memberDevelopStats" mds
@@ -1041,6 +1427,8 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
@@ -1060,6 +1448,8 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        ds."memberStatsId" AS "memberStatsId",
+        srm."id" AS "legacyRowId",
         srm."challenges" AS "challenges",
         srm."wins" AS "wins",
         srm."mostRecentSubmission" AS "mostRecentSubmission",
@@ -1077,8 +1467,11 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
       `
       SELECT
         ms."userId" AS "userId",
+        ds."memberStatsId" AS "memberStatsId",
+        marathon."id" AS "legacyRowId",
         marathon."challenges" AS "challenges",
         marathon."wins" AS "wins",
+        marathon."competitions" AS "competitions",
         marathon."mostRecentSubmission" AS "mostRecentSubmission",
         marathon."mostRecentEventDate" AS "mostRecentEventDate"
       FROM "members"."memberDataScienceStats" ds
@@ -1092,7 +1485,14 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   ])
 
-  developRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    developRows,
+    row => buildLegacyChildAggregateKey(row, 'develop')
+  ).forEach((row) => {
+    if (isZeroSubmissionLegacyDevelopMarathonRow(row)) {
+      return
+    }
+
     const typeId = resolveChallengeTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy develop aggregate row for user ${row.userId} and subTrack ${row.name || row.subTrackId}`)
@@ -1106,7 +1506,10 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   })
 
-  designRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    designRows,
+    row => buildLegacyChildAggregateKey(row, 'design')
+  ).forEach((row) => {
     const typeId = resolveLegacyDesignTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy design aggregate row for user ${row.userId} and subTrack ${row.name || row.subTrackId}`)
@@ -1120,7 +1523,10 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   })
 
-  srmRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    srmRows,
+    row => `${normalizeBigInt(row.userId, 'user id').toString()}::srm`
+  ).forEach((row) => {
     const typeId = legacyLookupCache.typeIds.SRM || resolveChallengeTypeId(TYPE_NAMES.SRM)
     if (!typeId) {
       logWarn(`Skipping legacy SRM aggregate row for user ${row.userId} because the SRM type id could not be resolved`)
@@ -1134,7 +1540,14 @@ async function aggregateLegacyStatsByUserIds (membersClient, userIds, options, l
     )
   })
 
-  marathonRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    marathonRows,
+    row => `${normalizeBigInt(row.userId, 'user id').toString()}::marathon`
+  ).forEach((row) => {
+    if (!hasLegacyMarathonCompetitionActivity(row)) {
+      return
+    }
+
     const typeId = legacyLookupCache.typeIds.MARATHON_MATCH || resolveChallengeTypeId(TYPE_NAMES.MARATHON_MATCH)
     if (!typeId) {
       logWarn(`Skipping legacy marathon aggregate row for user ${row.userId} because the marathon type id could not be resolved`)
@@ -1177,10 +1590,14 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
         mdi."wins" AS "wins",
+        mdi."submissions" AS "submissions",
+        mdi."passedReview" AS "passedReview",
         mdi."mostRecentSubmission" AS "mostRecentSubmission",
         mdi."mostRecentEventDate" AS "mostRecentEventDate"
       FROM "members"."memberDevelopStats" mds
@@ -1193,6 +1610,8 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        mds."memberStatsId" AS "memberStatsId",
+        mdi."id" AS "legacyRowId",
         mdi."subTrackId" AS "subTrackId",
         mdi."name" AS "name",
         mdi."challenges" AS "challenges",
@@ -1209,6 +1628,8 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        ds."memberStatsId" AS "memberStatsId",
+        srm."id" AS "legacyRowId",
         srm."challenges" AS "challenges",
         srm."wins" AS "wins",
         srm."mostRecentSubmission" AS "mostRecentSubmission",
@@ -1223,8 +1644,11 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     membersClient.$queryRawUnsafe(
       `
       SELECT
+        ds."memberStatsId" AS "memberStatsId",
+        marathon."id" AS "legacyRowId",
         marathon."challenges" AS "challenges",
         marathon."wins" AS "wins",
+        marathon."competitions" AS "competitions",
         marathon."mostRecentSubmission" AS "mostRecentSubmission",
         marathon."mostRecentEventDate" AS "mostRecentEventDate"
       FROM "members"."memberDataScienceStats" ds
@@ -1236,7 +1660,14 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   ])
 
-  developRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    developRows,
+    row => buildLegacyChildAggregateKey(row, 'develop')
+  ).forEach((row) => {
+    if (isZeroSubmissionLegacyDevelopMarathonRow(row)) {
+      return
+    }
+
     const typeId = resolveChallengeTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy develop aggregate row for user ${userId.toString()} and subTrack ${row.name || row.subTrackId}`)
@@ -1249,7 +1680,10 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   })
 
-  designRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    designRows,
+    row => buildLegacyChildAggregateKey(row, 'design')
+  ).forEach((row) => {
     const typeId = resolveLegacyDesignTypeId(row.name, row.subTrackId)
     if (!typeId) {
       logWarn(`Skipping legacy design aggregate row for user ${userId.toString()} and subTrack ${row.name || row.subTrackId}`)
@@ -1262,7 +1696,10 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   })
 
-  srmRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    srmRows,
+    () => 'srm'
+  ).forEach((row) => {
     const typeId = legacyLookupCache.typeIds.SRM || resolveChallengeTypeId(TYPE_NAMES.SRM)
     if (!typeId) {
       logWarn(`Skipping legacy SRM aggregate row for user ${userId.toString()} because the SRM type id could not be resolved`)
@@ -1275,7 +1712,14 @@ async function aggregateLegacyStatsForUser (membersClient, userId, options, lega
     )
   })
 
-  marathonRows.forEach((row) => {
+  selectLatestLegacyAggregateRows(
+    marathonRows,
+    () => 'marathon'
+  ).forEach((row) => {
+    if (!hasLegacyMarathonCompetitionActivity(row)) {
+      return
+    }
+
     const typeId = legacyLookupCache.typeIds.MARATHON_MATCH || resolveChallengeTypeId(TYPE_NAMES.MARATHON_MATCH)
     if (!typeId) {
       logWarn(`Skipping legacy marathon aggregate row for user ${userId.toString()} because the marathon type id could not be resolved`)
@@ -1702,7 +2146,9 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
       id: true,
       trackId: true,
       typeId: true,
-      challengeId: true
+      challengeId: true,
+      placement: true,
+      percentile: true
     }
   })
 
@@ -1722,7 +2168,13 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
       historyRowsToUpdate.push({
         id: existingRow.id,
         eventDate: row.eventDate,
-        newRating: row.newRating
+        newRating: row.newRating,
+        placement: row.placement === undefined
+          ? (existingRow.placement === undefined ? null : existingRow.placement)
+          : row.placement,
+        percentile: row.percentile === undefined
+          ? (existingRow.percentile === undefined ? null : existingRow.percentile)
+          : row.percentile
       })
       return
     }
@@ -1733,18 +2185,26 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
       typeId: row.typeId,
       challengeId: row.challengeId,
       eventDate: row.eventDate,
-      newRating: row.newRating
+      newRating: row.newRating,
+      placement: row.placement === undefined ? null : row.placement,
+      percentile: row.percentile === undefined ? null : row.percentile
     })
   })
 
   const queries = []
   if (historyRowsToUpdate.length > 0) {
-    const { sql, params } = buildMemberStatsHistoryBulkUpdateQuery(historyRowsToUpdate)
-    queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+    chunkRecordsForParameterizedQuery(historyRowsToUpdate, HISTORY_BULK_UPDATE_PARAM_COUNT)
+      .forEach((historyRowsChunk) => {
+        const { sql, params } = buildMemberStatsHistoryBulkUpdateQuery(historyRowsChunk)
+        queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+      })
   }
   if (historyRowsToInsert.length > 0) {
-    const { sql, params } = buildMemberStatsHistoryBulkInsertQuery(historyRowsToInsert)
-    queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+    chunkRecordsForParameterizedQuery(historyRowsToInsert, HISTORY_BULK_INSERT_PARAM_COUNT)
+      .forEach((historyRowsChunk) => {
+        const { sql, params } = buildMemberStatsHistoryBulkInsertQuery(historyRowsChunk)
+        queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+      })
   }
 
   await membersClient.$transaction(queries)
@@ -1810,6 +2270,8 @@ async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
         "challengeId",
         "date",
         "rating",
+        "placement",
+        "percentile",
         "subTrack",
         "subTrackId"
       FROM "members"."memberDataScienceHistoryStats"
@@ -1861,7 +2323,9 @@ async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
       typeId,
       challengeId: String(row.challengeId),
       eventDate,
-      newRating: toOptionalInt(row.rating)
+      newRating: toOptionalInt(row.rating),
+      placement: toOptionalPlacement(row.placement),
+      percentile: toOptionalFloat(row.percentile)
     })
   })
 
@@ -1869,12 +2333,14 @@ async function backfillHistoryFromLegacy (membersClient, userId, options = {}) {
 }
 
 /**
- * Load completed placement winner rows for one member so history can be seeded
+ * Load completed winner rows for one member so history can be seeded
  * when a completed challenge never appeared in the legacy history tables.
+ * PLACEMENT and PASSED_REVIEW rows both represent visible challenge
+ * participation; wins are still counted separately from PLACEMENT rows only.
  * @param {Object} challengesClient prisma challenges client
  * @param {BigInt} userId member user id
  * @param {Object} [options] optional track/type filters
- * @returns {Promise<Array<Object>>} placement winner rows with embedded challenge metadata
+ * @returns {Promise<Array<Object>>} winner rows with embedded challenge metadata
  */
 async function fetchChallengeWinnerRowsForUser (challengesClient, userId, options = {}) {
   const { whereSql, params } = buildFilterQuery(options, userId)
@@ -1883,6 +2349,8 @@ async function fetchChallengeWinnerRowsForUser (challengesClient, userId, option
     SELECT
       cw."challengeId" AS "challengeId",
       cw."createdAt" AS "createdAt",
+      cw."placement" AS "placement",
+      cw."type" AS "winnerType",
       c.id AS "canonicalChallengeId",
       c."trackId" AS "trackId",
       c."typeId" AS "typeId",
@@ -1891,7 +2359,7 @@ async function fetchChallengeWinnerRowsForUser (challengesClient, userId, option
     FROM "ChallengeWinner" cw
     INNER JOIN "Challenge" c ON c.id = cw."challengeId"
     WHERE ${whereSql}
-      AND cw."type" = 'PLACEMENT'
+      AND cw."type" IN (${CHALLENGE_WINNER_HISTORY_TYPE_SQL})
       AND c.status::text = '${COMPLETED_CHALLENGE_STATUS}'
     ORDER BY cw."createdAt" ASC, cw."challengeId" ASC
     `,
@@ -1901,6 +2369,7 @@ async function fetchChallengeWinnerRowsForUser (challengesClient, userId, option
   return rows.map((row) => ({
     challengeId: String(row.challengeId),
     createdAt: row.createdAt ? new Date(row.createdAt) : null,
+    placement: row.winnerType === 'PLACEMENT' ? toOptionalPlacement(row.placement) : null,
     challenge: {
       id: String(row.canonicalChallengeId || row.challengeId),
       trackId: row.trackId ? String(row.trackId) : null,
@@ -1932,14 +2401,19 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
   const historyLookup = new Map()
 
   ;(reviewRows || []).forEach((row) => {
+    if (!isUsableReviewChallengeResultRow(row)) {
+      return
+    }
+
     const challenge = challengeMetadataById.get(String(row.challengeId))
     if (!challenge || !challenge.id || !challenge.trackId || !challenge.typeId || !isCompletedChallengeStatus(challenge.status)) {
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
-    if ((options.trackId && trackId !== options.trackId) || (options.typeId && typeId !== options.typeId)) {
+    const dimension = normalizeChallengeStatsDimension(challenge.trackId, challenge.typeId)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
+    if (!matchesNormalizedStatsFilters(dimension, options)) {
       return
     }
 
@@ -1954,7 +2428,8 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
       typeId,
       challengeId: String(challenge.id),
       eventDate,
-      newRating: null
+      newRating: null,
+      placement: toOptionalPlacement(row.placement)
     })
   })
 
@@ -1964,9 +2439,10 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
       return
     }
 
-    const trackId = String(challenge.trackId)
-    const typeId = String(challenge.typeId)
-    if ((options.trackId && trackId !== options.trackId) || (options.typeId && typeId !== options.typeId)) {
+    const dimension = normalizeChallengeStatsDimension(challenge.trackId, challenge.typeId)
+    const trackId = dimension.trackId
+    const typeId = dimension.typeId
+    if (!matchesNormalizedStatsFilters(dimension, options)) {
       return
     }
 
@@ -1981,7 +2457,8 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
       typeId,
       challengeId: String(challenge.id),
       eventDate,
-      newRating: null
+      newRating: null,
+      placement: toOptionalPlacement(row.placement)
     })
   })
 
@@ -2316,6 +2793,33 @@ async function syncCurrentMemberMaxRatingsForUsers (membersClient, userIds) {
 }
 
 /**
+ * Split raw-query write records so each generated query stays below the bind
+ * parameter limit used by spread-based Prisma raw calls.
+ * @param {Array<*>} records write records to split
+ * @param {number} parametersPerRecord number of bound parameters each record emits
+ * @returns {Array<Array<*>>} record chunks sized for safe raw-query execution
+ * @throws {Error} if parametersPerRecord is not a positive integer
+ */
+function chunkRecordsForParameterizedQuery (records, parametersPerRecord) {
+  if (!records || records.length === 0) {
+    return []
+  }
+
+  if (!Number.isInteger(parametersPerRecord) || parametersPerRecord <= 0) {
+    throw new Error('parametersPerRecord must be a positive integer')
+  }
+
+  const chunkSize = Math.max(1, Math.floor(MAX_RAW_QUERY_PARAMS / parametersPerRecord))
+  const chunks = []
+
+  for (let start = 0; start < records.length; start += chunkSize) {
+    chunks.push(records.slice(start, start + chunkSize))
+  }
+
+  return chunks
+}
+
+/**
  * Build parameter placeholders and flattened values for a SQL VALUES list.
  * @param {Array<Array<*>>} rows row-major parameter values
  * @returns {{ valuesSql: string, params: Array<*> }} VALUES SQL fragment and flattened params
@@ -2438,6 +2942,8 @@ function buildMemberStatsHistoryBulkUpdateQuery (historyRows) {
     row.id,
     row.eventDate,
     row.newRating,
+    row.placement,
+    row.percentile,
     UPDATED_BY
   ])))
 
@@ -2447,11 +2953,13 @@ function buildMemberStatsHistoryBulkUpdateQuery (historyRows) {
       SET
         "eventDate" = CAST(data."eventDate" AS TIMESTAMP),
         "newRating" = CAST(data."newRating" AS INTEGER),
+        "placement" = CAST(data."placement" AS INTEGER),
+        "percentile" = CAST(data."percentile" AS DOUBLE PRECISION),
         "updatedBy" = data."updatedBy",
         "updatedAt" = CURRENT_TIMESTAMP
       FROM (
         VALUES ${valuesSql}
-      ) AS data ("id", "eventDate", "newRating", "updatedBy")
+      ) AS data ("id", "eventDate", "newRating", "placement", "percentile", "updatedBy")
       WHERE msh."id" = CAST(data."id" AS BIGINT)
     `,
     params
@@ -2472,6 +2980,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
     false,
     row.eventDate,
     row.newRating,
+    row.placement,
+    row.percentile,
     CREATED_BY,
     UPDATED_BY
   ])))
@@ -2486,6 +2996,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
         "mostRecent",
         "eventDate",
         "newRating",
+        "placement",
+        "percentile",
         "createdBy",
         "updatedBy"
       )
@@ -2497,6 +3009,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
         data."mostRecent",
         CAST(data."eventDate" AS TIMESTAMP),
         CAST(data."newRating" AS INTEGER),
+        CAST(data."placement" AS INTEGER),
+        CAST(data."percentile" AS DOUBLE PRECISION),
         data."createdBy",
         data."updatedBy"
       FROM (
@@ -2509,6 +3023,8 @@ function buildMemberStatsHistoryBulkInsertQuery (historyRows) {
         "mostRecent",
         "eventDate",
         "newRating",
+        "placement",
+        "percentile",
         "createdBy",
         "updatedBy"
       )
@@ -2877,7 +3393,17 @@ function buildFilterQuery (options, includeUserFilter) {
   }
 
   if (options.trackId) {
-    addEqualsClause('c."trackId"', options.trackId)
+    if (legacyLookupCache &&
+      options.trackId === legacyLookupCache.trackIds.DATA_SCIENCE &&
+      legacyLookupCache.typeIds.MARATHON_MATCH) {
+      params.push(options.trackId)
+      const trackPlaceholder = `$${params.length}`
+      params.push(legacyLookupCache.typeIds.MARATHON_MATCH)
+      const marathonTypePlaceholder = `$${params.length}`
+      clauses.push(`(c."trackId" = ${trackPlaceholder} OR c."typeId" = ${marathonTypePlaceholder})`)
+    } else {
+      addEqualsClause('c."trackId"', options.trackId)
+    }
   }
 
   if (options.typeId) {
@@ -2944,6 +3470,8 @@ async function getUserIds (membersClient, challengesClient, options) {
       FROM "ChallengeWinner" cw
       INNER JOIN "Challenge" c ON c.id = cw."challengeId"
       WHERE ${whereSql}
+        AND cw."type" IN (${CHALLENGE_WINNER_HISTORY_TYPE_SQL})
+        AND c.status::text = '${COMPLETED_CHALLENGE_STATUS}'
       ORDER BY cw."userId" ASC
       `,
       ...params
@@ -2985,7 +3513,50 @@ async function getExistingMemberUserIdSet (membersClient, userIds) {
 }
 
 /**
- * Aggregate unified memberStats rows from challenge winner placements.
+ * Normalize grouped ChallengeWinner SQL rows into unified memberStats records.
+ * @param {Array<Object>} rows grouped ChallengeWinner rows
+ * @param {Object} options script filters
+ * @returns {Array<Object>} normalized aggregate records
+ */
+function buildChallengeWinnerAggregateRecords (rows, options) {
+  const aggregateLookup = new Map()
+  ;(rows || []).forEach((row) => {
+    const dimension = normalizeChallengeStatsDimension(row.trackId, row.typeId)
+    if (!matchesNormalizedStatsFilters(dimension, options)) {
+      return
+    }
+
+    mergeAggregateRecord(aggregateLookup, {
+      userId: normalizeBigInt(row.userId, 'user id'),
+      trackId: dimension.trackId,
+      typeId: dimension.typeId,
+      challenges: toInt(row.challenges),
+      wins: toInt(row.wins),
+      _challengeIds: buildChallengeIdSet(row.challengeIds),
+      _winChallengeIds: buildChallengeIdSet(row.winChallengeIds),
+      mostRecentEventDate: row.mostRecentEventDate ? new Date(row.mostRecentEventDate) : null,
+      mostRecentSubmission: row.mostRecentSubmission ? new Date(row.mostRecentSubmission) : null,
+      rating: null,
+      avgRank: null,
+      avgNumSubmissions: null,
+      bestRank: null,
+      globalRank: null,
+      countryRank: null,
+      schoolRank: null,
+      volatility: null,
+      maxRating: null,
+      minRating: null,
+      topFiveFinishes: null,
+      topTenFinishes: null,
+      isPrivate: false
+    })
+  })
+
+  return Array.from(aggregateLookup.values())
+}
+
+/**
+ * Aggregate unified memberStats rows from completed ChallengeWinner placements.
  * Challenges count distinct completed winner-backed challenges, while wins count
  * only first-place PLACEMENT rows so second/third-place finishes do not inflate
  * the public win totals during ChallengeWinner fallback aggregation.
@@ -3005,53 +3576,111 @@ async function aggregateChallengeWinnerStatsForUser (challengesClient, userId, o
       c."typeId" AS "typeId",
       COUNT(DISTINCT c.id)::int AS "challenges",
       COUNT(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id END)::int AS "wins",
+      ARRAY_REMOVE(ARRAY_AGG(DISTINCT c.id::text), NULL) AS "challengeIds",
+      ARRAY_REMOVE(
+        ARRAY_AGG(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id::text ELSE NULL END),
+        NULL
+      ) AS "winChallengeIds",
       MAX(c."endDate") AS "mostRecentEventDate",
       MAX(cw."createdAt") AS "mostRecentSubmission"
     FROM "ChallengeWinner" cw
     INNER JOIN "Challenge" c ON c.id = cw."challengeId"
     WHERE ${whereSql}
+      AND cw."type" IN (${CHALLENGE_WINNER_HISTORY_TYPE_SQL})
+      AND c.status::text = '${COMPLETED_CHALLENGE_STATUS}'
     GROUP BY cw."userId", c."trackId", c."typeId"
     ORDER BY c."trackId" ASC, c."typeId" ASC
     `,
     ...params
   )
 
-  return rows.map((row) => ({
-    userId: normalizeBigInt(row.userId, 'user id'),
-    trackId: String(row.trackId),
-    typeId: String(row.typeId),
-    challenges: toInt(row.challenges),
-    wins: toInt(row.wins),
-    mostRecentEventDate: row.mostRecentEventDate ? new Date(row.mostRecentEventDate) : null,
-    mostRecentSubmission: row.mostRecentSubmission ? new Date(row.mostRecentSubmission) : null,
-    rating: null,
-    avgRank: null,
-    avgNumSubmissions: null,
-    bestRank: null,
-    globalRank: null,
-    countryRank: null,
-    schoolRank: null,
-    volatility: null,
-    maxRating: null,
-    minRating: null,
-    topFiveFinishes: null,
-    topTenFinishes: null,
-    isPrivate: false
-  }))
+  return buildChallengeWinnerAggregateRecords(rows, options)
+}
+
+/**
+ * Aggregate completed ChallengeWinner rows for a batch of users.
+ * The resulting rows are used as gap-fillers for visible Task/QA dimensions
+ * that may not exist in legacy or review-api aggregate sources.
+ * @param {Object} challengesClient prisma challenges client
+ * @param {Array<BigInt>} userIds member user ids
+ * @param {Object} options script options
+ * @returns {Promise<Map<string, Array<Object>>>} aggregate rows keyed by user id
+ */
+async function aggregateChallengeWinnerStatsByUserIds (challengesClient, userIds, options) {
+  if (!userIds || userIds.length === 0) {
+    return new Map()
+  }
+
+  const normalizedUserIds = Array.from(
+    new Set(userIds.map((userId) => normalizeBigInt(userId, 'user id').toString()))
+  )
+  const rowsByUserId = new Map()
+  normalizedUserIds.forEach((userId) => {
+    rowsByUserId.set(userId, [])
+  })
+
+  if (normalizedUserIds.length === 0) {
+    return rowsByUserId
+  }
+
+  const { whereSql, params } = buildFilterQuery(options, null)
+  const userIdsPlaceholder = `$${params.length + 1}`
+  const rows = await challengesClient.$queryRawUnsafe(
+    `
+    SELECT
+      cw."userId" AS "userId",
+      c."trackId" AS "trackId",
+      c."typeId" AS "typeId",
+      COUNT(DISTINCT c.id)::int AS "challenges",
+      COUNT(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id END)::int AS "wins",
+      ARRAY_REMOVE(ARRAY_AGG(DISTINCT c.id::text), NULL) AS "challengeIds",
+      ARRAY_REMOVE(
+        ARRAY_AGG(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id::text ELSE NULL END),
+        NULL
+      ) AS "winChallengeIds",
+      MAX(c."endDate") AS "mostRecentEventDate",
+      MAX(cw."createdAt") AS "mostRecentSubmission"
+    FROM "ChallengeWinner" cw
+    INNER JOIN "Challenge" c ON c.id = cw."challengeId"
+    WHERE ${whereSql}
+      AND cw."userId" = ANY(${userIdsPlaceholder}::int[])
+      AND cw."type" IN (${CHALLENGE_WINNER_HISTORY_TYPE_SQL})
+      AND c.status::text = '${COMPLETED_CHALLENGE_STATUS}'
+    GROUP BY cw."userId", c."trackId", c."typeId"
+    ORDER BY cw."userId" ASC, c."trackId" ASC, c."typeId" ASC
+    `,
+    ...params,
+    normalizedUserIds
+  )
+
+  const aggregateRows = buildChallengeWinnerAggregateRecords(rows, options)
+  aggregateRows.forEach((row) => {
+    const userKey = normalizeBigInt(row.userId, 'user id').toString()
+    const userRows = rowsByUserId.get(userKey)
+    if (userRows) {
+      userRows.push(row)
+    }
+  })
+
+  return rowsByUserId
 }
 
 async function aggregateStatsForUser (membersClient, challengesClient, userId, options, legacyIds = null) {
   const legacyRows = await aggregateLegacyStatsForUser(membersClient, userId, options, legacyIds)
   const reviewRows = await aggregateReviewStatsForUser(reviewDb, challengesClient, userId, options, legacyRows)
+  const challengeWinnerRows = await aggregateChallengeWinnerStatsForUser(challengesClient, userId, options)
+  const completedParticipationRows = reviewRows.concat(challengeWinnerRows)
+  const effectiveLegacyRows = filterLegacyRowsReplacedByCompletedParticipation(legacyRows, completedParticipationRows)
 
-  if (legacyRows.length > 0) {
+  if (effectiveLegacyRows.length > 0) {
     const aggregateLookup = new Map()
-    legacyRows.forEach((row) => {
+    effectiveLegacyRows.forEach((row) => {
       mergeAggregateRecord(aggregateLookup, row)
     })
     reviewRows.forEach((row) => {
       mergeAggregateRecord(aggregateLookup, row)
     })
+    mergeMissingAggregateRecords(aggregateLookup, challengeWinnerRows)
 
     return {
       source: 'legacy',
@@ -3059,16 +3688,22 @@ async function aggregateStatsForUser (membersClient, challengesClient, userId, o
     }
   }
 
-  if (reviewRows.length > 0) {
+  if (completedParticipationRows.length > 0) {
+    const aggregateLookup = new Map()
+    reviewRows.forEach((row) => {
+      mergeAggregateRecord(aggregateLookup, row)
+    })
+    mergeMissingAggregateRecords(aggregateLookup, challengeWinnerRows)
+
     return {
       source: 'review',
-      rows: reviewRows
+      rows: Array.from(aggregateLookup.values())
     }
   }
 
   return {
     source: 'challenge-winner',
-    rows: await aggregateChallengeWinnerStatsForUser(challengesClient, userId, options)
+    rows: challengeWinnerRows
   }
 }
 
@@ -3078,20 +3713,24 @@ async function aggregateStatsForUserFromPreloadedData (
   options,
   legacyRows = [],
   reviewRows = [],
-  challengeMetadataById = new Map()
+  challengeMetadataById = new Map(),
+  challengeWinnerRows = []
 ) {
   const aggregatedReviewRows = reviewRows.length > 0
     ? buildAggregatedStatsFromReviewResults(reviewRows, challengeMetadataById, options, legacyRows)
     : []
+  const completedParticipationRows = aggregatedReviewRows.concat(challengeWinnerRows)
+  const effectiveLegacyRows = filterLegacyRowsReplacedByCompletedParticipation(legacyRows, completedParticipationRows)
 
-  if (legacyRows.length > 0) {
+  if (effectiveLegacyRows.length > 0) {
     const aggregateLookup = new Map()
-    legacyRows.forEach((row) => {
+    effectiveLegacyRows.forEach((row) => {
       mergeAggregateRecord(aggregateLookup, row)
     })
     aggregatedReviewRows.forEach((row) => {
       mergeAggregateRecord(aggregateLookup, row)
     })
+    mergeMissingAggregateRecords(aggregateLookup, challengeWinnerRows)
 
     return {
       source: 'legacy',
@@ -3099,16 +3738,24 @@ async function aggregateStatsForUserFromPreloadedData (
     }
   }
 
-  if (aggregatedReviewRows.length > 0) {
+  if (completedParticipationRows.length > 0) {
+    const aggregateLookup = new Map()
+    aggregatedReviewRows.forEach((row) => {
+      mergeAggregateRecord(aggregateLookup, row)
+    })
+    mergeMissingAggregateRecords(aggregateLookup, challengeWinnerRows)
+
     return {
       source: 'review',
-      rows: aggregatedReviewRows
+      rows: Array.from(aggregateLookup.values())
     }
   }
 
   return {
     source: 'challenge-winner',
-    rows: await aggregateChallengeWinnerStatsForUser(challengesClient, userId, options)
+    rows: challengeWinnerRows.length > 0
+      ? challengeWinnerRows
+      : await aggregateChallengeWinnerStatsForUser(challengesClient, userId, options)
   }
 }
 
@@ -3182,8 +3829,11 @@ async function writeStatsToDatabase (membersClient, statsRecords, replaceUsers =
       }))
     }
 
-    const { sql, params } = buildMemberStatsBulkUpsertQuery(statsWriteRecords)
-    queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+    chunkRecordsForParameterizedQuery(statsWriteRecords, MEMBER_STATS_BULK_UPSERT_PARAM_COUNT)
+      .forEach((statsWriteChunk) => {
+        const { sql, params } = buildMemberStatsBulkUpsertQuery(statsWriteChunk)
+        queries.push(membersClient.$executeRawUnsafe(sql, ...params))
+      })
 
     // Use array transactions so the bulk delete and bulk upsert stay atomic.
     await membersClient.$transaction(queries)
@@ -3344,8 +3994,8 @@ async function main () {
     throw new Error('DATABASE_URL is required')
   }
 
-  if (!process.env.CHALLENGES_DB_URL) {
-    throw new Error('CHALLENGES_DB_URL is required')
+  if (!process.env.CHALLENGES_DB_URL && !process.env.CHALLENGE_DB_URL) {
+    throw new Error('CHALLENGES_DB_URL or CHALLENGE_DB_URL is required')
   }
 
   if (!reviewDb) {
@@ -3363,6 +4013,7 @@ async function main () {
   let updatedHistoryFlags = 0
   let reratedChallenges = 0
   let reratedRatings = 0
+  let recalculatedRankRows = 0
   let syncedMemberMaxRatings = 0
   let deletedMemberMaxRatings = 0
 
@@ -3448,6 +4099,7 @@ async function main () {
       let historyDurationMs = 0
       let historyRefreshDurationMs = 0
       let rerateDurationMs = 0
+      let rankRecalculationDurationMs = 0
       let maxRatingSyncDurationMs = 0
 
       for (const userId of batchUserIds) {
@@ -3499,6 +4151,12 @@ async function main () {
         )
       ))
       const {
+        result: batchChallengeWinnerStatsByUserId,
+        durationMs: challengeWinnerStatsDurationMs
+      } = await measureAsyncStep(async () => (
+        aggregateChallengeWinnerStatsByUserIds(challengesClient, existingBatchUserIds, options)
+      ))
+      const {
         result: batchLegacyRatingFieldsByUserId,
         durationMs: legacyRatingFieldsDurationMs
       } = (!options.csvOnly && !options.skipRatings)
@@ -3521,13 +4179,15 @@ async function main () {
           const userKey = userId.toString()
           const legacyRows = batchLegacyStatsByUserId.get(userKey) || []
           const reviewRows = batchReviewRowsByUserId.get(userKey) || []
+          const challengeWinnerRows = batchChallengeWinnerStatsByUserId.get(userKey) || []
           const { source, rows: stats } = await aggregateStatsForUserFromPreloadedData(
             challengesClient,
             userId,
             options,
             legacyRows,
             reviewRows,
-            batchChallengeMetadataById
+            batchChallengeMetadataById,
+            challengeWinnerRows
           )
 
           if (!options.csvOnly && !options.skipRatings && stats.length > 0) {
@@ -3595,7 +4255,9 @@ async function main () {
           return
         }
 
-        batchStatsRecords.push(...stats)
+        stats.forEach((stat) => {
+          batchStatsRecords.push(stat)
+        })
       })
 
       if (!options.csvOnly && batchStatsRecords.length > 0) {
@@ -3612,6 +4274,7 @@ async function main () {
       let batchHistoryRefreshes = 0
       let batchReratedChallenges = 0
       let batchReratedRatings = 0
+      let batchRecalculatedRankRows = 0
       let batchSyncedMemberMaxRatings = 0
       let batchDeletedMemberMaxRatings = 0
 
@@ -3688,7 +4351,10 @@ async function main () {
           } = await measureAsyncStep(async () => (
             mapWithConcurrency(existingBatchUserIds, options.concurrency, async (userId) => {
               const rerateStartedAt = startTimer()
-              const rerateResult = await rerateDevTrack(membersClient, challengesClient, reviewDb, userId)
+              const rerateResult = await rerateDevTrack(membersClient, challengesClient, reviewDb, userId, null, {
+                useLegacySourceRatings: true,
+                recalculateRanks: false
+              })
               return {
                 userId,
                 challengesProcessed: rerateResult.challengesProcessed,
@@ -3714,6 +4380,24 @@ async function main () {
           if (batchReratedChallenges > 0) {
             logInfo(`Re-rated ${batchReratedChallenges} development challenge(s) for users ${batchStart + 1}-${processedUsers}`)
           }
+
+          if (batchReratedRatings > 0) {
+            const {
+              result: updatedRankRows,
+              durationMs
+            } = await measureAsyncStep(async () => recalculateRatingRanks(
+              membersClient,
+              {
+                trackId: legacyLookupCache.trackIds.DEVELOP,
+                typeId: legacyLookupCache.typeIds.CHALLENGE || resolveChallengeTypeId(TYPE_NAMES.CHALLENGE)
+              },
+              { updatedBy: RERATE_ACTOR }
+            ))
+            rankRecalculationDurationMs = durationMs
+            batchRecalculatedRankRows = updatedRankRows
+            recalculatedRankRows += updatedRankRows
+            logInfo(`Recomputed ${updatedRankRows} development challenge rank row(s) after batch rerates`)
+          }
         }
 
         if (!options.skipRatings) {
@@ -3736,13 +4420,14 @@ async function main () {
       const { durationMs: checkpointDurationMs } = await measureAsyncStep(async () => processedUserIdsWriter.appendUserIds(existingBatchUserIds))
       const batchTotalDurationMs = getElapsedMilliseconds(batchStartedAt)
 
-      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}, maxRatingUpserts=${batchSyncedMemberMaxRatings}, maxRatingDeletes=${batchDeletedMemberMaxRatings}`)
+      logInfo(`Batch ${batchNumber}/${totalBatches} summary: requested=${batchUserIds.length}, existing=${existingBatchUserIds.length}, missing=${missingBatchUserIds.length}, statRows=${batchOutputStatsRows}, historyWrites=${batchHistoryWrites}, historyMostRecentUpdates=${batchHistoryRefreshes}, reratedChallenges=${batchReratedChallenges}, reratedRatings=${batchReratedRatings}, rankRows=${batchRecalculatedRankRows}, maxRatingUpserts=${batchSyncedMemberMaxRatings}, maxRatingDeletes=${batchDeletedMemberMaxRatings}`)
       logInfo(`Batch ${batchNumber}/${totalBatches} timings: ${formatTimingSegments([
         { label: 'existingUsers', durationMs: existingUsersDurationMs },
         { label: 'legacyIds', durationMs: legacyIdsDurationMs },
         { label: 'legacyStats', durationMs: legacyStatsDurationMs },
         { label: 'reviewRows', durationMs: reviewRowsDurationMs },
         { label: 'challengeMetadata', durationMs: challengeMetadataDurationMs },
+        { label: 'challengeWinnerStats', durationMs: challengeWinnerStatsDurationMs },
         !options.csvOnly && !options.skipRatings
           ? { label: 'legacyRatings', durationMs: legacyRatingFieldsDurationMs }
           : null,
@@ -3751,6 +4436,7 @@ async function main () {
         !options.csvOnly && !options.skipHistory ? { label: 'historyBackfill', durationMs: historyDurationMs } : null,
         !options.csvOnly ? { label: 'historyMostRecent', durationMs: historyRefreshDurationMs } : null,
         !options.csvOnly && !options.skipRatings && !options.skipRerate ? { label: 'rerate', durationMs: rerateDurationMs } : null,
+        !options.csvOnly && !options.skipRatings && !options.skipRerate ? { label: 'rankRecalc', durationMs: rankRecalculationDurationMs } : null,
         !options.csvOnly && !options.skipRatings ? { label: 'maxRatingSync', durationMs: maxRatingSyncDurationMs } : null,
         { label: 'checkpoint', durationMs: checkpointDurationMs },
         { label: 'total', durationMs: batchTotalDurationMs }
@@ -3765,7 +4451,7 @@ async function main () {
     }
 
     const totalRuntimeMs = getElapsedMilliseconds(scriptStartedAt)
-    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), synchronized ${syncedMemberMaxRatings} memberMaxRating row(s), deleted ${deletedMemberMaxRatings} stale memberMaxRating row(s), total runtime ${formatDuration(totalRuntimeMs)}`)
+    logInfo(`Completed processing ${processedUsers} users, created/updated ${writtenStats} stat records, seeded/updated ${writtenHistory} history records, recomputed ${updatedHistoryFlags} history mostRecent flags, rebuilt ${reratedRatings} rating update(s) across ${reratedChallenges} development challenge(s), recomputed ${recalculatedRankRows} development challenge rank row(s), synchronized ${syncedMemberMaxRatings} memberMaxRating row(s), deleted ${deletedMemberMaxRatings} stale memberMaxRating row(s), total runtime ${formatDuration(totalRuntimeMs)}`)
   } finally {
     await Promise.allSettled([
       membersClient.$disconnect(),
@@ -3786,6 +4472,7 @@ module.exports = {
   parseArgs,
   getUserIds,
   getExistingMemberUserIdSet,
+  aggregateLegacyStatsForUser,
   aggregateStatsForUser,
   initializeLegacyLookupCache,
   fetchLegacyRatingFields,

@@ -4,9 +4,14 @@ generator client {
   output   = "./generated/client"
 }
 
+generator externalClient {
+  provider      = "prisma-client-js"
+  output        = "../packages/member-prisma-client"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
   schemas  = ["members"]
 }
 
@@ -68,6 +73,7 @@ model member {
   financial memberFinancial?
   memberStats memberStats[]
   memberStatsHistory memberStatsHistory[]
+  challengePoints memberChallengePoints[]
   memberTraits memberTraits?
 
   createdAt   DateTime @default(now())
@@ -80,6 +86,9 @@ model member {
   @@index([status, handleLower])
   @@index([lastLoginDate])
   @@index([availableForGigs])
+  @@index([status, availableForGigs])
+  @@index([homeCountryCode], map: "idx_member_home_country_code")
+  @@index([competitionCountryCode], map: "idx_member_competition_country_code")
   @@schema("members")
 }
 
@@ -102,6 +111,7 @@ model memberAddress {
 
   @@index([userId])
   @@index([userId, type])
+  @@index([userId, type, id(sort: Desc)], map: "idx_member_address_user_type")
   @@schema("members")
 }
 
@@ -168,6 +178,10 @@ model memberStatsHistory {
   mostRecent      Boolean  @default(false)
   oldRating       Int?
   newRating       Int?
+  placement       Int?
+  percentile      Float?
+  oldVolatility   Int?
+  newVolatility   Int?
   oldGlobalRank   Int?
   newGlobalRank   Int?
   oldCountryRank  Int?
@@ -224,11 +238,33 @@ model memberStats {
   @@index([userId])
   @@index([trackId])
   @@index([typeId])
+  @@index([trackId, typeId, rating])
   @@index([userId, trackId, typeId])
   @@index([globalRank])
   @@index([countryRank])
   @@index([schoolRank])
   @@unique([userId, trackId, typeId])
+  @@schema("members")
+}
+
+model memberChallengePoints {
+  id            BigInt @id @default(autoincrement())
+  challengeId   String
+  challengeName String
+  userId        BigInt
+  placement     Int
+  points        Int
+
+  member member @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  createdBy   String
+  updatedAt   DateTime? @updatedAt
+  updatedBy   String?
+
+  @@unique([challengeId, userId])
+  @@index([userId])
+  @@index([challengeId])
   @@schema("members")
 }
 

@@ -14,6 +14,33 @@ if (!communicationSecureFields.includes('email')) {
   communicationSecureFields.unshift('email')
 }
 
+const defaultRatingPaths = [
+  {
+    name: 'AI Engineering',
+    track: 'DATA_SCIENCE',
+    tags: ['AI', 'AI Exponential League']
+  }
+]
+
+/**
+ * Parse rating path JSON from the environment.
+ * @param {string|undefined} value raw JSON environment value
+ * @returns {Array<Object>} configured rating path entries
+ * @throws {Error} when RATING_PATHS is not a JSON array
+ */
+function parseRatingPaths (value) {
+  if (!value) {
+    return defaultRatingPaths
+  }
+
+  const parsedValue = JSON.parse(value)
+  if (!Array.isArray(parsedValue)) {
+    throw new Error('RATING_PATHS must be a JSON array')
+  }
+
+  return parsedValue
+}
+
 module.exports = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'debug',
   PORT: process.env.PORT || 3000,
@@ -63,7 +90,7 @@ module.exports = {
   FILE_UPLOAD_SIZE_LIMIT: process.env.FILE_UPLOAD_SIZE_LIMIT
     ? Number(process.env.FILE_UPLOAD_SIZE_LIMIT) : 10 * 1024 * 1024, // 10M
 
-  // photo URL template, its <key> will be replaced with S3 object key,
+  // photo URL template, its <key> will be replaced with the generated file name,
   // the URL is specific to AWS region and bucket, you may go to AWS console S3 service to
   // see bucket object URL to get the URL structure
   PHOTO_URL_TEMPLATE: process.env.PHOTO_URL_TEMPLATE || 'https://member-media.topcoder-dev.com/member/profile/<key>',
@@ -126,6 +153,8 @@ module.exports = {
     : ['createdBy', 'updatedBy'],
   // Select stats read source: 'unified' (new tables) or 'legacy' (pre-refactor tables)
   STATS_READ_SOURCE: process.env.STATS_READ_SOURCE || 'unified',
+  // Configurable tag- and skill-based Development Challenge and Marathon Match rating paths.
+  RATING_PATHS: parseRatingPaths(process.env.RATING_PATHS),
 
   // Public group id
   PUBLIC_GROUP_ID: process.env.PUBLIC_GROUP_ID || '10',

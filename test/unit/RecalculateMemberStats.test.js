@@ -19,14 +19,17 @@ describe('recalculateMemberStats unit tests', () => {
           return [
             { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
             { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
-            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null },
+            { id: 'track-qa-id', name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
           ]
         }
 
         if (query.includes('"ChallengeType"')) {
           return [
             { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
-            { id: 'type-f2f-id', name: 'First2Finish', abbreviation: 'F2F', legacyId: null, isTask: false }
+            { id: 'type-bug-hunt-id', name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
+            { id: 'type-f2f-id', name: 'First2Finish', abbreviation: 'F2F', legacyId: null, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
           ]
         }
 
@@ -42,6 +45,64 @@ describe('recalculateMemberStats unit tests', () => {
     recalculateMemberStats.resolveLegacyDesignTypeId(null, 40).should.equal('type-f2f-id')
   })
 
+  it('should normalize QA challenge aggregates into the QA bucket', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null },
+            { id: 'track-qa-id', name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-bug-hunt-id', name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const eventDate = new Date('2026-06-15T08:00:00.000Z')
+    const results = recalculateMemberStats.buildAggregatedStatsFromReviewResults(
+      [{
+        challengeId: 'qa-challenge-june-15',
+        userId: global.BigInt(88770025),
+        submissionId: 'submission-1',
+        validSubmission: true,
+        placement: 1,
+        createdAt: new Date('2026-06-15T08:01:00.000Z')
+      }],
+      new Map([[
+        'qa-challenge-june-15',
+        {
+          id: 'qa-challenge-june-15',
+          trackId: 'track-qa-id',
+          typeId: 'type-ch-id',
+          status: 'COMPLETED',
+          endDate: eventDate
+        }
+      ]]),
+      {}
+    )
+
+    results.should.have.length(1)
+    results[0].trackId.should.equal('track-qa-id')
+    results[0].typeId.should.equal('type-ch-id')
+    results[0].challenges.should.equal(1)
+    results[0].wins.should.equal(1)
+    results[0].mostRecentEventDate.should.deep.equal(eventDate)
+  })
+
   it('should parse the concurrency option', () => {
     const options = recalculateMemberStats.parseArgs(['--concurrency', '8', '--skip-history'])
 
@@ -54,6 +115,86 @@ describe('recalculateMemberStats unit tests', () => {
 
     options.skipRerate.should.equal(true)
     options.skipRatings.should.equal(false)
+  })
+
+  it('should prefer newer duplicate legacy Marathon Match rating snapshots', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+    const membersClient = {
+      $queryRawUnsafe: async (sql) => {
+        if (sql.includes('"memberDevelopStats"')) {
+          return []
+        }
+
+        if (sql.includes('"memberSrmStats"')) {
+          return []
+        }
+
+        if (sql.includes('"memberMarathonStats"')) {
+          return [{
+            rating: 2955,
+            minimumRating: 1362,
+            maximumRating: 2955,
+            volatility: 357,
+            rank: 2,
+            countryRank: 1,
+            schoolRank: 0,
+            avgRank: 17,
+            avgNumSubmissions: 16,
+            bestRank: 3,
+            topFiveFinishes: 4,
+            topTenFinishes: 5
+          }, {
+            rating: 2187,
+            minimumRating: 1362,
+            maximumRating: 2187,
+            volatility: 470,
+            rank: 13,
+            countryRank: 1,
+            schoolRank: 0,
+            avgRank: 17,
+            avgNumSubmissions: 16,
+            bestRank: 3,
+            topFiveFinishes: 4,
+            topTenFinishes: 5
+          }]
+        }
+
+        throw new Error(`Unexpected query: ${sql}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const ratingFields = await recalculateMemberStats.fetchLegacyRatingFields(
+      membersClient,
+      global.BigInt(40562752),
+      [global.BigInt(2012717), global.BigInt(329904)]
+    )
+    const marathonFields = ratingFields.get('track-ds-id::type-mm-id')
+
+    marathonFields.rating.should.equal(2955)
+    marathonFields.maxRating.should.equal(2955)
+    marathonFields.volatility.should.equal(357)
   })
 
   it('should parse the processed user IDs path option', () => {
@@ -124,6 +265,8 @@ describe('recalculateMemberStats unit tests', () => {
     capturedQueries[0].sql.should.include(
       `COUNT(DISTINCT CASE WHEN cw."type" = 'PLACEMENT' AND cw."placement" = 1 THEN c.id END)::int AS "wins"`
     )
+    capturedQueries[0].sql.should.include(`AND cw."type" IN ('PLACEMENT', 'PASSED_REVIEW')`)
+    capturedQueries[0].sql.should.include("AND c.status::text = 'COMPLETED'")
     capturedQueries[0].params.should.deep.equal([global.BigInt(456)])
     result.should.have.length(1)
     chai.expect(result[0]).to.include({
@@ -135,6 +278,192 @@ describe('recalculateMemberStats unit tests', () => {
     result[0].userId.should.equal(global.BigInt(456))
     result[0].mostRecentEventDate.toISOString().should.equal('2024-03-05T00:00:00.000Z')
     result[0].mostRecentSubmission.toISOString().should.equal('2024-03-05T10:00:00.000Z')
+  })
+
+  it('should ignore empty legacy Marathon Match aggregate placeholders', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+    const membersClient = {
+      $queryRawUnsafe: async (sql) => {
+        if (sql.includes('"memberDevelopStats"')) {
+          return [{
+            memberStatsId: 1,
+            legacyRowId: 11,
+            subTrackId: 148,
+            name: 'DEVELOP_MARATHON_MATCH',
+            challenges: 40,
+            wins: 0,
+            submissions: 0,
+            passedReview: 0,
+            mostRecentSubmission: null,
+            mostRecentEventDate: '2024-11-11T13:00:23.000Z'
+          }]
+        }
+
+        if (sql.includes('"memberDesignStats"')) {
+          return []
+        }
+
+        if (sql.includes('"memberSrmStats"')) {
+          return []
+        }
+
+        if (sql.includes('"memberMarathonStats"')) {
+          return [{
+            memberStatsId: 1,
+            legacyRowId: 12,
+            challenges: 1,
+            wins: 0,
+            competitions: 0,
+            mostRecentSubmission: '1970-01-01T00:00:00.000Z',
+            mostRecentEventDate: null
+          }]
+        }
+
+        throw new Error(`Unexpected query: ${sql}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const result = await recalculateMemberStats.aggregateLegacyStatsForUser(
+      membersClient,
+      global.BigInt(456),
+      {},
+      [global.BigInt(1)]
+    )
+
+    result.should.deep.equal([])
+  })
+
+  it('should dedupe duplicate legacy aggregate parent snapshots by source subtrack', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-f2f-id', name: 'First2Finish', abbreviation: 'F2F', legacyId: null, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+    const membersClient = {
+      $queryRawUnsafe: async (sql) => {
+        if (sql.includes('"memberDevelopStats"')) {
+          return [
+            {
+              memberStatsId: 100,
+              legacyRowId: 1001,
+              subTrackId: 149,
+              name: 'FIRST_2_FINISH',
+              challenges: 103,
+              wins: 46,
+              mostRecentSubmission: '2022-06-08T21:28:00.000Z',
+              mostRecentEventDate: '2025-03-15T23:30:10.000Z'
+            },
+            {
+              memberStatsId: 200,
+              legacyRowId: 2001,
+              subTrackId: 149,
+              name: 'FIRST_2_FINISH',
+              challenges: 103,
+              wins: 46,
+              mostRecentSubmission: '2022-06-08T21:28:00.000Z',
+              mostRecentEventDate: '2025-03-15T23:30:10.000Z'
+            }
+          ]
+        }
+
+        if (sql.includes('"memberDesignStats"')) {
+          return [
+            {
+              memberStatsId: 100,
+              legacyRowId: 3001,
+              subTrackId: 17,
+              name: 'WEB_DESIGNS',
+              challenges: 2,
+              wins: 1,
+              mostRecentSubmission: '2024-01-01T00:00:00.000Z',
+              mostRecentEventDate: '2024-01-02T00:00:00.000Z'
+            },
+            {
+              memberStatsId: 200,
+              legacyRowId: 4001,
+              subTrackId: 17,
+              name: 'WEB_DESIGNS',
+              challenges: 2,
+              wins: 1,
+              mostRecentSubmission: '2024-01-01T00:00:00.000Z',
+              mostRecentEventDate: '2024-01-02T00:00:00.000Z'
+            },
+            {
+              memberStatsId: 200,
+              legacyRowId: 4002,
+              subTrackId: 34,
+              name: 'STUDIO_OTHER',
+              challenges: 3,
+              wins: 1,
+              mostRecentSubmission: '2024-02-01T00:00:00.000Z',
+              mostRecentEventDate: '2024-02-02T00:00:00.000Z'
+            }
+          ]
+        }
+
+        if (sql.includes('"memberSrmStats"') || sql.includes('"memberMarathonStats"')) {
+          return []
+        }
+
+        throw new Error(`Unexpected query: ${sql}`)
+      }
+    }
+
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const results = await recalculateMemberStats.aggregateLegacyStatsForUser(
+      membersClient,
+      global.BigInt(123),
+      {},
+      [global.BigInt(100), global.BigInt(200)]
+    )
+    const developF2F = results.find((row) => row.trackId === 'track-dev-id' && row.typeId === 'type-f2f-id')
+    const designChallenge = results.find((row) => row.trackId === 'track-design-id' && row.typeId === 'type-ch-id')
+
+    developF2F.challenges.should.equal(103)
+    developF2F.wins.should.equal(46)
+    designChallenge.challenges.should.equal(5)
+    designChallenge.wins.should.equal(2)
+    designChallenge.mostRecentEventDate.toISOString().should.equal('2024-02-02T00:00:00.000Z')
   })
 
   it('should bulk update and insert history rows during legacy backfill', async () => {
@@ -191,6 +520,8 @@ describe('recalculateMemberStats unit tests', () => {
             challengeId: 'challenge-ds',
             date: '2024-02-03T00:00:00.000Z',
             rating: 1700,
+            placement: 2,
+            percentile: 85.5,
             subTrack: 'Challenge',
             subTrackId: null
           }]
@@ -227,14 +558,21 @@ describe('recalculateMemberStats unit tests', () => {
     rawQueries.should.have.length(2)
     rawQueries[0].sql.should.include('UPDATE "members"."memberStatsHistory"')
     rawQueries[0].sql.should.include('CAST(data."newRating" AS INTEGER)')
+    rawQueries[0].sql.should.include('CAST(data."placement" AS INTEGER)')
+    rawQueries[0].sql.should.include('CAST(data."percentile" AS DOUBLE PRECISION)')
     rawQueries[0].sql.should.include('CAST(data."id" AS BIGINT)')
     rawQueries[1].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
     rawQueries[1].sql.should.include('CAST(data."userId" AS BIGINT)')
     rawQueries[1].sql.should.include('CAST(data."newRating" AS INTEGER)')
+    rawQueries[1].sql.should.include('CAST(data."placement" AS INTEGER)')
+    rawQueries[1].sql.should.include('CAST(data."percentile" AS DOUBLE PRECISION)')
+    rawQueries[1].params.should.include(2)
+    rawQueries[1].params.should.include(85.5)
   })
 
   it('should supplement history rows from completed review and winner challenges', async () => {
     const transactionCalls = []
+    let winnerQuerySql
     const membersClient = {
       memberStatsHistory: {
         findMany: async () => []
@@ -255,15 +593,18 @@ describe('recalculateMemberStats unit tests', () => {
           status: 'COMPLETED'
         }]
       },
-      $queryRawUnsafe: async () => [{
-        challengeId: 'challenge-winner',
-        createdAt: '2024-03-03T00:00:00.000Z',
-        canonicalChallengeId: 'challenge-winner',
-        trackId: 'track-design-id',
-        typeId: 'type-ch-id',
-        status: 'COMPLETED',
-        endDate: '2024-03-04T00:00:00.000Z'
-      }]
+      $queryRawUnsafe: async (sql) => {
+        winnerQuerySql = sql
+        return [{
+          challengeId: 'challenge-winner',
+          createdAt: '2024-03-03T00:00:00.000Z',
+          canonicalChallengeId: 'challenge-winner',
+          trackId: 'track-design-id',
+          typeId: 'type-ch-id',
+          status: 'COMPLETED',
+          endDate: '2024-03-04T00:00:00.000Z'
+        }]
+      }
     }
 
     const reviewDbClient = {
@@ -299,6 +640,102 @@ describe('recalculateMemberStats unit tests', () => {
     const rawQueries = transactionCalls[0].filter((query) => query.action === 'executeRawUnsafe')
     rawQueries.should.have.length(1)
     rawQueries[0].sql.should.include('INSERT INTO "members"."memberStatsHistory"')
+    rawQueries[0].sql.should.include('CAST(data."placement" AS INTEGER)')
+    rawQueries[0].params.should.include(2)
+    winnerQuerySql.should.include('cw."type" IN (\'PLACEMENT\', \'PASSED_REVIEW\')')
+    winnerQuerySql.should.include('cw."placement" AS "placement"')
+  })
+
+  it('should normalize Development-track Marathon Match history to Data Science', async () => {
+    const fakeChallengesClient = {
+      $queryRaw (strings) {
+        const query = strings.join('')
+        if (query.includes('"ChallengeTrack"')) {
+          return [
+            { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: null },
+            { id: 'track-design-id', name: 'Design', abbreviation: 'DES', legacyId: null },
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        }
+
+        if (query.includes('"ChallengeType"')) {
+          return [
+            { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+            { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+          ]
+        }
+
+        throw new Error(`Unexpected query: ${query}`)
+      }
+    }
+    await recalculateMemberStats.initializeLegacyLookupCache(fakeChallengesClient)
+
+    const rows = recalculateMemberStats.buildSupplementalHistoryRowsFromCompletedChallenges(
+      global.BigInt(123),
+      [],
+      new Map(),
+      [{
+        challengeId: 'mm-challenge',
+        createdAt: '2025-03-01T00:00:00.000Z',
+        challenge: {
+          id: 'mm-challenge',
+          trackId: 'track-dev-id',
+          typeId: 'type-mm-id',
+          status: 'COMPLETED',
+          endDate: '2025-03-02T00:00:00.000Z'
+        }
+      }],
+      {}
+    )
+
+    rows.should.have.length(1)
+    rows[0].trackId.should.equal('track-ds-id')
+    rows[0].typeId.should.equal('type-mm-id')
+  })
+
+  it('should chunk large history inserts to avoid raw query parameter limits', async () => {
+    const transactionCalls = []
+    const membersClient = {
+      memberStatsHistory: {
+        findMany: async () => []
+      },
+      $executeRawUnsafe: (sql, ...params) => ({ action: 'executeRawUnsafe', sql, params }),
+      $transaction: async (queries) => {
+        transactionCalls.push(queries)
+      }
+    }
+    const winnerRows = Array.from({ length: 1200 }, (value, index) => ({
+      challengeId: `challenge-${index}`,
+      createdAt: '2024-03-03T00:00:00.000Z',
+      canonicalChallengeId: `challenge-${index}`,
+      trackId: 'track-design-id',
+      typeId: 'type-ch-id',
+      status: 'COMPLETED',
+      endDate: '2024-03-04T00:00:00.000Z'
+    }))
+    const challengesClient = {
+      $queryRawUnsafe: async () => winnerRows
+    }
+
+    const result = await recalculateMemberStats.backfillHistoryFromCompletedChallenges(
+      membersClient,
+      challengesClient,
+      null,
+      global.BigInt(123),
+      { refreshMostRecent: false }
+    )
+
+    result.should.deep.equal({
+      upserted: 1200,
+      refreshed: 0
+    })
+    transactionCalls.should.have.length(1)
+    const rawQueries = transactionCalls[0].filter((query) => query.action === 'executeRawUnsafe')
+    rawQueries.should.have.length(2)
+    rawQueries.forEach((query) => {
+      query.sql.should.include('INSERT INTO "members"."memberStatsHistory"')
+      query.params.length.should.be.at.most(10000)
+    })
   })
 
   it('should refresh mostRecent flags in two phases so reruns overwrite stale winners', async () => {
@@ -607,6 +1044,94 @@ describe('recalculateMemberStats unit tests', () => {
     })
     results[0].mostRecentEventDate.toISOString().should.equal('2024-03-05T00:00:00.000Z')
     results[0].mostRecentSubmission.toISOString().should.equal('2024-03-03T10:00:00.000Z')
+  })
+
+  it('should ignore invalid or placeholder review challenge results', () => {
+    const reviewRows = [
+      {
+        challengeId: 'valid-challenge',
+        userId: '456',
+        submissionId: 'submission-1',
+        validSubmission: true,
+        placement: 1,
+        createdAt: '2024-03-01T10:00:00.000Z'
+      },
+      {
+        challengeId: 'invalid-challenge',
+        userId: '456',
+        submissionId: 'submission-2',
+        validSubmission: false,
+        placement: 1,
+        createdAt: '2024-03-02T10:00:00.000Z'
+      },
+      {
+        challengeId: 'missing-submission-challenge',
+        userId: '456',
+        submissionId: null,
+        validSubmission: true,
+        placement: 1,
+        createdAt: '2024-03-03T10:00:00.000Z'
+      },
+      {
+        challengeId: 'active-challenge',
+        userId: '456',
+        submissionId: 'submission-3',
+        validSubmission: true,
+        placement: 1,
+        createdAt: '2024-03-04T10:00:00.000Z'
+      }
+    ]
+    const challengeMetadataById = new Map([
+      ['valid-challenge', {
+        id: 'valid-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'COMPLETED',
+        endDate: '2024-03-02T00:00:00.000Z'
+      }],
+      ['invalid-challenge', {
+        id: 'invalid-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'COMPLETED',
+        endDate: '2024-03-03T00:00:00.000Z'
+      }],
+      ['missing-submission-challenge', {
+        id: 'missing-submission-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'COMPLETED',
+        endDate: '2024-03-04T00:00:00.000Z'
+      }],
+      ['active-challenge', {
+        id: 'active-challenge',
+        trackId: 'track-dev',
+        typeId: 'type-challenge',
+        status: 'ACTIVE',
+        endDate: '2024-03-05T00:00:00.000Z'
+      }]
+    ])
+
+    const aggregateRows = recalculateMemberStats.buildAggregatedStatsFromReviewResults(
+      reviewRows,
+      challengeMetadataById,
+      {}
+    )
+    const historyRows = recalculateMemberStats.buildSupplementalHistoryRowsFromCompletedChallenges(
+      global.BigInt(456),
+      reviewRows,
+      challengeMetadataById,
+      [],
+      {}
+    )
+
+    aggregateRows.should.have.length(1)
+    aggregateRows[0].challenges.should.equal(1)
+    aggregateRows[0].wins.should.equal(1)
+    aggregateRows[0].mostRecentEventDate.toISOString().should.equal('2024-03-02T00:00:00.000Z')
+
+    historyRows.should.have.length(1)
+    historyRows[0].challengeId.should.equal('valid-challenge')
   })
 
   it('should synchronize memberMaxRating from the highest current memberStats rating', async () => {

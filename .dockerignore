@@ -1,0 +1,12 @@
+.DS_Store
+.env
+.git
+.gitignore
+.idea
+.npmrc
+.vscode/
+coverage
+dist
+node_modules
+prisma/generated
+reports
