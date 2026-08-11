@@ -2259,11 +2259,12 @@ definitions:
         properties:
           skills:
             type: boolean
-          gigAvailability:
+          engagementAvailability:
             type: boolean
+          preferredRoles:
+            type: boolean
+            description: True when the member has selected at least one preferred role.
           bio:
-            type: boolean
-          profilePicture:
             type: boolean
           workHistory:
             type: boolean
@@ -2274,7 +2275,10 @@ definitions:
           skillsLastUpdateDate:
             type: date-time
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
-          gigAvailabilityLastUpdateDate:
+          engagementAvailabilityLastUpdateDate:
+            type: date-time
+            description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
+          preferredRolesLastUpdateDate:
             type: date-time
             description: 'ISO-8601 formatted date times (YYYY-MM-DDTHH:mm:ss.sssZ)'
           workHistoryLastUpdateDate:
