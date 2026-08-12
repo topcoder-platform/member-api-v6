@@ -82,6 +82,34 @@ function isEngagementAvailabilityComplete (member, openToWorkData) {
 }
 
 /**
+ * Determine whether the member has selected at least one preferred role.
+ * Prefers the top-level personalization.preferredRoles field (current model)
+ * and falls back to legacy openToWork.preferredRoles when the top-level key
+ * is absent.
+ * @param {Array} personalizationData personalization trait data entries
+ * @returns {Boolean} true when at least one preferred role is selected
+ */
+function hasPreferredRolesSelected (personalizationData) {
+  if (!Array.isArray(personalizationData) || personalizationData.length === 0) {
+    return false
+  }
+
+  const personalizationEntry = personalizationData.find(r =>
+    Object.prototype.hasOwnProperty.call(r, 'preferredRoles') ||
+    Object.prototype.hasOwnProperty.call(r, 'openToWork')
+  ) || personalizationData[0] || {}
+
+  let preferredRoles
+  if (Object.prototype.hasOwnProperty.call(personalizationEntry, 'preferredRoles')) {
+    preferredRoles = personalizationEntry.preferredRoles
+  } else {
+    preferredRoles = personalizationEntry.openToWork && personalizationEntry.openToWork.preferredRoles
+  }
+
+  return Array.isArray(preferredRoles) && preferredRoles.length > 0
+}
+
+/**
  * Resolve compact memberStats track/type UUIDs before deriving current
  * maxRating labels for member profile responses.
  * @param {Object} member member payload that may include compact memberStats rows
@@ -617,6 +645,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
   // data.verified = false
   data.skills = false
   data.engagementAvailability = false
+  data.preferredRoles = false
   data.bio = false
   data.workHistory = false
   data.education = false
@@ -626,6 +655,7 @@ async function getProfileCompleteness (currentUser, handle, query) {
 
   data.skillsLastUpdateDate = undefined
   data.engagementAvailabilityLastUpdateDate = undefined
+  data.preferredRolesLastUpdateDate = undefined
   data.workHistoryLastUpdateDate = undefined
   data.educationLastUpdateDate = undefined
   data.locationLastUpdateDate = undefined
@@ -645,14 +675,22 @@ async function getProfileCompleteness (currentUser, handle, query) {
       data.workHistoryLastUpdateDate = new Date(item.updatedAt).toISOString()
     }
 
-    if (item.traitId === 'personalization' && item.traits.data.length > 0 && !data.engagementAvailability) {
-      const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork')) || {}
-      const openToWorkData = openToWorkTrait.openToWork
+    if (item.traitId === 'personalization' && item.traits.data.length > 0) {
+      if (!data.engagementAvailability) {
+        const openToWorkTrait = item.traits.data.find(r => Object.keys(r).includes('openToWork')) || {}
+        const openToWorkData = openToWorkTrait.openToWork
 
-      if (isEngagementAvailabilityComplete(member, openToWorkData)) {
+        if (isEngagementAvailabilityComplete(member, openToWorkData)) {
+          completeItems += 1
+          data.engagementAvailability = true
+          data.engagementAvailabilityLastUpdateDate = new Date(item.updatedAt).toISOString()
+        }
+      }
+
+      if (!data.preferredRoles && hasPreferredRolesSelected(item.traits.data)) {
         completeItems += 1
-        data.engagementAvailability = true
-        data.engagementAvailabilityLastUpdateDate = new Date(item.updatedAt).toISOString()
+        data.preferredRoles = true
+        data.preferredRolesLastUpdateDate = new Date(item.updatedAt).toISOString()
       }
     }
   })
@@ -665,6 +703,9 @@ async function getProfileCompleteness (currentUser, handle, query) {
   }
   if (!data.engagementAvailability) {
     showToast.push('engagementAvailability')
+  }
+  if (!data.preferredRoles) {
+    showToast.push('preferredRoles')
   }
 
   // TODO: Do we use the short bio or the "description" field of the member object?
