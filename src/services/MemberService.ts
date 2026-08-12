@@ -905,8 +905,6 @@ async function updateMember (currentUser, handle, query, data) {
 
   // convert prisma data to response format
   prismaHelper.convertMember(result)
-  // send data to event bus
-  await helper.postBusEvent(constants.TOPICS.MemberUpdated, result)
   if (emailChanged) {
     // send email verification to old email
     await helper.postBusEvent(constants.TOPICS.EmailChanged, {
@@ -1078,7 +1076,6 @@ async function updateHandle (currentUser, handle, query, data) {
   }
 
   prismaHelper.convertMember(updatedMember)
-  await helper.postBusEvent(constants.TOPICS.MemberUpdated, updatedMember)
   return cleanMember(currentUser, updatedMember, selectFields)
 }
 
@@ -1142,7 +1139,6 @@ async function verifyEmail (currentUser, handle, query) {
     data: _.omit(member, ['maxRating', 'phones'])
   })
   prismaHelper.convertMember(result)
-  await helper.postBusEvent(constants.TOPICS.MemberUpdated, result)
   return { emailChangeCompleted, verifiedEmail }
 }
 
@@ -1221,8 +1217,6 @@ async function uploadPhoto (currentUser, handle, files) {
     }
   })
   prismaHelper.convertMember(result)
-  // post bus event
-  await helper.postBusEvent(constants.TOPICS.MemberUpdated, result)
   return { photoURL }
 }
 
@@ -1343,7 +1337,6 @@ async function deleteMember (currentUser, handle, data) {
   }
 
   prismaHelper.convertMember(updatedMember)
-  await helper.postBusEvent(constants.TOPICS.MemberUpdated, updatedMember)
 
   return {
     handle: deletedHandle,

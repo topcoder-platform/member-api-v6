@@ -54,6 +54,102 @@ describe('search service unit tests', () => {
     }
   })
 
+  it('searchMembers should accept qs decimal-string userIds without losing precision', async () => {
+    const prisma = prismaManager.getClient()
+    const originalMemberCount = prisma.member.count
+    let memberFilter
+
+    try {
+      prisma.member.count = async (filter) => {
+        memberFilter = filter
+        return 0
+      }
+
+      await service.searchMembers(
+        { isMachine: true },
+        {
+          userIds: ['100000013', '9223372036854775807'],
+          fields: 'handle,userId'
+        }
+      )
+
+      memberFilter.where.AND.should.deep.equal([
+        { userId: { in: ['100000013', '9223372036854775807'] } }
+      ])
+    } finally {
+      prisma.member.count = originalMemberCount
+    }
+  })
+
+  it('searchMembers should preserve an empty userIds array', async () => {
+    const prisma = prismaManager.getClient()
+    const originalMemberCount = prisma.member.count
+    let memberFilter
+
+    try {
+      prisma.member.count = async (filter) => {
+        memberFilter = filter
+        return 0
+      }
+
+      await service.searchMembers(
+        { isMachine: true },
+        {
+          userIds: [],
+          fields: 'handle,userId'
+        }
+      )
+
+      memberFilter.where.AND.should.deep.equal([])
+    } finally {
+      prisma.member.count = originalMemberCount
+    }
+  })
+
+  it('searchMembers should reject invalid userIds before querying Prisma', async () => {
+    const prisma = prismaManager.getClient()
+    const originalMemberCount = prisma.member.count
+    let memberCountCalled = false
+    let validationError
+
+    try {
+      prisma.member.count = async () => {
+        memberCountCalled = true
+        return 0
+      }
+
+      for (const userIds of [
+        ['TCConnCopilot'],
+        [Number.MAX_SAFE_INTEGER + 1],
+        ['9223372036854775808'],
+        ['']
+      ]) {
+        validationError = undefined
+
+        try {
+          await service.searchMembers(
+            { isMachine: true },
+            {
+              userIds,
+              fields: 'handle,userId'
+            }
+          )
+        } catch (err) {
+          validationError = err
+        }
+
+        should.exist(validationError)
+        validationError.isJoi.should.equal(true)
+        validationError.details[0].path.should.deep.equal(['query', 'userIds'])
+        validationError.details[0].type.should.equal('queryArray.items')
+      }
+
+      memberCountCalled.should.equal(false)
+    } finally {
+      prisma.member.count = originalMemberCount
+    }
+  })
+
   it('searchMembers should skip stats and skills hydration for explicit field-limited lookups', async () => {
     const prisma = prismaManager.getClient()
     const skillsPrisma = prismaManager.getSkillsClient()

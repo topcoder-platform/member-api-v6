@@ -9,7 +9,6 @@ const moment = require('moment')
 const helper = require('../common/helper')
 const logger = require('../common/logger')
 const errors = require('../common/errors')
-const constants = require('../../app-constants')
 const prisma = require('../common/prisma').getClient()
 const prismaManager = require('../common/prisma')
 const skillsPrisma = prismaManager.getSkillsClient()
@@ -479,22 +478,6 @@ async function createTraits (currentUser, handle, data) {
       data: prismaData
     })
   }
-  // send data to event bus
-  for (let item of data) {
-    const trait = { ...item }
-    trait.userId = helper.bigIntToNumber(member.userId)
-    trait.createdBy = Number(currentUser.userId || config.TC_WEBSERVICE_USERID)
-    if (trait.traits) {
-      trait.traits = { 'traitId': trait.traitId, 'data': trait.traits.data }
-    } else {
-      trait.traits = { 'traitId': trait.traitId, 'data': [] }
-    }
-    // convert date time
-    trait.createdAt = new Date().getTime()
-    // post bus event
-    await helper.postBusEvent(constants.TOPICS.MemberTraitCreated, trait)
-  }
-
   // merge result
   existingTraits = _.concat(existingTraits, data)
 
@@ -575,24 +558,6 @@ async function updateTraits (currentUser, handle, data) {
     await prisma.memberTraits.create({ data: createData })
   }
 
-  // post bus events: created for new traits, updated for existing ones
-  const existingIds = new Set((existingTraits || []).map(t => t.traitId))
-  for (let r of result) {
-    if (!existingIds.has(r.traitId)) {
-      const trait = { ...r }
-      trait.userId = helper.bigIntToNumber(member.userId)
-      trait.createdBy = Number(currentUser.userId || config.TC_WEBSERVICE_USERID)
-      if (trait.traits) {
-        trait.traits = { traitId: trait.traitId, data: trait.traits.data }
-      } else {
-        trait.traits = { traitId: trait.traitId, data: [] }
-      }
-      trait.createdAt = new Date().getTime()
-      await helper.postBusEvent(constants.TOPICS.MemberTraitCreated, trait)
-    } else {
-      await helper.postBusEvent(constants.TOPICS.MemberTraitUpdated, r)
-    }
-  }
   return result
 }
 
@@ -632,26 +597,10 @@ async function removeTraits (currentUser, handle, query) {
       })))
     })
   }
-  // remove existingTraits data
-  const memberProfileTraitIds = []
-  _.forEach(existingTraits, t => {
-    if (!traitIds || _.includes(traitIds, t.traitId)) {
-      memberProfileTraitIds.push(t.traitId)
-    }
-  })
-
+  // remove deleted traits from the data used to recalculate skill-score deductions
   existingTraits = _.filter(existingTraits, t => !traitIds.includes(t.traitId))
 
   await updateSkillScoreDeduction(currentUser, member, existingTraits)
-  // post bus event
-  if (memberProfileTraitIds.length > 0) {
-    await helper.postBusEvent(constants.TOPICS.MemberTraitDeleted, {
-      userId: helper.bigIntToNumber(member.userId),
-      memberProfileTraitIds,
-      updatedAt: new Date(),
-      updatedBy: currentUser.userId || currentUser.sub
-    })
-  }
 }
 
 removeTraits.schema = {
