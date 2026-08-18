@@ -11,14 +11,7 @@ const EVENT_ORIGINATOR = 'topcoder-member-api'
 const EVENT_MIME_TYPE = 'application/json'
 
 const TOPICS = {
-  MemberCreated: 'member.action.profile.create',
-  MemberUpdated: 'member.action.profile.update',
-  EmailChanged: 'member.action.email.profile.emailchange.verification',
-  MemberTraitCreated: 'member.action.profile.trait.create',
-  MemberTraitUpdated: 'member.action.profile.trait.update',
-  MemberTraitDeleted: 'member.action.profile.trait.delete',
-  MemberSkillsCreated: 'member.action.profile.skills.create',
-  MemberSkillsUpdated: 'member.action.profile.skills.update'
+  EmailChanged: 'member.action.email.profile.emailchange.verification'
 }
 
 const MAMBO_GET_REWARDS_ALLOWED_FIELDS = [

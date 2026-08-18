@@ -64,33 +64,56 @@ const MEMBER_SELECT_EXCLUDED_FIELDS = ['addresses', 'maxRating', 'skills', 'stat
 const BULK_IDENTIFIER_MAX_LENGTH = 256
 const BULK_EMAIL_REGEX = /^[+_A-Za-z0-9-]+(\.[+_A-Za-z0-9-]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9]+)*(\.[A-Za-z]{2,}$)/
 const BULK_HANDLE_REGEX = /^[-A-Za-z0-9_.`{}[\]]+$/
+const MAX_USER_ID = BigInt('9223372036854775807')
+const USER_ID_QUERY_ITEM_SCHEMA = Joi.alternatives().try(
+  Joi.string().pattern(/^\d+$/).custom((value, helpers) => (
+    BigInt(value) <= MAX_USER_ID ? value : helpers.error('string.userIdRange')
+  )).messages({
+    'string.userIdRange': '{{#label}} must not exceed the maximum 64-bit user ID'
+  }),
+  Joi.number().integer().min(0).strict()
+)
 
 /**
  * Accept arrays parsed by `qs` as well as the JSON-array query format documented
  * by this API. Joi 14 coerced JSON array strings automatically, while Joi 18
  * no longer coerces them.
+ * @param {Object} [itemSchema] optional Joi schema used to validate and normalize items
  * @returns {Object} Joi schema for a query-string array
  */
-function queryArraySchema () {
-  return Joi.any().custom((value, helpers) => {
-    if (_.isArray(value)) {
-      return value
-    }
+function queryArraySchema (itemSchema = null) {
+  const itemArraySchema = itemSchema && Joi.array().items(itemSchema)
 
-    if (_.isString(value)) {
+  return Joi.any().custom((value, helpers) => {
+    let parsed = value
+
+    if (_.isArray(value)) {
+      parsed = value
+    } else if (_.isString(value)) {
       try {
-        const parsed = JSON.parse(value)
-        if (_.isArray(parsed)) {
-          return parsed
-        }
+        parsed = JSON.parse(value)
       } catch (err) {
         // Fall through to the same validation error as a non-array value.
       }
     }
 
-    return helpers.error('array.base')
+    if (!_.isArray(parsed)) {
+      return helpers.error('array.base')
+    }
+
+    if (!itemSchema) {
+      return parsed
+    }
+
+    const validation = itemArraySchema.validate(parsed, { abortEarly: false })
+    if (validation.error) {
+      return helpers.error('queryArray.items', { details: validation.error.message })
+    }
+
+    return validation.value
   }).messages({
-    'array.base': '{{#label}} must be an array'
+    'array.base': '{{#label}} must be an array',
+    'queryArray.items': '{{#label}} contains invalid values: {{#details}}'
   })
 }
 
@@ -442,7 +465,7 @@ searchMembers.schema = {
     handles: queryArraySchema(),
     email: Joi.string(),
     userId: Joi.number(),
-    userIds: queryArraySchema(),
+    userIds: queryArraySchema(USER_ID_QUERY_ITEM_SCHEMA),
     term: Joi.string(),
     fields: Joi.string(),
     includeStats: Joi.string(),

@@ -9,8 +9,9 @@
 - PostgreSQL
 - Docker and Docker Compose
 
-The service does not consume Kafka messages. It continues to publish events through
-the Bus API wrapper, so the existing Bus API and Auth0 configuration remains unchanged.
+The service does not consume Kafka messages. It uses the Bus API wrapper only for
+email-change verification events; profile and trait mutations do not publish events.
+The existing Bus API and Auth0 configuration remains required for email verification.
 
 ## Install, Build, and Run
 

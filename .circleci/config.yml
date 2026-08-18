@@ -59,8 +59,7 @@ workflows:
           branches:
             only:
             - develop
-            - PM-4482
-            - security_july_2026
+            - PM-5460
             
     # Production builds are exectuted only on tagged commits to the
     # master branch.
