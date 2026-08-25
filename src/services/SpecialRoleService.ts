@@ -17,6 +17,9 @@ const { ChallengesPrisma } = prismaManager
 const COPILOT_ROLE = 'copilot'
 const REVIEWER_ROLE = 'reviewer'
 const SPECIAL_ROLES = [COPILOT_ROLE, REVIEWER_ROLE]
+const FULFILLMENT_EXCLUDED_STATUSES = new Set([
+  'CANCELLED_CLIENT_REQUEST'
+])
 
 const REVIEWER_ROLE_NAMES_LOWER = [
   'iterative reviewer',
@@ -107,12 +110,14 @@ function getProfileTrackKey (track) {
 
 /**
  * Calculate Copilot fulfillment from terminal outcome counts. The percentage
- * is completed divided by completed plus every `CANCELLED`/`CANCELLED_*`
- * status, rounded to two decimal places on a 0-100 scale. It returns zero when
- * no terminal challenge exists and does not raise.
+ * is completed divided by completed plus qualifying `CANCELLED`/
+ * `CANCELLED_*` statuses, rounded to two decimal places on a 0-100 scale.
+ * Client-request cancellations are excluded because they are not Copilot
+ * failures. It returns zero when no included terminal challenge exists and
+ * does not raise.
  * @param {Number} completed number of completed public Copilot challenges
- * @param {Number} cancelled number of cancelled public Copilot challenges
- * @returns {Object} completed, cancelled, terminal total, and percentage rate
+ * @param {Number} cancelled number of included cancelled public Copilot challenges
+ * @returns {Object} completed, cancelled, included terminal total, and rate
  */
 function buildFulfillment (completed, cancelled) {
   const total = completed + cancelled
@@ -266,6 +271,7 @@ async function loadVisibleCopilotMetrics (userId) {
   let cancelled = 0
   _.forEach(rows, row => {
     const challengeCount = Number(row.challengeCount) || 0
+    const status = String(row.status || '')
     const trackKey = getProfileTrackKey({
       track: row.track,
       name: row.trackName,
@@ -274,9 +280,12 @@ async function loadVisibleCopilotMetrics (userId) {
     if (trackKey && challengeCount > 0) {
       trackCounts[trackKey] = (trackCounts[trackKey] || 0) + challengeCount
     }
-    if (row.status === 'COMPLETED') {
+    if (status === 'COMPLETED') {
       completed += challengeCount
-    } else if (String(row.status || '').startsWith('CANCELLED')) {
+    } else if (
+      status.startsWith('CANCELLED') &&
+      !FULFILLMENT_EXCLUDED_STATUSES.has(status)
+    ) {
       cancelled += challengeCount
     }
   })

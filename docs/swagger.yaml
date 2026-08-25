@@ -1709,10 +1709,12 @@ paths:
 
         Copilot `trackCounts` includes only non-zero Development, Design,
         Quality Assurance, and Data Science keys. Fulfillment is
-        `COMPLETED / (COMPLETED + CANCELLED*) * 100`; `CANCELLED` and every
-        `CANCELLED_*` status count as cancelled, non-terminal statuses are
-        excluded, a zero denominator returns 0, and the percentage is rounded
-        to two decimal places on a 0-100 scale.
+        `COMPLETED / (COMPLETED + qualifying CANCELLED*) * 100`.
+        `CANCELLED_CLIENT_REQUEST` remains in challenge history and track counts
+        but is excluded from fulfillment because it is not a Copilot failure.
+        Other `CANCELLED` and `CANCELLED_*` statuses count as cancelled,
+        non-terminal statuses are excluded, a zero denominator returns 0, and
+        the percentage is rounded to two decimal places on a 0-100 scale.
 
         Cross-schema special-role queries require the `challenges` and `resources`
         schemas to be co-located in the challenge database, as in the supported
@@ -2842,13 +2844,14 @@ definitions:
         format: int32
         minimum: 0
         description: >
-          Anonymous-visible Copilot challenges in CANCELLED or any CANCELLED_*
-          status.
+          Anonymous-visible Copilot challenges in CANCELLED or CANCELLED_*
+          statuses included as Copilot failures. CANCELLED_CLIENT_REQUEST is
+          excluded.
       total:
         type: integer
         format: int32
         minimum: 0
-        description: Completed plus cancelled terminal challenges.
+        description: Completed plus included cancelled terminal challenges.
       rate:
         type: number
         format: double
@@ -2856,7 +2859,7 @@ definitions:
         maximum: 100
         description: >
           Completed percentage on a 0-100 scale, rounded to two decimals; zero
-          when there are no terminal outcomes.
+          when there are no included terminal outcomes.
   SpecialRoleChallengeDimension:
     type: object
     required:

@@ -297,12 +297,24 @@ describe('special role service unit tests', () => {
     }
   })
 
-  it('getMemberRoleChallenges should return all Copilot rows and aggregate visible terminal metrics', async () => {
+  it('getMemberRoleChallenges should exclude client-request cancellations only from Copilot fulfillment', async () => {
     const { service, restore } = loadSpecialRoleService({
       onResourceQuery: async () => [],
       onChallengeQuery: async (sql) => {
         if (sql.includes('challengeType."name" AS "typeName"')) {
           return [
+            {
+              id: 'copilot-4',
+              name: 'Client-Cancelled Copilot Challenge',
+              status: 'CANCELLED_CLIENT_REQUEST',
+              startDate: new Date('2024-04-01T00:00:00Z'),
+              endDate: new Date('2024-04-02T00:00:00Z'),
+              resourceCreatedAt: new Date('2024-04-01T12:00:00Z'),
+              trackId: 'data-science',
+              trackName: 'Data Science',
+              typeId: 'challenge',
+              typeName: 'Challenge'
+            },
             {
               id: 'copilot-3',
               name: 'Newest Copilot Challenge',
@@ -363,6 +375,13 @@ describe('special role service unit tests', () => {
               trackName: 'Design',
               trackAbbreviation: 'DES',
               challengeCount: 1
+            },
+            {
+              status: 'CANCELLED_CLIENT_REQUEST',
+              track: 'DATA_SCIENCE',
+              trackName: 'Data Science',
+              trackAbbreviation: 'DS',
+              challengeCount: 1
             }
           ]
         }
@@ -373,21 +392,30 @@ describe('special role service unit tests', () => {
     try {
       const result = await service.getMemberRoleChallenges('devtest1400', 'copilot')
 
-      result.total.should.equal(3)
-      result.trackCounts.should.deep.equal({ DEVELOPMENT: 2, DESIGN: 1 })
+      result.total.should.equal(4)
+      result.trackCounts.should.deep.equal({
+        DEVELOPMENT: 2,
+        DESIGN: 1,
+        DATA_SCIENCE: 1
+      })
       result.fulfillment.should.deep.equal({
         completed: 1,
         cancelled: 1,
         total: 2,
         rate: 50
       })
-      result.challenges.should.have.length(3)
+      result.challenges.should.have.length(4)
       result.challenges.map(challenge => challenge.id).should.deep.equal([
+        'copilot-4',
         'copilot-3',
         'copilot-2',
         'copilot-1'
       ])
-      result.challenges[1].should.deep.equal({
+      result.challenges[0].should.include({
+        id: 'copilot-4',
+        status: 'CANCELLED_CLIENT_REQUEST'
+      })
+      result.challenges[2].should.deep.equal({
         id: 'copilot-2',
         name: 'Second Copilot Challenge',
         status: 'CANCELLED_ZERO_SUBMISSIONS',
