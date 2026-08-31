@@ -15,6 +15,7 @@ const skillsPrisma = prismaManager.getSkillsClient()
 const prismaHelper = require('../common/prismaHelper')
 const reviewDb = require('../common/reviewDb')
 const { resolveChallengeResultRelation } = require('../common/reviewDbHelper')
+const { decodeBasicHtmlEntitiesOnce } = require('../common/htmlUtils')
 const { rerateDevTrack } = require('../ratings/developRatingEngine')
 const {
   RATING_METADATA_SELECT,
@@ -165,21 +166,6 @@ const GENERIC_LEGACY_PAGE_TAG_NAMES = new Set([
   'COPILOT'
 ])
 
-function decodeBasicHtmlEntities (value) {
-  if (_.isNil(value)) {
-    return null
-  }
-
-  return String(value)
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, '\'')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .trim()
-}
-
 function safeDecodeUriComponent (value) {
   if (_.isNil(value)) {
     return null
@@ -238,7 +224,7 @@ function parseLegacyChallengePageSummary (html, challengeId) {
       .slice(searchTagIndex + searchTagNeedle.length)
       .split('"', 1)[0]
       .split('&', 1)[0]
-    const decodedTag = decodeBasicHtmlEntities(safeDecodeUriComponent(encodedTag))
+    const decodedTag = decodeBasicHtmlEntitiesOnce(safeDecodeUriComponent(encodedTag))
     if (decodedTag) {
       searchTags.push(decodedTag)
     }
@@ -247,7 +233,7 @@ function parseLegacyChallengePageSummary (html, challengeId) {
 
   return {
     challengeId: normalizedChallengeId,
-    title: stripLegacyChallengeTitlePrefix(decodeBasicHtmlEntities(title)),
+    title: stripLegacyChallengeTitlePrefix(decodeBasicHtmlEntitiesOnce(title)),
     searchTags: _.uniq(searchTags)
   }
 }
