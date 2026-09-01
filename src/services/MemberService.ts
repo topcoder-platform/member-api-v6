@@ -23,6 +23,7 @@ const fileTypeChecker = require('file-type-checker')
 const sharp = require('sharp')
 const { bufferContainsScript } = require('../common/image')
 const { htmlToText } = require('../common/htmlUtils')
+const { generateSecureRandomString } = require('../common/secureRandom')
 const { buildProfileActivityStatsFromRequests } = require('../common/profileStats')
 const countryCallingCodes = require('country-calling-code')
 const prismaHelper = require('../common/prismaHelper')
@@ -1265,7 +1266,10 @@ async function uploadPhoto (currentUser, handle, files) {
  * Delete member profile data and scrub personal details.
  * @param {Object} currentUser the user who performs operation
  * @param {String} handle the member handle
- * @returns {Object} the deletion result
+ * @param {Object} data deletion request containing the required ticketUrl
+ * @returns {Object} the anonymized handle and email address
+ * @throws {errors.ForbiddenError} when the caller is neither an administrator nor a machine account
+ * @throws {errors.BadRequestError} when ticketUrl is missing
  */
 async function deleteMember (currentUser, handle, data) {
   if (!currentUser || (!currentUser.isMachine && !helper.hasAdminRole(currentUser))) {
@@ -1279,7 +1283,7 @@ async function deleteMember (currentUser, handle, data) {
   const member = await helper.getMemberByHandle(handle)
   const originalEmail = member.email
   const operatorId = currentUser.userId || currentUser.sub || config.TC_WEBSERVICE_USERID
-  const nanoId = generateNanoId()
+  const nanoId = generateSecureRandomString()
   const deletedHandle = `DELETED_USER_${nanoId}`
   const deletedEmail = `${nanoId}@topcoder.com`
   const identityUserId = helper.bigIntToNumber(member.userId)
@@ -1383,16 +1387,6 @@ async function deleteMember (currentUser, handle, data) {
     handle: deletedHandle,
     email: deletedEmail
   }
-}
-
-function generateNanoId (size = 21) {
-  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-  const bytes = crypto.randomBytes(size)
-  let id = ''
-  for (let i = 0; i < size; i += 1) {
-    id += alphabet[bytes[i] % alphabet.length]
-  }
-  return id
 }
 
 async function updateVanillaHandle (oldHandle, newHandle, pool) {

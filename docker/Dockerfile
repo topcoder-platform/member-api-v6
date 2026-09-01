@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # Keep a Debian/glibc build because upstream generated Prisma clients ship Debian engines.
-FROM node:26.5.0-bookworm-slim AS build-base
+FROM node:26.5.1-bookworm-slim AS build-base
 
 WORKDIR /member-api-v6
 RUN apt-get update \
@@ -34,12 +34,13 @@ RUN sh docker/prune-internal-api-packages.sh \
 
 # The pinned Wolfi/glibc runtime supports the checked-in Debian/OpenSSL 3 Prisma
 # engines without shipping a shell, package manager, or build toolchain.
-FROM cgr.dev/chainguard/node:latest@sha256:c002402b355201714dfbeb3b1a7ca99152cccced4b334496db2442a3a9bf4883 AS runtime
+FROM cgr.dev/chainguard/node:latest@sha256:f819ce9bc54ff2a771a6849ec8453aaab9bb697873f3f6b91039ed07a3626748 AS runtime
 
-# The upstream minimal Node image currently includes npm launchers. Remove them
-# and their package payload with Node itself; this image intentionally has no shell.
+# The pinned runtime includes maintenance utilities that the service does not use.
+# Remove every executable except Node, plus the global npm/node-gyp payload, so
+# the final image has no shell, package manager, or build toolchain.
 USER 0
-RUN ["/usr/bin/node", "-e", "const fs=require('node:fs'); for (const target of ['/usr/bin/npm','/usr/bin/npx','/usr/bin/corepack','/usr/lib/node_modules/npm','/usr/lib/node_modules/corepack']) fs.rmSync(target,{force:true,recursive:true})"]
+RUN ["/usr/bin/node", "-e", "const fs=require('node:fs'); for (const entry of fs.readdirSync('/usr/bin')) if (entry !== 'node') fs.rmSync('/usr/bin/'+entry,{force:true,recursive:true}); fs.rmSync('/usr/lib/node_modules',{force:true,recursive:true})"]
 
 WORKDIR /member-api-v6
 
