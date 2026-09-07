@@ -132,6 +132,9 @@ function buildFulfillment (completed, cancelled) {
 /**
  * Build the reusable SQL common-table expressions for one role's anonymous-
  * visible challenges. Resource assignments are de-duplicated per challenge.
+ * Copilot summaries, history, and metrics include only completed or cancelled
+ * challenges; Reviewer queries retain all statuses. Client-request cancellations
+ * remain visible but are excluded separately when calculating fulfillment.
  * Visibility matches challenge-api's anonymous baseline: no groups, no user
  * whitelist rows, and no tasks. This helper only constructs SQL and does not
  * execute or raise database errors.
@@ -168,6 +171,12 @@ function buildVisibleRoleChallengesCte (userId, role) {
         ON challenge."id" = roleAssignment."challengeId"
       WHERE cardinality(challenge."groups") = 0
         AND challenge."taskIsTask" = FALSE
+        ${role === COPILOT_ROLE
+          ? ChallengesPrisma.sql`AND (
+              challenge."status" = 'COMPLETED'
+              OR challenge."status"::text LIKE 'CANCELLED%'
+            )`
+          : ChallengesPrisma.empty}
         AND NOT EXISTS (
           SELECT 1
           FROM challenges."ChallengeUserWhitelist" AS whitelist
@@ -180,7 +189,8 @@ function buildVisibleRoleChallengesCte (userId, role) {
 /**
  * Count distinct anonymous-visible challenges for one role. The profile
  * summary uses this count so it matches the anonymous-visible detail set and
- * never discloses restricted challenge assignments.
+ * never discloses restricted challenge assignments. Copilot counts include
+ * only completed or cancelled challenges.
  * @param {BigInt|Number|String} userId member user ID from the members database
  * @param {String} role `copilot` or `reviewer`
  * @returns {Promise<Number>} visible distinct challenge count
@@ -198,8 +208,9 @@ async function countVisibleRoleChallenges (userId, role) {
 }
 
 /**
- * Load every anonymous-visible challenge detail. PostgreSQL
- * orders lifecycle end date, then start/creation fallback, newest first; latest
+ * Load every anonymous-visible challenge detail, limited to completed or
+ * cancelled challenges for Copilots. PostgreSQL orders lifecycle end date,
+ * then start/creation fallback, newest first; latest
  * Resource assignment and challenge ID are deterministic tie-breakers. The
  * Resource timestamp is assignment time, not a literal review-completion date.
  * @param {BigInt|Number|String} userId member user ID from the members database
@@ -240,8 +251,8 @@ async function loadVisibleRoleChallenges (userId, role) {
 
 /**
  * Aggregate Copilot tracks and terminal statuses entirely in PostgreSQL over
- * the anonymous-visible challenge set. Only the clicked Copilot detail route
- * invokes this query; zero-count tracks are naturally omitted from the result.
+ * the anonymous-visible completed or cancelled challenge set. Only the Copilot
+ * detail route invokes this query; zero-count tracks are omitted from the result.
  * @param {BigInt|Number|String} userId member user ID from the members database
  * @returns {Promise<Object>} non-zero track counts and fulfillment statistics
  * @throws {Error} propagates cross-schema PostgreSQL query failures
@@ -338,7 +349,8 @@ function formatChallenge (challenge) {
  * Get public Copilot and Reviewer badge counts for a member profile. The
  * summary reuses the detail view's anonymous-visible challenge set so its
  * counts match the role details. Roles with no visible challenges are omitted,
- * and challenges with multiple reviewer assignments count once.
+ * and challenges with multiple reviewer assignments count once. Copilot counts
+ * exclude drafts and other non-terminal challenges.
  * @param {String} handle member handle resolved through the members table
  * @returns {Promise<Object>} optional count-only Copilot/Reviewer summaries
  * @throws {NotFoundError} when the member handle does not exist
@@ -372,8 +384,9 @@ getMemberRoleStats.schema = {
 
 /**
  * Get every newest-first anonymous-visible Copilot or Reviewer challenge for a
- * member. Copilot responses also include public-set track counts and terminal
- * fulfillment. Details never return restricted challenge IDs.
+ * member. Copilot history and track counts include only completed or cancelled
+ * challenges, with client-request cancellations excluded from fulfillment.
+ * Details never return restricted challenge IDs.
  * @param {String} handle member handle resolved through the members table
  * @param {String} role `copilot` or `reviewer`
  * @returns {Promise<Object>} complete challenge list and aggregate role metrics

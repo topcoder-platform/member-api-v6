@@ -1656,8 +1656,11 @@ paths:
         Reviewer, Primary Reviewer, Reviewer, Failure Reviewer, Final Reviewer,
         Aggregator, Stress Reviewer, Accuracy Reviewer, Primary Screener,
         Checkpoint Screener, and Checkpoint Reviewer. Copilot assignments use
-        the Copilot resource role. The summary does not load challenge names or
-        Copilot track/fulfillment details.
+        the Copilot resource role and count only COMPLETED, CANCELLED, or
+        CANCELLED_* challenges, including client-request cancellations. Drafts
+        and other non-terminal challenges are excluded from Copilot counts;
+        Reviewer counts have no status restriction. The summary does not load
+        challenge names or Copilot track/fulfillment details.
 
         Authorization:
           - Public: Anonymous callers may retrieve the count-only summary.
@@ -1706,6 +1709,11 @@ paths:
         challenges visible to an anonymous Challenge API caller: challenges have
         no groups, no user-whitelist rows, and are not tasks. Restricted
         challenge IDs and names are never returned.
+
+        Copilot history, detail totals, and track counts include only COMPLETED,
+        CANCELLED, or CANCELLED_* challenges. Drafts and other non-terminal
+        challenges, including active challenges in post mortem, are excluded.
+        Reviewer history and totals have no status restriction.
 
         Copilot `trackCounts` includes only non-zero Development, Design,
         Quality Assurance, and Data Science keys. Fulfillment is
@@ -2803,12 +2811,15 @@ definitions:
         type: integer
         format: int32
         minimum: 1
-        description: Anonymous-visible distinct challenge count for this role family.
+        description: >
+          Anonymous-visible distinct challenge count for this role family.
+          Copilot counts include only completed or cancelled challenges.
   SpecialRoleTrackCounts:
     type: object
     description: >
-      Non-zero Copilot challenge counts by challenge track. A zero-count track
-      is omitted.
+      Non-zero Copilot challenge counts by challenge track, including only
+      completed or cancelled challenges. Client-request cancellations are
+      included. A zero-count track is omitted.
     properties:
       DEVELOPMENT:
         type: integer
@@ -2919,7 +2930,9 @@ definitions:
         type: integer
         format: int32
         minimum: 0
-        description: Total anonymous-visible distinct challenges for this role.
+        description: >
+          Total anonymous-visible distinct challenges for this role. Copilot
+          totals include only completed or cancelled challenges.
       trackCounts:
         description: Present only for Copilot details.
         $ref: '#/definitions/SpecialRoleTrackCounts'
