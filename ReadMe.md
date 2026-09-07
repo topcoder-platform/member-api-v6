@@ -26,6 +26,30 @@ pnpm start
 For development with TypeScript watch mode, use `pnpm start:dev`. Production runs the
 compiled NestJS entrypoint at `dist/main.js`.
 
+## Copilot History Regression Tests
+
+Copilot profile summaries, challenge history, and track totals include only
+completed or cancelled challenges. Fulfillment is completed challenges divided
+by completed plus cancelled challenges, excluding client-request cancellations
+from the denominator. Client-request cancellations remain visible in history.
+Drafts and other non-terminal challenges, including active challenges in post
+mortem, are excluded from all Copilot counts. Reviewer status handling is unchanged.
+
+The PostgreSQL regression suite executes the service's real SQL against minimal
+fixtures in an empty test database. It verifies the PM-5966 clarification example,
+all cancellation types, empty fulfillment denominators, visibility, and Reviewer
+behavior. Both schemas and all fixtures are created in a transaction and rolled
+back afterward; setup fails if either schema already exists.
+
+```bash
+nvm use
+SPECIAL_ROLE_TEST_DB_URL=postgresql://user:password@localhost:5432/member_test \
+  pnpm exec mocha --require ts-node/register/transpile-only test/integration/SpecialRoleService.test.js
+```
+
+The suite is skipped when `SPECIAL_ROLE_TEST_DB_URL` is unset. The existing
+isolated service tests remain available through `pnpm test`.
+
 ## Database Setup
 
 Please setup PostgreSQL first. If you are using docker, you can run:

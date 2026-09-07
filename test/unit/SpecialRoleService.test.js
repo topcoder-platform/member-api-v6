@@ -79,10 +79,11 @@ function renderSqlValue (value) {
  * Create the subset of Prisma's parameterized SQL helper used by the service.
  * It preserves interpolations in readable text for assertions and does not
  * connect to a database.
- * @returns {Object} `sql` tagged-template and `join` test helpers
+ * @returns {Object} `sql`, `join`, and `empty` test helpers
  */
 function createPrismaSqlStub () {
   return {
+    empty: { __sqlText: '' },
     sql: (strings, ...values) => ({
       __sqlText: strings.reduce((text, part, index) => (
         text + part + (index < values.length ? renderSqlValue(values[index]) : '')
@@ -317,8 +318,8 @@ describe('special role service unit tests', () => {
             },
             {
               id: 'copilot-3',
-              name: 'Newest Copilot Challenge',
-              status: 'ACTIVE',
+              name: 'Failed Review Copilot Challenge',
+              status: 'CANCELLED_FAILED_REVIEW',
               startDate: new Date('2024-03-01T00:00:00Z'),
               endDate: null,
               resourceCreatedAt: new Date('2024-03-02T00:00:00Z'),
@@ -370,7 +371,7 @@ describe('special role service unit tests', () => {
               challengeCount: 1
             },
             {
-              status: 'ACTIVE',
+              status: 'CANCELLED_FAILED_REVIEW',
               track: 'DESIGN',
               trackName: 'Design',
               trackAbbreviation: 'DES',
@@ -400,9 +401,9 @@ describe('special role service unit tests', () => {
       })
       result.fulfillment.should.deep.equal({
         completed: 1,
-        cancelled: 1,
-        total: 2,
-        rate: 50
+        cancelled: 2,
+        total: 3,
+        rate: 33.33
       })
       result.challenges.should.have.length(4)
       result.challenges.map(challenge => challenge.id).should.deep.equal([
