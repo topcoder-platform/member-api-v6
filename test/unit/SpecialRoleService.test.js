@@ -79,10 +79,11 @@ function renderSqlValue (value) {
  * Create the subset of Prisma's parameterized SQL helper used by the service.
  * It preserves interpolations in readable text for assertions and does not
  * connect to a database.
- * @returns {Object} `sql` tagged-template and `join` test helpers
+ * @returns {Object} `sql`, `join`, and `empty` test helpers
  */
 function createPrismaSqlStub () {
   return {
+    empty: { __sqlText: '' },
     sql: (strings, ...values) => ({
       __sqlText: strings.reduce((text, part, index) => (
         text + part + (index < values.length ? renderSqlValue(values[index]) : '')
@@ -297,16 +298,28 @@ describe('special role service unit tests', () => {
     }
   })
 
-  it('getMemberRoleChallenges should return all Copilot rows and aggregate visible terminal metrics', async () => {
+  it('getMemberRoleChallenges should exclude client-request cancellations only from Copilot fulfillment', async () => {
     const { service, restore } = loadSpecialRoleService({
       onResourceQuery: async () => [],
       onChallengeQuery: async (sql) => {
         if (sql.includes('challengeType."name" AS "typeName"')) {
           return [
             {
+              id: 'copilot-4',
+              name: 'Client-Cancelled Copilot Challenge',
+              status: 'CANCELLED_CLIENT_REQUEST',
+              startDate: new Date('2024-04-01T00:00:00Z'),
+              endDate: new Date('2024-04-02T00:00:00Z'),
+              resourceCreatedAt: new Date('2024-04-01T12:00:00Z'),
+              trackId: 'data-science',
+              trackName: 'Data Science',
+              typeId: 'challenge',
+              typeName: 'Challenge'
+            },
+            {
               id: 'copilot-3',
-              name: 'Newest Copilot Challenge',
-              status: 'ACTIVE',
+              name: 'Failed Review Copilot Challenge',
+              status: 'CANCELLED_FAILED_REVIEW',
               startDate: new Date('2024-03-01T00:00:00Z'),
               endDate: null,
               resourceCreatedAt: new Date('2024-03-02T00:00:00Z'),
@@ -358,10 +371,17 @@ describe('special role service unit tests', () => {
               challengeCount: 1
             },
             {
-              status: 'ACTIVE',
+              status: 'CANCELLED_FAILED_REVIEW',
               track: 'DESIGN',
               trackName: 'Design',
               trackAbbreviation: 'DES',
+              challengeCount: 1
+            },
+            {
+              status: 'CANCELLED_CLIENT_REQUEST',
+              track: 'DATA_SCIENCE',
+              trackName: 'Data Science',
+              trackAbbreviation: 'DS',
               challengeCount: 1
             }
           ]
@@ -373,21 +393,30 @@ describe('special role service unit tests', () => {
     try {
       const result = await service.getMemberRoleChallenges('devtest1400', 'copilot')
 
-      result.total.should.equal(3)
-      result.trackCounts.should.deep.equal({ DEVELOPMENT: 2, DESIGN: 1 })
+      result.total.should.equal(4)
+      result.trackCounts.should.deep.equal({
+        DEVELOPMENT: 2,
+        DESIGN: 1,
+        DATA_SCIENCE: 1
+      })
       result.fulfillment.should.deep.equal({
         completed: 1,
-        cancelled: 1,
-        total: 2,
-        rate: 50
+        cancelled: 2,
+        total: 3,
+        rate: 33.33
       })
-      result.challenges.should.have.length(3)
+      result.challenges.should.have.length(4)
       result.challenges.map(challenge => challenge.id).should.deep.equal([
+        'copilot-4',
         'copilot-3',
         'copilot-2',
         'copilot-1'
       ])
-      result.challenges[1].should.deep.equal({
+      result.challenges[0].should.include({
+        id: 'copilot-4',
+        status: 'CANCELLED_CLIENT_REQUEST'
+      })
+      result.challenges[2].should.deep.equal({
         id: 'copilot-2',
         name: 'Second Copilot Challenge',
         status: 'CANCELLED_ZERO_SUBMISSIONS',
