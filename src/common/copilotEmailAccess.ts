@@ -14,12 +14,21 @@ function hasCopilotRole (currentUser) {
   return helper.checkIfExists(['copilot'], currentUser.roles)
 }
 
+/**
+ * Check whether the copilot challenge-sharing email restriction applies to the caller.
+ * Used by MemberService.getMember and SearchService to decide whether member emails
+ * must be filtered down to members who share a challenge with the copilot.
+ * @param {Object} currentUser the authenticated user or M2M caller
+ * @returns {Boolean} true only for copilots without a sensitive data role (admin or Talent Manager)
+ */
 function shouldLimitCopilotEmailAccess (currentUser) {
   if (!currentUser || currentUser.isMachine) {
     return false
   }
 
-  if (helper.hasAdminRole(currentUser)) {
+  // Admins and Talent Managers can already see every member email, so an extra
+  // copilot role must not narrow that access.
+  if (helper.hasSensitiveDataRole(currentUser)) {
     return false
   }
 
