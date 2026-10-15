@@ -292,6 +292,8 @@ pnpm dedupe-marathon-match-history --apply --user-id 40562752
 
 The cleanup deletes only migrated numeric `DATA_SCIENCE / MARATHON_MATCH` history rows that match a complete official Challenge API Marathon Match UUID row for the same member and MM round number. It leaves Challenge API helper challenges such as writer, tester, task, and placement award records intact because those are separate challenge records, not native Marathon Match rating history. After native MM rerates exist for a member, profile history also hides remaining orphan numeric MM rows that cannot be resolved to a Challenge API UUID or matched to a canonical MM round for that member.
 
+Public member stats reconcile Marathon Match challenge and win totals against the same visible history returned by `GET /members/{handle}/stats/history`. Restoring older rounds therefore raises stale totals, including nonzero totals, without requiring a rerate. History counts use the existing completion, placement, and legacy/canonical deduplication rules. Larger stored totals are preserved when imported history is partial. Data Science and overall totals, plus the MM submission-count fallback, receive the same adjustment before requested response fields are selected; ratings, rankings, and private-group totals are unchanged.
+
 To re-run a configured rating path for every member who participated in the configured challenge set, use the bulk script instead of the member-scoped API:
 
 ```bash

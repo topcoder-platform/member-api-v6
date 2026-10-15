@@ -4084,10 +4084,69 @@ async function getLegacyMemberStats (member, groupIds, fields) {
 }
 
 /**
- * Get member statistics.
+ * Raise public Marathon Match totals to the minimum proven by visible history.
+ * Reuses the history read path so restored rounds, placement enrichment, and
+ * legacy/canonical deduplication match the profile cards. Larger stored totals
+ * are preserved because imported history can be partial. Parent totals and the
+ * MM submission fallback are adjusted before response fields are selected.
+ * @param {Object} currentUser caller used for the public history read
+ * @param {String} handle member handle
+ * @param {Array<Object>} stats complete member stats responses, before field filtering
+ * @returns {Promise<Array<Object>>} responses with consistent public MM totals
+ * @throws {Error} propagates member/history lookup failures
+ */
+async function hydrateMarathonParticipationCounts (currentUser, handle, stats) {
+  const publicStats = _.find(stats, item =>
+    String(item.groupId) === String(config.PUBLIC_GROUP_ID) &&
+    _.get(item, 'DATA_SCIENCE.MARATHON_MATCH')
+  )
+  if (!publicStats) {
+    return stats
+  }
+
+  // Filter by type only: legacy Development/MM rows normalize to Data Science.
+  const historyStats = await getHistoryStats(currentUser, handle, { typeId: TYPE_NAMES.MARATHON_MATCH })
+  const history = _.get(_.head(historyStats), 'DATA_SCIENCE.MARATHON_MATCH.history', [])
+  const marathon = publicStats.DATA_SCIENCE.MARATHON_MATCH
+  const challenges = Math.max(marathon.challenges || 0, history.length)
+  const wins = Math.max(marathon.wins || 0, _.filter(history, row => toVisiblePlacement(row.placement) === 1).length)
+  const addedChallenges = challenges - (marathon.challenges || 0)
+  const addedWins = wins - (marathon.wins || 0)
+  if (addedChallenges === 0 && addedWins === 0) {
+    return stats
+  }
+
+  return _.map(stats, item => item !== publicStats ? item : {
+    ...item,
+    challenges: (item.challenges || 0) + addedChallenges,
+    wins: (item.wins || 0) + addedWins,
+    DATA_SCIENCE: {
+      ...item.DATA_SCIENCE,
+      challenges: (item.DATA_SCIENCE.challenges || 0) + addedChallenges,
+      wins: (item.DATA_SCIENCE.wins || 0) + addedWins,
+      MARATHON_MATCH: {
+        ...marathon,
+        challenges,
+        wins,
+        submissions: {
+          ...marathon.submissions,
+          submissions: Math.max(_.get(marathon, 'submissions.submissions', 0) || 0, challenges)
+        }
+      }
+    }
+  })
+}
+
+/**
+ * Get member statistics, reconciling public Marathon Match participation totals
+ * with visible history before applying requested response fields.
+ * @param {Object} currentUser caller used to determine access to member stats
  * @param {String} handle the member handle
  * @param {Object} query the query parameters
- * @returns {Object} the member statistics
+ * @param {boolean} throwError whether missing stats should raise a not-found error
+ * @returns {Promise<Array<Object>>} member statistics for the allowed groups
+ * @throws {NotFoundError} when the member is missing, or stats are missing and throwError is true
+ * @throws {Error} propagates database and history lookup failures
  */
 async function getMemberStats (currentUser, handle, query, throwError) {
   // validate and parse query parameter
@@ -4098,10 +4157,10 @@ async function getMemberStats (currentUser, handle, query, throwError) {
   const groupIds = await helper.getAllowedGroupIds(currentUser, member, query.groupIds)
   let stats = []
   if (USE_LEGACY_STATS_READS) {
-    stats = await getLegacyMemberStats(member, groupIds, fields)
+    stats = await getLegacyMemberStats(member, groupIds, MEMBER_STATS_FIELDS)
     if (stats.length === 0) {
       logger.warn(`Legacy member stats lookup returned no rows for handle='${handle}', groupIds='${groupIds}'. Falling back to unified memberStats lookup.`)
-      stats = await getUnifiedMemberStats(member, groupIds, query, fields)
+      stats = await getUnifiedMemberStats(member, groupIds, query, MEMBER_STATS_FIELDS)
     }
   } else {
     const dimensionLookup = await getChallengeDimensionLookup()
@@ -4141,7 +4200,7 @@ async function getMemberStats (currentUser, handle, query, throwError) {
           ...stat,
           groupId: _.toNumber(groupId)
         }))
-        stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, fields))
+        stats.push(prismaHelper.buildUnifiedStatsResponse(member, scopedStats, MEMBER_STATS_FIELDS))
       }
     }
   }
@@ -4149,6 +4208,9 @@ async function getMemberStats (currentUser, handle, query, throwError) {
   if (throwError && stats.length === 0) {
     throw new errors.NotFoundError('Member stats not found')
   }
+
+  stats = await hydrateMarathonParticipationCounts(currentUser, handle, stats)
+  stats = _.map(stats, item => _.pick(item, fields))
 
   if (!helper.canManageMember(currentUser, member)) {
     stats = _.map(stats, (item) => _.omit(item, config.STATISTICS_SECURE_FIELDS))
