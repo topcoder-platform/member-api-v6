@@ -2123,11 +2123,13 @@ function isCompletedChallengeStatus (value) {
 /**
  * Persist normalized unified history rows for one user.
  * Existing rows are matched by (userId, trackId, typeId, challengeId).
+ * Supplemental challenge data can preserve established Marathon Match standings.
  * @param {Object} membersClient prisma members client
  * @param {BigInt} userId member user id
  * @param {Array<Object>} historyRows normalized rows to update or insert
  * @param {Object} [options] history write options
  * @param {boolean} [options.refreshMostRecent=true] whether to recompute mostRecent after writes
+ * @param {boolean} [options.preserveMarathonPlacement=false] keep existing positive MM standings
  * @returns {Promise<Object>} summary with upserted row count and refreshed mostRecent row count
  */
 async function upsertHistoryRows (membersClient, userId, historyRows, options = {}) {
@@ -2165,11 +2167,13 @@ async function upsertHistoryRows (membersClient, userId, historyRows, options = 
     const existingRow = existingByKey.get(buildHistoryKey(userId, row.trackId, row.typeId, row.challengeId))
 
     if (existingRow) {
+      const preserveMarathonPlacement = options.preserveMarathonPlacement &&
+        isMarathonMatchTypeId(row.typeId) && toOptionalPlacement(existingRow.placement) !== null
       historyRowsToUpdate.push({
         id: existingRow.id,
         eventDate: row.eventDate,
         newRating: row.newRating,
-        placement: row.placement === undefined
+        placement: preserveMarathonPlacement || row.placement === undefined
           ? (existingRow.placement === undefined ? null : existingRow.placement)
           : row.placement,
         percentile: row.percentile === undefined
@@ -2468,7 +2472,8 @@ function buildSupplementalHistoryRowsFromCompletedChallenges (
 /**
  * Seed unified memberStatsHistory from completed non-legacy challenge sources.
  * This supplements legacy history so newer completed challenges still surface
- * when they were never written to legacy history tables.
+ * when they were never written to legacy history tables. Existing positive MM
+ * standings are retained because winner positions may represent prize eligibility.
  * @param {Object} membersClient prisma members client
  * @param {Object} challengesClient prisma challenges client
  * @param {Object|null} reviewDbClient raw pg review database client
@@ -2506,7 +2511,10 @@ async function backfillHistoryFromCompletedChallenges (
     options
   )
 
-  return upsertHistoryRows(membersClient, userId, historyRows, options)
+  return upsertHistoryRows(membersClient, userId, historyRows, {
+    ...options,
+    preserveMarathonPlacement: true
+  })
 }
 
 /**

@@ -1656,9 +1656,9 @@ function buildChallengeWinnerPlacementLookup (winnerRows) {
 
 /**
  * Fill or correct persisted placements from challenge-api winner rows.
- * Rerated canonical Marathon Match placements are preserved because they are
- * computed from final-standing scores; ChallengeWinner can store paid/winner
- * placement for MM and is only a fallback for non-rerated or missing rows.
+ * Existing Marathon Match standings are preserved for both rated and unrated
+ * history. ChallengeWinner can describe payment positions, so it only fills a
+ * missing MM placement. Other challenge types retain winner-based correction.
  * @param {Array<Object>} rows persisted and/or synthesized history rows
  * @param {Array<Object>} winnerRows placement winner rows from challenge-api
  * @returns {Array<Object>} history rows with corrected placements when available
@@ -1675,7 +1675,10 @@ function mergeHistoryPlacementsFromChallengeWinners (rows, winnerRows) {
     const placement = challengeKey ? placementByChallengeId.get(challengeKey) : undefined
     const existingPlacement = toVisiblePlacement(row.placement)
 
-    if ((isReratedCanonicalMarathonHistoryRow(row) && existingPlacement) ||
+    const hasMarathonPlacement = row.trackName === TRACK_NAMES.DATA_SCIENCE &&
+      row.typeName === TYPE_NAMES.MARATHON_MATCH && existingPlacement
+
+    if (hasMarathonPlacement ||
       !placement ||
       existingPlacement === placement) {
       return row

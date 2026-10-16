@@ -2312,7 +2312,7 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('getHistoryStats should offset persisted passed-review placements by paid winners', async () => {
+  it('getHistoryStats should preserve unrated Marathon Match standings instead of payment offsets', async () => {
     const ratingDate = new Date('2025-08-27T17:05:00.000Z')
     const challenge = {
       id: 'mm-challenge-uuid',
@@ -2345,7 +2345,8 @@ describe('statistics service unit tests', () => {
             typeId: 'type-mm-id',
             challengeId: 'mm-challenge-uuid',
             eventDate: ratingDate,
-            placement: 1,
+            placement: 7,
+            newRating: null,
             mostRecent: true
           }]
         }
@@ -2368,7 +2369,7 @@ describe('statistics service unit tests', () => {
       should.exist(result[0].DATA_SCIENCE)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history.should.have.length(1)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].challengeName.should.equal('Marathon Match 163')
-      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(4)
+      result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].placement.should.equal(7)
       result[0].DATA_SCIENCE.MARATHON_MATCH.history[0].mostRecent.should.equal(true)
     } finally {
       restore()
@@ -2517,7 +2518,7 @@ describe('statistics service unit tests', () => {
     }
   })
 
-  it('getHistoryStats should use the best duplicate passed-review Marathon Match placement', async () => {
+  it('getHistoryStats should use the best duplicate passed-review placement when MM standing is missing', async () => {
     const ratingDate = new Date('2023-05-31T10:02:00.000Z')
     const challenge = {
       id: 'mm-145',
@@ -2550,7 +2551,7 @@ describe('statistics service unit tests', () => {
             typeId: 'type-mm-id',
             challengeId: 'mm-145',
             eventDate: ratingDate,
-            placement: 1,
+            placement: null,
             mostRecent: true
           }]
         }
