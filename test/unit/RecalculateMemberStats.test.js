@@ -693,6 +693,57 @@ describe('recalculateMemberStats unit tests', () => {
     rows[0].typeId.should.equal('type-mm-id')
   })
 
+  it('should retain official MM standings when supplementing paid winner positions', async () => {
+    await recalculateMemberStats.initializeLegacyLookupCache({
+      $queryRaw (strings) {
+        if (strings.join('').includes('"ChallengeTrack"')) {
+          return [{ id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS' }]
+        }
+        return [
+          { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', isTask: false },
+          { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', isTask: false }
+        ]
+      }
+    })
+    const cases = [
+      { id: 101, challengeId: 'mm-official', typeId: 'type-mm-id', placement: 7, expected: 7 },
+      { id: 102, challengeId: 'mm-missing', typeId: 'type-mm-id', placement: null, expected: 4 },
+      { id: 103, challengeId: 'non-mm', typeId: 'type-ch-id', placement: 7, expected: 4 }
+    ]
+    const queries = []
+    await recalculateMemberStats.backfillHistoryFromCompletedChallenges(
+      {
+        memberStatsHistory: {
+          findMany: async () => cases.map((row) => ({ ...row, trackId: 'track-ds-id' }))
+        },
+        $executeRawUnsafe: (sql, ...params) => ({ sql, params }),
+        $transaction: async (batch) => { queries.push(...batch) }
+      },
+      {
+        $queryRawUnsafe: async () => cases.map((row) => ({
+          challengeId: row.challengeId,
+          canonicalChallengeId: row.challengeId,
+          trackId: 'track-ds-id',
+          typeId: row.typeId,
+          status: 'COMPLETED',
+          endDate: '2025-03-02T00:00:00.000Z',
+          winnerType: 'PLACEMENT',
+          placement: 4
+        }))
+      },
+      null,
+      global.BigInt(123),
+      { refreshMostRecent: false }
+    )
+    queries.should.have.length(1)
+    queries[0].sql.should.include('UPDATE "members"."memberStatsHistory"')
+    // Each bound row contains id, event date, rating, placement, percentile, audit actor.
+    cases.forEach((row, index) => {
+      queries[0].params[index * 6].should.equal(row.id)
+      queries[0].params[index * 6 + 3].should.equal(row.expected)
+    })
+  })
+
   it('should chunk large history inserts to avoid raw query parameter limits', async () => {
     const transactionCalls = []
     const membersClient = {

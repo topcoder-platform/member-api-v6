@@ -287,6 +287,8 @@ Marathon Match replay excludes provisional and example tests before selecting sc
 
 MM history keeps official `challengeResult` or submission placements when available. Missing review rows for other competitors must not compress an official rank (for example, seventh place must remain seventh even if only two eligible score rows are available). The score-derived rank is used when no official placement exists. This rule also applies to MM events included in configured rating paths. The history API also preserves stored MM standings for unrated events; prize/payment positions from `ChallengeWinner` only fill missing MM placements.
 
+The completed-challenge history backfill preserves existing positive Marathon Match standings when supplementing review/winner rows. Paid winner positions can fill missing standings, but do not overwrite an established MM placement. Legacy-history imports retain their existing authority.
+
 After a rerate, migrated numeric history rows can still exist beside the canonical UUID rows until they are physically cleaned from `memberStatsHistory`. When the members and challenges schemas are available in the same Postgres database, preview and apply the cleanup with:
 
 ```bash
