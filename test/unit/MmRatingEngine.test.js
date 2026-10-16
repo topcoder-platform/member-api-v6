@@ -287,13 +287,20 @@ function createMmReviewDbClient (rows) {
   const resultRows = rows.map(cloneRow)
 
   /**
-   * Match the production MM reviewSummation readiness guard.
-   * Rows without test progress metadata are legacy/imported rows and remain
-   * eligible; rows with progress metadata need a successful reviewed checkpoint.
+   * Model reviewSummation finality and readiness predicates in the captured SQL.
+   * Explicit non-final markers are excluded when the query requests it.
+   * Unmarked legacy rows remain eligible; progress metadata additionally needs
+   * a successful reviewed checkpoint.
    * @param {Object} row stub review summation row
+   * @param {string} sql query whose filtering is being exercised
    * @returns {boolean} true when the row is ready for MM rating replay
    */
-  function isMmReviewRowReady (row) {
+  function isMmReviewRowReady (row, sql) {
+    if (sql.includes('rs."isFinal" IS NOT FALSE') && row.isFinal === false) return false
+    if (sql.includes('rs."isProvisional" IS NOT TRUE') && row.isProvisional === true) return false
+    if (sql.includes('rs."isExample" IS NOT TRUE') && row.isExample === true) return false
+    if (sql.includes("NOT IN ('provisional', 'example')") &&
+      ['provisional', 'example'].includes(String(row.metadata?.testType || '').toLowerCase())) return false
     const testProgressDetails = row && row.metadata && row.metadata.testProgressDetails
     if (!testProgressDetails) {
       return true
@@ -326,7 +333,7 @@ function createMmReviewDbClient (rows) {
       if (sql.includes('WHERE s."memberId" = $1')) {
         return {
           rows: resultRows
-            .filter(isMmReviewRowReady)
+            .filter(row => isMmReviewRowReady(row, sql))
             .filter((row) => String(row.memberId) === String(params[0]))
             .map(normalizeReviewRow)
             .sort((left, right) => {
@@ -349,7 +356,7 @@ function createMmReviewDbClient (rows) {
         const challengeIds = new Set((Array.isArray(params[0]) ? params[0] : [params[0]]).map((value) => String(value)))
         return {
           rows: resultRows
-            .filter(isMmReviewRowReady)
+            .filter(row => isMmReviewRowReady(row, sql))
             .filter((row) =>
               challengeIds.has(String(row.challengeId)) ||
               challengeIds.has(String(row.legacyChallengeId))
@@ -1177,6 +1184,24 @@ describe('marathon match rating engine unit tests', () => {
     should.equal(historyRow.placement, 3)
   })
 
+  it('rerateMmTrack should preserve official placement when final review rows omit competitors', async () => {
+    const { client: membersClient, state } = createMembersClient({
+      historyRows: [], statsRows: [], maxRatingRows: []
+    })
+    const rows = [
+      { submissionId: 'final-winner', memberId: opponentUserId, challengeId, placement: 1, aggregateScore: 100 },
+      { submissionId: 'final-target', memberId: targetUserId, challengeId, placement: 7, aggregateScore: 80 }
+    ].map(row => ({
+      ...row,
+      reviewedDate: new Date('2024-06-01T10:00:00.000Z'),
+      createdAt: new Date('2024-06-01T10:00:00.000Z'),
+      submissionCreatedAt: new Date('2024-06-01T09:00:00.000Z')
+    }))
+    await rerateMmTrack(membersClient, createChallengeClient(challengeMetadata), null,
+      createMmReviewDbClient(rows), targetUserId, challengeId)
+    should.equal(findHistoryRow(state.historyRows, targetUserId, challengeId).placement, 7)
+  })
+
   it('rerateMmTrack should skip MM challenges with challenge metadata isRated false', async () => {
     const { client: membersClient, state } = createMembersClient({
       historyRows: [],
@@ -1281,6 +1306,63 @@ describe('marathon match rating engine unit tests', () => {
     const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
     should.equal(historyRow.newRating, expectedTargetState.rating)
     should.equal(historyRow.placement, 1)
+  })
+
+  it('rerateMmTrack should rank final results without higher provisional or example scores', async () => {
+    const { client: membersClient, state } = createMembersClient({ historyRows: [], statsRows: [], maxRatingRows: [] })
+    const finalScores = [93.34311, 92.15678, 91.67553, 89.36018, 88.97521, 88.46224, 87.42098, 86.98858, 84.84607]
+    const finalRows = finalScores.map((score, index) => ({
+      ...cloneRow(baseReviewRows[0]),
+      submissionId: `final-${index}`,
+      memberId: index === 8 ? String(targetUserId) : String(7000 + index),
+      aggregateScore: score,
+      placement: null,
+      isFinal: true
+    }))
+    const rejectedRows = [
+      { isFinal: null, isProvisional: true },
+      { isFinal: null, isExample: true },
+      { isFinal: null, metadata: { testType: 'provisional' } },
+      { isFinal: null, metadata: { testType: 'EXAMPLE' } }
+    ].map((flags, index) => ({
+      ...cloneRow(baseReviewRows[0]),
+      submissionId: `non-final-${index}`,
+      memberId: String(8000 + index),
+      placement: null,
+      aggregateScore: 99,
+      ...flags
+    }))
+    // A higher provisional score from the target must not replace the final score.
+    rejectedRows.push({
+      ...cloneRow(finalRows[8]),
+      submissionId: 'target-provisional',
+      aggregateScore: 90.16452442655127,
+      isFinal: null,
+      isProvisional: true
+    })
+
+    await rerateMmTrack(membersClient, createChallengeClient(challengeMetadata), null,
+      createMmReviewDbClient([...finalRows, ...rejectedRows]), targetUserId, challengeId)
+
+    const historyRow = findHistoryRow(state.historyRows, targetUserId, challengeId)
+    should.equal(historyRow.placement, 9)
+    const expectedParticipants = finalRows.map(row => ({
+      coderId: row.memberId, rating: 0, volatility: 0, numRatings: 0, score: row.aggregateScore
+    }))
+    runQubitsRating(expectedParticipants)
+    should.equal(historyRow.newRating, expectedParticipants.find(row => row.coderId === String(targetUserId)).rating)
+  })
+
+  it('rerateMmTrack should skip a challenge when the target only has provisional results', async () => {
+    const { client: membersClient, state } = createMembersClient({ historyRows: [], statsRows: [], maxRatingRows: [] })
+    const rows = baseReviewRows.map(row => ({
+      ...cloneRow(row), isFinal: null, isProvisional: String(row.memberId) === String(targetUserId)
+    }))
+    const result = await rerateMmTrack(membersClient, createChallengeClient(challengeMetadata), null,
+      createMmReviewDbClient(rows), targetUserId, challengeId)
+    should.equal(result.challengesProcessed, 0)
+    state.historyRows.should.have.length(0)
+    state.statsRows.should.have.length(0)
   })
 
   it('rerateMmTrack should rate MM summations when challenge metadata is rated despite stale row metadata', async () => {

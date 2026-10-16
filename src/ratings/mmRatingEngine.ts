@@ -56,6 +56,9 @@ const DEFAULT_MM_SCORING_CONFIG = Object.freeze({
   scoreDirection: 'MAXIMIZE'
 })
 const READY_MM_REVIEW_SUMMATION_FILTER = `
+          AND rs."isProvisional" IS NOT TRUE
+          AND rs."isExample" IS NOT TRUE
+          AND COALESCE(LOWER(rs."metadata"->>'testType'), '') NOT IN ('provisional', 'example')
           AND (
             rs."metadata"->'testProgressDetails' IS NULL
             OR (
@@ -1134,18 +1137,20 @@ function computePlacementByCoderId (participants) {
 
 /**
  * Build optional history metadata for the target participant.
- * Placement is computed from the same normalized scores used by the rating run,
- * with the source placement kept as a fallback when computed placement is absent.
+ * MM history preserves an authoritative source placement, including gaps where
+ * some competitors have no eligible review rows. Other rating paths retain their
+ * computed placement. Scores supply the fallback when a source rank is missing.
  * @param {Array<Object>} participants rated participant states for one challenge
  * @param {string} targetUserKey normalized target user id
  * @param {Object} sourceRow source participant row for the target user
+ * @param {boolean} [preferSourcePlacement=false] preserve official MM standings
  * @returns {Object} persisted memberStatsHistory metadata
  */
-function buildHistoryResultFields (participants, targetUserKey, sourceRow): any {
+function buildHistoryResultFields (participants, targetUserKey, sourceRow, preferSourcePlacement = false): any {
   const computedPlacement = computePlacementByCoderId(participants).get(String(targetUserKey))
   const sourcePlacement = toOptionalPlacement(sourceRow && sourceRow.placement)
   return omitUndefinedFields({
-    placement: computedPlacement || sourcePlacement
+    placement: preferSourcePlacement ? (sourcePlacement || computedPlacement) : (computedPlacement || sourcePlacement)
   })
 }
 
@@ -1188,8 +1193,8 @@ function maxDate (currentDate, candidateDate) {
  * per submission is selected before replay history is built. Deleted
  * submissions are ignored, and each challenge keeps the best eligible standings
  * row for the target member. Some imported MM
- * summations have a null isFinal flag; those are treated as final unless the
- * row is explicitly marked false. Modern MM system-test summations expose
+ * summations have a null isFinal flag; those remain eligible only when neither
+ * flags nor metadata identify provisional or example tests. Modern MM system-test summations expose
  * testProgressDetails while scoring is still in flight, so those rows are not
  * replayed until the system test completed successfully.
  * @param {Object} reviewDbClient raw pg review database client
@@ -1285,6 +1290,8 @@ async function fetchMmResultsForUser (reviewDbClient, userId) {
  * are ignored, placement-bearing rows are preferred, and ready reviewSummation
  * aggregateScore is treated as already normalized for higher-is-better ordering
  * when usable. Submission finalScore backs up legacy placeholder summations.
+ * Provisional and example tests are excluded before choosing a summation or
+ * comparing participant scores, even when their isFinal flag is null.
  * Both submission.challengeId and submission.legacyChallengeId are considered.
  * @param {Object} reviewDbClient raw pg review database client
  * @param {string|Object} challengeId challenge identifier or history entry with legacy aliases
@@ -2271,7 +2278,8 @@ async function rerateMmRatingPath (membersClient, challengeClient, mmDbClient, r
     const targetHistoryFields = buildHistoryResultFields(
       participants,
       targetUserKey,
-      participantRowsByUserId.get(targetUserKey)
+      participantRowsByUserId.get(targetUserKey),
+      historyEntry.source === RATING_PATH_SOURCE_MARATHON_MATCH
     )
     if (targetHistoryFields.placement === 1) {
       targetWinCount += 1
@@ -2516,7 +2524,8 @@ async function rerateMmTrack (membersClient, challengeClient, mmDbClient, review
     const targetHistoryFields = buildHistoryResultFields(
       participants,
       targetUserKey,
-      participantRowsByUserId.get(targetUserKey)
+      participantRowsByUserId.get(targetUserKey),
+      true
     )
 
     await membersClient.$transaction(async (tx) => {
