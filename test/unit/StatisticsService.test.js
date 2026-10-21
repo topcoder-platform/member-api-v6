@@ -275,7 +275,7 @@ function loadStatisticsService (options = {}) {
   delete require.cache[prismaHelperPath]
 
   setStubModule(helperPath, {
-    parseCommaSeparatedString: () => null,
+    parseCommaSeparatedString: value => value ? value.split(',') : null,
     getMemberByHandle: async () => member,
     getAllowedGroupIds: async () => options.groupIds || ['10'],
     canManageMember: () => true,
@@ -545,6 +545,193 @@ describe('statistics service unit tests', () => {
     } finally {
       restore()
     }
+  })
+
+  describe('Marathon Match participation totals', () => {
+    const rounds = [
+      ['TCO13 Round 3', 1], ['TCO12 Championship Round', 1], ['TCO12 Round 3', 1],
+      ['TCO11 Championship Round', 1], ['TCO11 Round 3', 1], ['TCO11 Round 2', 3],
+      ['TCO10 Final', 3], ['TCO10 Round 3', 5], ['TCO10 Round 2', 9],
+      ['Marathon Match 59', 11], ['TCO09 Round 3', 5], ['TCO09 Round 2', 5],
+      ['MM 48', 2], ['MM 45', 7], ['MM 39', 1], ['TCO08 MM Finals', 7],
+      ['MM 34', 2], ['TCO08 MM 3', 2], ['TCO08 MM 2', 11], ['TCO08 MM 1', 30]
+    ]
+    const historyRows = rounds.map(([challengeName, placement], index) => ({
+      trackId: 'track-ds-id',
+      typeId: 'type-mm-id',
+      challengeId: `restored-mm-${index}`,
+      challengeName,
+      placement,
+      newRating: 2581,
+      eventDate: new Date(Date.UTC(2013, 0, 20 - index)),
+      createdBy: 'rerate-mm-stats'
+    }))
+    const challengeRows = historyRows.map(row => ({
+      id: row.challengeId,
+      name: row.challengeName,
+      status: 'COMPLETED'
+    }))
+
+    for (const scenario of [
+      { name: 'repair stale nonzero totals after restoring TCO rounds', challenges: 5, wins: 1, expectedChallenges: 20, expectedWins: 6 },
+      { name: 'repair explicit zero totals', challenges: 0, wins: 0, expectedChallenges: 20, expectedWins: 6 },
+      { name: 'preserve larger aggregates when history is partial', challenges: 30, wins: 8, expectedChallenges: 30, expectedWins: 8 },
+      { name: 'repair wins even when the challenge total is current', challenges: 20, wins: 4, expectedChallenges: 20, expectedWins: 6 },
+      { name: 'preserve totals when history is empty', challenges: 5, wins: 1, expectedChallenges: 5, expectedWins: 1, history: [] },
+      { name: 'adjust merged Development/MM totals only once', challenges: 5, wins: 1, expectedChallenges: 20, expectedWins: 6, extraMarathonRow: true }
+    ]) {
+      it(`getMemberStats should ${scenario.name}`, async () => {
+        const { service, restore } = loadStatisticsService({
+          prismaStub: {
+            $queryRaw: async () => [],
+            memberStats: {
+              findMany: async () => [{
+                trackId: 'track-ds-id', typeId: 'type-mm-id',
+                challenges: scenario.challenges, wins: scenario.wins,
+                rating: 2581, globalRank: 17, volatility: 416, isPrivate: false,
+                mostRecentEventDate: historyRows[0].eventDate
+              }, {
+                trackId: 'track-ds-id', typeId: 'type-srm-id', challenges: 3, wins: 2
+              }].concat(scenario.extraMarathonRow ? [{
+                trackId: 'track-dev-id', typeId: 'type-mm-id', challenges: 4, wins: 1
+              }] : [])
+            },
+            memberStatsHistory: { findMany: async () => scenario.history || historyRows }
+          },
+          challengeRows
+        })
+
+        try {
+          const [result] = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+          const marathon = result.DATA_SCIENCE.MARATHON_MATCH
+          marathon.challenges.should.equal(scenario.expectedChallenges)
+          marathon.wins.should.equal(scenario.expectedWins)
+          marathon.submissions.submissions.should.equal(scenario.expectedChallenges)
+          marathon.rank.rating.should.equal(2581)
+          marathon.rank.rank.should.equal(17)
+          marathon.rank.volatility.should.equal(416)
+          result.DATA_SCIENCE.SRM.challenges.should.equal(3)
+          result.DATA_SCIENCE.SRM.wins.should.equal(2)
+          result.DATA_SCIENCE.challenges.should.equal(scenario.expectedChallenges + 3)
+          result.DATA_SCIENCE.wins.should.equal(scenario.expectedWins + 2)
+          result.challenges.should.equal(scenario.expectedChallenges + 3)
+          result.wins.should.equal(scenario.expectedWins + 2)
+
+          const [filtered] = await service.getMemberStats({ isMachine: true }, 'devtest1400', {
+            fields: 'challenges,wins'
+          })
+          filtered.should.deep.equal({
+            challenges: scenario.expectedChallenges + 3,
+            wins: scenario.expectedWins + 2
+          })
+        } finally {
+          restore()
+        }
+      })
+    }
+
+    it('getMemberStats should count the same deduplicated, completed rounds as visible history', async () => {
+      const { service, restore } = loadStatisticsService({
+        prismaStub: {
+          $queryRaw: async () => [],
+          memberStats: {
+            findMany: async () => [{
+              trackId: 'track-ds-id', typeId: 'type-mm-id', challenges: 1, wins: 0,
+              rating: 2581, globalRank: 17, isPrivate: false
+            }]
+          },
+          memberStatsHistory: {
+            findMany: async () => historyRows.concat([
+              { ...historyRows[0], trackId: 'track-dev-id' },
+              { ...historyRows[1], challengeId: '12345', createdBy: 'stats-migration' },
+              { ...historyRows[2], challengeId: '99999', challengeName: undefined },
+              { ...historyRows[3], challengeId: 'cancelled-mm' }
+            ])
+          }
+        },
+        challengeRows: challengeRows.concat({
+          id: 'cancelled-mm', name: 'Cancelled Marathon Match', status: 'CANCELLED'
+        })
+      })
+
+      try {
+        const [result] = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+        const [historyResult] = await service.getHistoryStats({ isMachine: true }, 'devtest1400', {})
+        const history = historyResult.DATA_SCIENCE.MARATHON_MATCH.history
+        history.should.have.length(20)
+        result.DATA_SCIENCE.MARATHON_MATCH.challenges.should.equal(history.length)
+        result.DATA_SCIENCE.MARATHON_MATCH.wins.should.equal(history.filter(row => row.placement === 1).length)
+      } finally {
+        restore()
+      }
+    })
+
+    it('getMemberStats should include rounds and placements recovered from challenge winners', async () => {
+      const { service, restore } = loadStatisticsService({
+        prismaStub: {
+          $queryRaw: async () => [],
+          memberStats: {
+            findMany: async () => [{
+              trackId: 'track-ds-id', typeId: 'type-mm-id', challenges: 1, wins: 0,
+              rating: 2581, globalRank: 17, isPrivate: false
+            }]
+          },
+          memberStatsHistory: {
+            findMany: async () => [{ ...historyRows[0], placement: null }]
+          }
+        },
+        challengeRows,
+        challengeWinnerRows: historyRows.slice(0, 2).map(row => ({
+          challengeId: row.challengeId,
+          placement: 1,
+          type: 'PLACEMENT',
+          challenge: {
+            id: row.challengeId, name: row.challengeName, endDate: row.eventDate,
+            trackId: row.trackId, typeId: row.typeId, status: 'COMPLETED'
+          }
+        }))
+      })
+
+      try {
+        const [result] = await service.getMemberStats({ isMachine: true }, 'devtest1400', {})
+        result.DATA_SCIENCE.MARATHON_MATCH.challenges.should.equal(2)
+        result.DATA_SCIENCE.MARATHON_MATCH.wins.should.equal(2)
+      } finally {
+        restore()
+      }
+    })
+
+    it('getMemberStats should leave private-group totals unchanged', async () => {
+      let visibleHistoryReads = 0
+      const { service, restore } = loadStatisticsService({
+        groupIds: ['123'],
+        prismaStub: {
+          $queryRaw: async () => [],
+          memberStats: {
+            findMany: async () => [{
+              trackId: 'track-ds-id', typeId: 'type-mm-id', challenges: 5, wins: 1,
+              rating: 2581, globalRank: 17, isPrivate: true
+            }]
+          },
+          memberStatsHistory: {
+            findMany: async args => {
+              if (args.orderBy) visibleHistoryReads += 1
+              return historyRows
+            }
+          }
+        },
+        challengeRows
+      })
+
+      try {
+        const [result] = await service.getMemberStats({ isMachine: true }, 'devtest1400', { groupIds: '123' })
+        result.DATA_SCIENCE.MARATHON_MATCH.challenges.should.equal(5)
+        result.DATA_SCIENCE.MARATHON_MATCH.wins.should.equal(1)
+        visibleHistoryReads.should.equal(0)
+      } finally {
+        restore()
+      }
+    })
   })
 
   it('getMemberStats should hydrate BigInt legacy Develop submission counters', async () => {
