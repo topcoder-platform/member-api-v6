@@ -13,6 +13,7 @@ const loggerPath = path.resolve(__dirname, '../../src/common/logger.ts')
 const routesPath = path.resolve(__dirname, '../../src/routes.ts')
 const configPath = require.resolve('config')
 const coreLibraryPath = require.resolve('tc-core-library-js')
+const authAdapterPath = path.resolve(__dirname, '../../src/common/auth.ts')
 const statisticsControllerPath = path.resolve(__dirname, '../../src/controllers/StatisticsController.ts')
 
 function setStubModule (modulePath, exports) {
@@ -89,6 +90,7 @@ describe('app routes unit tests', () => {
       [routesPath]: require.cache[routesPath],
       [configPath]: require.cache[configPath],
       [coreLibraryPath]: require.cache[coreLibraryPath],
+      [authAdapterPath]: require.cache[authAdapterPath],
       [statisticsControllerPath]: require.cache[statisticsControllerPath]
     }
     let authenticatorCalls = 0
@@ -121,11 +123,11 @@ describe('app routes unit tests', () => {
       VALID_ISSUERS: '["issuer"]'
     })
     setStubModule(coreLibraryPath, {
-      middleware: {
-        jwtAuthenticator: () => () => {
+      auth: {
+        createValidator: () => ({ verify: () => {
           authenticatorCalls += 1
           throw new Error('authenticator should not run without an authorization header')
-        }
+        } })
       }
     })
     setStubModule(statisticsControllerPath, {

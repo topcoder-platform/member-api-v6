@@ -45,8 +45,8 @@ module.exports = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'debug',
   PORT: process.env.PORT || 3000,
   API_VERSION: process.env.API_VERSION || 'v6',
-  AUTH_SECRET: process.env.AUTH_SECRET || 'mysecret',
-  VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
+  AUTH_SECRET: process.env.AUTH_SECRET,
+  VALID_ISSUERS: process.env.VALID_ISSUERS || '[]',
   IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
   CHALLENGE_DB_URL: process.env.CHALLENGE_DB_URL,
   REVIEW_DB_URL: process.env.REVIEW_DB_URL,
@@ -55,12 +55,11 @@ module.exports = {
   VANILLA_DB_URL: process.env.VANILLA_DB_URL,
 
   // used to get M2M token
-  AUTH0_URL: process.env.AUTH0_URL,
-  AUTH0_PROXY_SERVER_URL: process.env.AUTH0_PROXY_SERVER_URL,
-  AUTH0_AUDIENCE: process.env.AUTH0_AUDIENCE || 'https://www.topcoder-dev.com',
+  KEYCLOAK_TOKEN_URL: process.env.KEYCLOAK_TOKEN_URL,
+  KEYCLOAK_AUDIENCE: process.env.KEYCLOAK_AUDIENCE,
+  KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,
+  KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET,
   TOKEN_CACHE_TIME: process.env.TOKEN_CACHE_TIME,
-  AUTH0_CLIENT_ID: process.env.AUTH0_CLIENT_ID,
-  AUTH0_CLIENT_SECRET: process.env.AUTH0_CLIENT_SECRET,
 
   // bus API config params
   BUSAPI_URL: process.env.BUSAPI_URL || 'https://api.topcoder-dev.com/v5',

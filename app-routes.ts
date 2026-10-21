@@ -9,7 +9,7 @@ const helper = require('./src/common/helper')
 const errors = require('./src/common/errors')
 const logger = require('./src/common/logger')
 const routes = require('./src/routes')
-const authenticator = require('tc-core-library-js').middleware.jwtAuthenticator
+const {authenticate, hasRequiredScopes} = require('./src/common/auth')
 
 /**
  * Configure all routes for express app
@@ -45,7 +45,7 @@ module.exports = (app) => {
           if (!_.get(req, 'headers.authorization') && def.allowNoToken) {
             next()
           } else {
-            authenticator(_.pick(config, ['AUTH_SECRET', 'VALID_ISSUERS']))(req, res, next)
+            authenticate(req, res, next)
           }
         })
 
@@ -56,7 +56,7 @@ module.exports = (app) => {
           } else {
             if (req.authUser.isMachine) {
               // M2M
-              if (!req.authUser.scopes || (def.scopes && !helper.checkIfExists(def.scopes, req.authUser.scopes))) {
+              if (!hasRequiredScopes(def, req.authUser)) {
                 next(new errors.ForbiddenError('You are not allowed to perform this action!'))
               } else {
                 next()
@@ -91,11 +91,7 @@ module.exports = (app) => {
               return
             }
 
-            const interceptRes: any = {}
-            interceptRes.status = () => interceptRes
-            interceptRes.json = () => next()
-            interceptRes.send = () => next()
-            authenticator(_.pick(config, ['AUTH_SECRET', 'VALID_ISSUERS']))(req, interceptRes, next)
+            authenticate(req, res, () => next())
           })
         }
 
@@ -106,7 +102,7 @@ module.exports = (app) => {
               next()
             } else if (req.authUser.isMachine) {
               // M2M
-              if (!req.authUser.scopes || (def.scopes && !helper.checkIfExists(def.scopes, req.authUser.scopes))) {
+              if (!hasRequiredScopes(def, req.authUser)) {
                 next(new errors.ForbiddenError('You are not allowed to perform this action!'))
               } else {
                 next()

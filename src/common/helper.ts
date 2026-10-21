@@ -65,15 +65,7 @@ function getS3 () {
 
 const m2mAuth = require('tc-core-library-js').auth.m2m
 
-const m2m = m2mAuth(
-  _.pick(config, [
-    'AUTH0_URL',
-    'AUTH0_AUDIENCE',
-    'AUTH0_CLIENT_ID',
-    'AUTH0_CLIENT_SECRET',
-    'AUTH0_PROXY_SERVER_URL'
-  ])
-)
+const m2m = m2mAuth()
 
 /**
  * Wrap async function to standard express function
@@ -261,10 +253,14 @@ async function uploadPhotoToS3 (data, mimetype, fileName) {
 function getBusApiClient () {
   // if there is no bus API client instance, then create a new instance
   if (!busApiClient) {
-    busApiClient = busApi(_.pick(config,
-      ['AUTH0_URL', 'AUTH0_AUDIENCE', 'TOKEN_CACHE_TIME',
-        'AUTH0_CLIENT_ID', 'AUTH0_CLIENT_SECRET', 'BUSAPI_URL',
-        'KAFKA_ERROR_TOPIC', 'AUTH0_PROXY_SERVER_URL']))
+    busApiClient = busApi({
+      AUTH0_URL: config.KEYCLOAK_TOKEN_URL,
+      AUTH0_AUDIENCE: config.KEYCLOAK_AUDIENCE,
+      AUTH0_CLIENT_ID: config.KEYCLOAK_CLIENT_ID,
+      AUTH0_CLIENT_SECRET: config.KEYCLOAK_CLIENT_SECRET,
+      BUSAPI_URL: config.BUSAPI_URL,
+      KAFKA_ERROR_TOPIC: config.KAFKA_ERROR_TOPIC
+    })
   }
 
   return busApiClient
@@ -561,22 +557,12 @@ async function getMemberGroups (memberId): Promise<any[]> {
   throw new Error(`Groups API returned status ${response.status}`)
 }
 
-/*
- * Function to get M2M token
- * @returns {Promise}
+/**
+ * Obtains a cached, verified Keycloak token for downstream service calls.
+ * @returns Promise resolving to the access token; takes no arguments.
+ * @throws Error for missing configuration, issuance or verification failures.
  */
-const getM2MToken = () => {
-  if (!config.AUTH0_URL) {
-    throw new Error('AUTH0_URL is not configured. Please set AUTH0_URL environment variable or add it to config.')
-  }
-  if (!config.AUTH0_CLIENT_ID || !config.AUTH0_CLIENT_SECRET) {
-    throw new Error('AUTH0_CLIENT_ID and AUTH0_CLIENT_SECRET must be configured for M2M authentication.')
-  }
-  return m2m.getMachineToken(
-    config.AUTH0_CLIENT_ID,
-    config.AUTH0_CLIENT_SECRET
-  )
-}
+const getM2MToken = () => m2m.getMachineToken()
 
 /**
  * Gets the list of parameters from the query as an array
