@@ -11,7 +11,8 @@
 
 The service does not consume Kafka messages. It uses the Bus API wrapper only for
 email-change verification events; profile and trait mutations do not publish events.
-The existing Bus API and Keycloak configuration remains required for email verification.
+The existing Bus API and M2M configuration (Keycloak or Auth0, selected by `USE_KEYCLOAK`)
+remains required for email verification.
 
 ## Install, Build, and Run
 
@@ -128,10 +129,18 @@ The following parameters can be set in config files or in env variables:
 - IDENTITY_DB_URL: PostgreSQL connection string for Identity schema reads.
 - CHALLENGE_DB_URL: PostgreSQL connection string for challenge schema reads (format: `postgresql://user:password@host:port/database?schema=challenges`, and should point to the same database used by challenge-api-v6).
 - VANILLA_DB_URL: MySQL connection string for the Vanilla forums database.
-- KEYCLOAK_TOKEN_URL: Managed Keycloak endpoint used to get M2M tokens
-- KEYCLOAK_AUDIENCE: Keycloak audience, used to get M2M token
-- KEYCLOAK_CLIENT_ID: Keycloak client id, used to get M2M token
-- KEYCLOAK_CLIENT_SECRET: Keycloak client secret, used to get M2M token
+- USE_KEYCLOAK: `true` gets M2M tokens from Keycloak (`KEYCLOAK_*`); unset, empty or `false`
+  uses Auth0 (`AUTH0_*`). Any other value fails at startup. See [docs/keycloak-m2m.md](docs/keycloak-m2m.md)
+- KEYCLOAK_TOKEN_URL: Managed Keycloak endpoint used to get M2M tokens (Keycloak mode)
+- KEYCLOAK_AUDIENCE: Keycloak audience, used to get M2M token (Keycloak mode)
+- KEYCLOAK_CLIENT_ID: Keycloak client id, used to get M2M token (Keycloak mode)
+- KEYCLOAK_CLIENT_SECRET: Keycloak client secret, used to get M2M token (Keycloak mode)
+- AUTH0_URL: AUTH0 URL, used to get M2M token (Auth0 mode)
+- AUTH0_PROXY_SERVER_URL: AUTH0 proxy server URL, used to get M2M token (Auth0 mode, default `AUTH0_URL`)
+- AUTH0_AUDIENCE: AUTH0 audience, used to get M2M token (Auth0 mode, default `https://www.topcoder-dev.com`)
+- TOKEN_CACHE_TIME: AUTH0 token cache time, passed to the Bus API wrapper (Auth0 mode)
+- AUTH0_CLIENT_ID: AUTH0 client id, used to get M2M token (Auth0 mode)
+- AUTH0_CLIENT_SECRET: AUTH0 client secret, used to get M2M token (Auth0 mode)
 - BUSAPI_URL: Bus API URL
 - KAFKA_ERROR_TOPIC: Kafka error topic used by bus API wrapper
 - GROUPS_API_URL: Groups API URL
@@ -159,10 +168,17 @@ The following parameters can be set in config files or in env variables:
 
 Set the following environment variables used by bus API to get TC M2M token (use 'set' insted of 'export' for Windows OS):
 ```
+# Keycloak (USE_KEYCLOAK=true)
+export USE_KEYCLOAK=true
 export KEYCLOAK_CLIENT_ID=
 export KEYCLOAK_CLIENT_SECRET=
 export KEYCLOAK_TOKEN_URL=
 export KEYCLOAK_AUDIENCE=
+# or Auth0 (USE_KEYCLOAK unset or false)
+export AUTH0_CLIENT_ID=
+export AUTH0_CLIENT_SECRET=
+export AUTH0_URL=
+export AUTH0_AUDIENCE=
 ```
 
 Also properly configure AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, PHOTO_S3_BUCKET config parameters.
@@ -351,7 +367,11 @@ This mock service will simulate request and responses for other APIs like auth0 
 Please run following commands to set necessary configs:
 
 ```bash
-# Keycloak token issuance uses the managed HTTPS endpoint; local mocks are in test/common/prepare.js.
+# Keycloak token issuance (USE_KEYCLOAK=true) uses the managed HTTPS endpoint; local mocks are in test/common/prepare.js.
+# With USE_KEYCLOAK unset or false, the mock Auth0 endpoint is used instead:
+# export AUTH0_URL="http://localhost:4000/v5/auth0"
+# export AUTH0_CLIENT_ID=xyz
+# export AUTH0_CLIENT_SECRET=xyz
 export BUSAPI_URL="http://localhost:4000/v5"
 export KEYCLOAK_CLIENT_ID=xyz
 export KEYCLOAK_CLIENT_SECRET=xyz
@@ -398,4 +418,4 @@ Use `STATS_READ_SOURCE=unified` for the unified `memberStats` / `memberStatsHist
 
 ## Keycloak migration branch
 
-See [Keycloak trust, credentials and rollout](docs/keycloak-m2m.md). Explicit `M2M_PROVIDER=keycloak`, issuer, audience and token URL are required. The shared core owns token expiry and caching. Member sessions remain Auth0; member OAuth scopes never grant machine permissions. Existing DEV services are unchanged.
+See [Keycloak trust, credentials and rollout](docs/keycloak-m2m.md). `USE_KEYCLOAK=true` selects Keycloak and then requires the issuer, audience and token URL; unset or `false` uses the Auth0 `AUTH0_*` settings, so rollback is `USE_KEYCLOAK=false` plus a new deployment. The shared core owns token expiry and caching. Member sessions remain Auth0; member OAuth scopes never grant machine permissions. Existing DEV services are unchanged.

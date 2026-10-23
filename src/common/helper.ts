@@ -63,9 +63,21 @@ function getS3 () {
   return s3
 }
 
-const m2mAuth = require('tc-core-library-js').auth.m2m
+const { auth } = require('tc-core-library-js')
 
-const m2m = m2mAuth()
+// USE_KEYCLOAK (read by tc-core-library-js) picks the M2M provider once at startup:
+// true uses the KEYCLOAK_* settings, unset/empty/false the pre-migration AUTH0_* settings
+// below. An invalid value throws here, so the service fails fast.
+const useKeycloak = auth.useKeycloak()
+const m2m = auth.m2m(
+  _.pick(config, [
+    'AUTH0_URL',
+    'AUTH0_AUDIENCE',
+    'AUTH0_CLIENT_ID',
+    'AUTH0_CLIENT_SECRET',
+    'AUTH0_PROXY_SERVER_URL'
+  ])
+)
 
 /**
  * Wrap async function to standard express function
@@ -247,17 +259,33 @@ async function uploadPhotoToS3 (data, mimetype, fileName) {
 }
 
 /**
- * Get Bus API Client
+ * Get the cached Bus API client used for email-change verification events.
+ * The wrapper always takes AUTH0_* option names; `auth.wrapperSettings` fills them for the
+ * provider USE_KEYCLOAK selects:
+ * - true: KEYCLOAK_TOKEN_URL, KEYCLOAK_AUDIENCE, KEYCLOAK_CLIENT_ID and KEYCLOAK_CLIENT_SECRET.
+ * - unset, empty or false: AUTH0_URL, AUTH0_AUDIENCE, AUTH0_PROXY_SERVER_URL, AUTH0_CLIENT_ID,
+ *   AUTH0_CLIENT_SECRET and TOKEN_CACHE_TIME, as before the Keycloak migration.
+ * Takes no arguments.
  * @return {Object} Bus API Client Instance
+ * @throws {Error} when the wrapper rejects missing or invalid settings for the active provider
  */
 function getBusApiClient () {
   // if there is no bus API client instance, then create a new instance
   if (!busApiClient) {
     busApiClient = busApi({
-      AUTH0_URL: config.KEYCLOAK_TOKEN_URL,
-      AUTH0_AUDIENCE: config.KEYCLOAK_AUDIENCE,
-      AUTH0_CLIENT_ID: config.KEYCLOAK_CLIENT_ID,
-      AUTH0_CLIENT_SECRET: config.KEYCLOAK_CLIENT_SECRET,
+      ...auth.wrapperSettings(_.pick(config, [
+        'AUTH0_URL',
+        'AUTH0_AUDIENCE',
+        'AUTH0_CLIENT_ID',
+        'AUTH0_CLIENT_SECRET',
+        'AUTH0_PROXY_SERVER_URL',
+        'KEYCLOAK_TOKEN_URL',
+        'KEYCLOAK_AUDIENCE',
+        'KEYCLOAK_CLIENT_ID',
+        'KEYCLOAK_CLIENT_SECRET'
+      ])),
+      // Only the Auth0 configuration passed TOKEN_CACHE_TIME to the wrapper.
+      ...(useKeycloak ? {} : _.pick(config, ['TOKEN_CACHE_TIME'])),
       BUSAPI_URL: config.BUSAPI_URL,
       KAFKA_ERROR_TOPIC: config.KAFKA_ERROR_TOPIC
     })
@@ -558,11 +586,26 @@ async function getMemberGroups (memberId): Promise<any[]> {
 }
 
 /**
- * Obtains a cached, verified Keycloak token for downstream service calls.
+ * Obtains a cached M2M token for downstream service calls (Groups API lookups and
+ * MemberService calls) from the provider USE_KEYCLOAK selects: a verified Keycloak token
+ * using KEYCLOAK_CLIENT_ID/SECRET when true, otherwise an Auth0 token using AUTH0_URL,
+ * AUTH0_AUDIENCE, AUTH0_PROXY_SERVER_URL and AUTH0_CLIENT_ID/SECRET.
  * @returns Promise resolving to the access token; takes no arguments.
- * @throws Error for missing configuration, issuance or verification failures.
+ * @throws Error in Auth0 mode, synchronously as before the migration, when AUTH0_URL or the
+ *   AUTH0 client credentials are not configured.
+ * @throws Error (rejection) for missing configuration, issuance or verification failures.
  */
-const getM2MToken = () => m2m.getMachineToken()
+const getM2MToken = () => {
+  if (!useKeycloak) {
+    if (!config.AUTH0_URL) {
+      throw new Error('AUTH0_URL is not configured. Please set AUTH0_URL environment variable or add it to config.')
+    }
+    if (!config.AUTH0_CLIENT_ID || !config.AUTH0_CLIENT_SECRET) {
+      throw new Error('AUTH0_CLIENT_ID and AUTH0_CLIENT_SECRET must be configured for M2M authentication.')
+    }
+  }
+  return m2m.getMachineToken()
+}
 
 /**
  * Gets the list of parameters from the query as an array

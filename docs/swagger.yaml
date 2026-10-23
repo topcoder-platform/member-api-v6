@@ -104,7 +104,7 @@ info:
     
     ## HTTP Authentication Schemes
     
-    Bearer Authentication (also called token authentication) is an HTTP authentication scheme that involves security tokens called bearer tokens. Member tokens use existing Auth0 trust; service tokens use explicit Keycloak trust
+    Bearer Authentication (also called token authentication) is an HTTP authentication scheme that involves security tokens called bearer tokens. Member tokens use existing Auth0 trust; service tokens use the Keycloak or Auth0 trust selected by USE_KEYCLOAK
     
     
     The client must send this token in the Authorization header when making requests to protected resources:
@@ -118,7 +118,7 @@ info:
     There are various areas in topcoder or third parties that need to communicate with each other like: service to service, daemon to backend, CLI client to internal service, IoT tools, for such scenarios we use machine to machine.
     
     
-    These M2M tokens are from the configured Keycloak issuer, and based on scopes grant access to our functionality. Here are few scopes that should be adhered to: `create:user_profiles`, `read:user_profiles`, `update:user_profiles`, `delete:user_profiles`, `all:user_profiles`
+    These M2M tokens are from the configured Keycloak issuer or Auth0 (see USE_KEYCLOAK), and based on scopes grant access to our functionality. Here are few scopes that should be adhered to: `create:user_profiles`, `read:user_profiles`, `update:user_profiles`, `delete:user_profiles`, `all:user_profiles`
     
     
     ## Authorization via JWT tokens
