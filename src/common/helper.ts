@@ -7,7 +7,7 @@ const errors = require('./errors')
 const { PutObjectCommand, S3Client } = require('@aws-sdk/client-s3')
 const config = require('config')
 const axios = require('axios')
-const busApi = require('topcoder-bus-api-wrapper')
+const busApi = require('tc-core-library-js').createBusApiClient
 const querystring = require('querystring')
 const prisma = require('./prisma').getClient()
 
@@ -63,7 +63,7 @@ function getS3 () {
   return s3
 }
 
-const m2mAuth = require('tc-core-library-js').auth.m2m
+const m2mAuth = require('tc-core-library-js').createM2MClient
 
 const m2m = m2mAuth(
   _.pick(config, [

@@ -9,7 +9,7 @@ const helper = require('./src/common/helper')
 const errors = require('./src/common/errors')
 const logger = require('./src/common/logger')
 const routes = require('./src/routes')
-const authenticator = require('tc-core-library-js').middleware.jwtAuthenticator
+const authenticator = require('tc-core-library-js').createJwtAuthenticator
 
 /**
  * Configure all routes for express app
