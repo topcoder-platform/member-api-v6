@@ -46,6 +46,7 @@ module.exports = {
   PORT: process.env.PORT || 3000,
   API_VERSION: process.env.API_VERSION || 'v6',
   AUTH_SECRET: process.env.AUTH_SECRET,
+  JWT_AUDIENCE: process.env.JWT_AUDIENCE,
   VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
   IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
   CHALLENGE_DB_URL: process.env.CHALLENGE_DB_URL,

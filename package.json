@@ -19,7 +19,7 @@
     "download-data": "ts-node src/scripts/download.ts",
     "seed-data": "ts-node src/scripts/seed-data.ts",
     "reset-db": "prisma migrate reset",
-    "test": "NODE_ENV=test mocha -t 20000 --require ts-node/register/transpile-only test/unit/*.test.js --exit",
+    "test": "NODE_ENV=test mocha -t 20000 --require ts-node/register/transpile-only \"test/unit/*.test.{js,ts}\" --exit",
     "test:cov": "nyc --reporter=html --reporter=text pnpm test",
     "migrate-dynamo-data": "ts-node src/scripts/migrate-dynamo-data.ts",
     "recalculate-member-stats": "node --require ts-node/register/transpile-only src/scripts/recalculateMemberStats.js",
