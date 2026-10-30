@@ -14,8 +14,7 @@ allowBuilds:
   topcoder-challenge-recources-api@https://codeload.github.com/topcoder-platform/resource-api-v6/tar.gz/c15912780c8c49fe65e03e22235db7b1e2aecdae: false
   topcoder-challenges-api@https://codeload.github.com/topcoder-platform/challenge-api-v6/tar.gz/f1e5dad7178b002d4fcfc920f9ca2b3a39921f8b: false
 
-# topcoder-bus-api-wrapper intentionally resolves tc-core-library-js from Git.
-# Preserve that established dependency graph when using pnpm 11's stricter defaults.
+# Linked service packages retain Git dependencies; allow their existing dependency graph.
 blockExoticSubdeps: false
 
 overrides:
