@@ -33,9 +33,13 @@ RUN sh docker/prune-internal-api-packages.sh \
         node_modules/.pnpm-workspace-state-v1.json \
         node_modules/.pnpm/lock.yaml
 
-# The pinned Wolfi/glibc runtime supports the checked-in Debian/OpenSSL 3 Prisma
-# engines without shipping a shell, package manager, or build toolchain.
+# Keep the hardened Wolfi/glibc runtime; Prisma's Debian engines also need the
+# OpenSSL 3 shared libraries, which newer runtime images no longer include.
 FROM cgr.dev/chainguard/node:latest@sha256:6cb70d6b2a324e491263949ea9f58938ed19031ef478e0bdb0b1810f96f8b400 AS runtime
+
+# Use the patched libraries from the build stage. The generic library directory
+# lets both the dynamic linker and Prisma detect OpenSSL 3 without shell tools.
+COPY --from=build-base /usr/lib/*-linux-gnu/libssl.so.3 /usr/lib/*-linux-gnu/libcrypto.so.3 /usr/lib/
 
 # The pinned runtime includes maintenance utilities that the service does not use.
 # Remove every executable except Node, plus the global npm/node-gyp payload, so
@@ -60,4 +64,8 @@ COPY --from=build --chown=65532:65532 /member-api-v6/prisma.config.ts ./prisma.c
 COPY --from=build --chown=65532:65532 /member-api-v6/docker/entrypoint.js ./docker/entrypoint.js
 
 USER 65532
+# Exercise the migration engine in the final runtime, without a database or
+# network access, so missing engines/shared libraries fail the image build.
+RUN --network=none --mount=type=bind,source=docker/check-prisma-runtime.js,target=/tmp/check-prisma-runtime.js \
+    ["/usr/bin/node", "/tmp/check-prisma-runtime.js"]
 ENTRYPOINT ["/usr/bin/node", "/member-api-v6/docker/entrypoint.js"]
