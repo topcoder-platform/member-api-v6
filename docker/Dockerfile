@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # Keep a Debian/glibc build because upstream generated Prisma clients ship Debian engines.
-FROM node:26.5.1-bookworm-slim AS build-base
+FROM node:26.12.1-bookworm-slim AS build-base
 
 WORKDIR /member-api-v6
 RUN apt-get update \
@@ -15,6 +15,7 @@ FROM build-base AS build
 COPY . .
 RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false \
     pnpm install --frozen-lockfile
+RUN pnpm run test:dependency-compat
 RUN pnpm lint && pnpm build \
     && rm -rf dist/src/scripts \
     && rm -f "dist/docs/Member API.postman_collection.json" \
@@ -34,7 +35,7 @@ RUN sh docker/prune-internal-api-packages.sh \
 
 # The pinned Wolfi/glibc runtime supports the checked-in Debian/OpenSSL 3 Prisma
 # engines without shipping a shell, package manager, or build toolchain.
-FROM cgr.dev/chainguard/node:latest@sha256:f819ce9bc54ff2a771a6849ec8453aaab9bb697873f3f6b91039ed07a3626748 AS runtime
+FROM cgr.dev/chainguard/node:latest@sha256:6cb70d6b2a324e491263949ea9f58938ed19031ef478e0bdb0b1810f96f8b400 AS runtime
 
 # The pinned runtime includes maintenance utilities that the service does not use.
 # Remove every executable except Node, plus the global npm/node-gyp payload, so
