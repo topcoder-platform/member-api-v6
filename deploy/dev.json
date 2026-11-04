@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 2,
+  "environment": "dev",
+  "accountId": "811668436784",
+  "region": "us-east-1",
+  "deployRoleArn": "arn:aws:iam::811668436784:role/member-api-v6-dev-deploy",
+  "taskRoleArn": "arn:aws:iam::811668436784:role/ap-member-v3-dev",
+  "executionRoleArn": "arn:aws:iam::811668436784:role/ecsTaskExecutionRole",
+  "cluster": "member-api-serverless",
+  "service": "member-api-v6",
+  "taskFamily": "member-api-v6",
+  "circleciOrgId": "947bef5e-1669-415d-b83c-4fc85155b7df",
+  "circleciProjectId": "af7dfffe-e15e-44a1-9191-f4726ca82efc",
+  "repository": "github.com/topcoder-platform/member-api-v6",
+  "branch": "develop",
+  "images": {
+    "member-api-v6": "member-api-v6"
+  }
+}
