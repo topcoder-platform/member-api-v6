@@ -45,7 +45,8 @@ module.exports = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'debug',
   PORT: process.env.PORT || 3000,
   API_VERSION: process.env.API_VERSION || 'v6',
-  AUTH_SECRET: process.env.AUTH_SECRET || 'mysecret',
+  AUTH_SECRET: process.env.AUTH_SECRET,
+  JWT_AUDIENCE: process.env.JWT_AUDIENCE,
   VALID_ISSUERS: process.env.VALID_ISSUERS || '["https://api.topcoder-dev.com", "https://api.topcoder.com", "https://topcoder-dev.auth0.com/", "https://auth.topcoder-dev.com/"]',
   IDENTITY_DB_URL: process.env.IDENTITY_DB_URL,
   CHALLENGE_DB_URL: process.env.CHALLENGE_DB_URL,
@@ -63,7 +64,7 @@ module.exports = {
   AUTH0_CLIENT_SECRET: process.env.AUTH0_CLIENT_SECRET,
 
   // bus API config params
-  BUSAPI_URL: process.env.BUSAPI_URL || 'https://api.topcoder-dev.com/v5',
+  BUSAPI_URL: process.env.BUSAPI_URL || 'https://api.topcoder-dev.com/v6',
   KAFKA_ERROR_TOPIC: process.env.KAFKA_ERROR_TOPIC || 'common.error.reporting',
 
   // tags config params
