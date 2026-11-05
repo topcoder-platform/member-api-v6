@@ -1,6 +1,6 @@
 # OIDC deployment migration
 
-This change replaces the Auth0 credential broker and SSM-to-shell deployment path with [tc-deploy-scripts v2.0.5](https://github.com/topcoder-platform/tc-deploy-scripts/releases/tag/v2.0.5), fetched by tag and verified against commit `bff574ab5c0b46773e25d2af1eff76675fba2ba5`. Build and deployment run in separate jobs. The deployer cannot read Parameter Store, Secrets Manager or decrypt KMS data, including through another assumed role. ECS continues resolving the existing runtime secret references using the execution role.
+This change replaces the Auth0 credential broker and SSM-to-shell deployment path with [tc-deploy-scripts v2.0.9](https://github.com/topcoder-platform/tc-deploy-scripts/releases/tag/v2.0.9), fetched by tag and verified against commit `dc06de730f068a230efa9d5f4d4d9c80782d3bfb`. Build and deployment run in separate jobs. The deployer cannot read Parameter Store, Secrets Manager or decrypt KMS data, including through another assumed role. ECS continues resolving the existing runtime secret references using the execution role.
 
 ## Development target
 
@@ -22,7 +22,7 @@ The read-only inventory on 2026-11-03 verified account `409275337247`, cluster `
 
 The verified dev manifest is now committed; service-specific IAM templates and the reference-only baseline remain in the private infrastructure repository. **Keep this PR in draft until the four remaining dev prerequisites above are installed and verified.** Merge to `develop` only after preparation, then monitor the first OIDC deployment. Branches other than `develop` and `master` build only and receive no deployment context.
 
-Local validation fetched the actual v2.0.5 tag in the pinned executor, verified its commit and passed all 82 shared tests. CircleCI configuration validation also passed. A passing PR build validates the application image; it does not establish a successful dev rollout.
+Local validation fetched the actual v2.0.9 tag in the pinned executor, verified its commit and passed all 82 shared tests. CircleCI configuration validation also passed. A passing PR build validates the application image; it does not establish a successful dev rollout.
 
 Run the shared offline suite, validate the CircleCI config and IAM policies, and test a dev release plus an unhealthy-image rollback. Verify CloudTrail contains no SSM/Secrets Manager calls from the deployment principal. Remove its old broker grants only after migration. Check the runtime secret references and roles stayed unchanged. Production requires the manual approval job and a passing digest/scan/health verification.
 
