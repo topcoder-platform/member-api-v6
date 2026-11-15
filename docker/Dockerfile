@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # Keep a Debian/glibc build because upstream generated Prisma clients ship Debian engines.
-FROM node:26.12.1-bookworm-slim AS build-base
+FROM node:26.13.1-bookworm-slim AS build-base
 
 WORKDIR /member-api-v6
 RUN apt-get update \
@@ -35,7 +35,7 @@ RUN sh docker/prune-internal-api-packages.sh \
 
 # Keep the hardened Wolfi/glibc runtime; Prisma's Debian engines also need the
 # OpenSSL 3 shared libraries, which newer runtime images no longer include.
-FROM cgr.dev/chainguard/node:latest@sha256:6cb70d6b2a324e491263949ea9f58938ed19031ef478e0bdb0b1810f96f8b400 AS runtime
+FROM cgr.dev/chainguard/node:latest@sha256:efeb9fd6c61fd20b7c634531e0a746d26204bdc2df13e7ea57ab69aad349a900 AS runtime
 
 # Use the patched libraries from the build stage. The generic library directory
 # lets both the dynamic linker and Prisma detect OpenSSL 3 without shell tools.
