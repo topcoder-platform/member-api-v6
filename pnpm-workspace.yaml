@@ -18,6 +18,7 @@ allowBuilds:
 blockExoticSubdeps: false
 
 overrides:
+  'effect@^3': 3.22.1
   'sharp': 0.35.5
   'baseline-browser-mapping': 2.11.0
   'browserslist': 4.28.8
