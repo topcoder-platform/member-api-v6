@@ -1,6 +1,7 @@
+const { createPostgresAdapter } = require('./prismaAdapter')
 const config = require('config')
 const errors = require('./errors')
-const { PrismaClient: IdentityExternalPrismaClient } = require('@topcoder/tc-identity-service/packages/identity-prisma-client')
+const { PrismaClient: IdentityExternalPrismaClient } = require('@topcoder/tc-identity-service')
 
 let identityClient
 
@@ -24,7 +25,7 @@ function getIdentityClient () {
   if (!identityClient) {
     identityClient = new IdentityExternalPrismaClient({
       ...clientOptions,
-      datasources: { db: { url: config.IDENTITY_DB_URL } }
+      adapter: createPostgresAdapter(config.IDENTITY_DB_URL, 'IDENTITY_DB_URL')
     })
   }
 

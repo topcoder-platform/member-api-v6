@@ -121,12 +121,11 @@ describe('app routes unit tests', () => {
       VALID_ISSUERS: '["issuer"]'
     })
     setStubModule(coreLibraryPath, {
-      middleware: {
-        jwtAuthenticator: () => () => {
+      createJwtAuthenticator: () => () => {
           authenticatorCalls += 1
           throw new Error('authenticator should not run without an authorization header')
         }
-      }
+
     })
     setStubModule(statisticsControllerPath, {
       getDistribution: (req, res, next) => {
