@@ -5,13 +5,13 @@ allowBuilds:
   '@nestjs/core': true
   '@prisma/engines': true
   '@scarf/scarf': false
-  '@topcoder/challenge-api-v6@https://codeload.github.com/topcoder-platform/challenge-api-v6/tar.gz/8c2bc0d9e1e879bd750d160bd57a041496e075fb#path:packages/challenge-prisma-client': false
+  '@topcoder/challenge-api-v6@https://codeload.github.com/topcoder-platform/challenge-api-v6/tar.gz/4be7af7df425e836020428ca4ed317e120289de9#path:packages/challenge-prisma-client': false
   aws-sdk: false
   dtrace-provider: false
   prisma: true
-  prisma-client-28f8527186ef540d21e9844cd48bf55dd53d056e1f8caaf440dad58683184288@https://codeload.github.com/topcoder-platform/identity-api-v6/tar.gz/7576802a1bb1d156f42d9e77362a0ef8d2bc218a#path:packages/identity-prisma-client: false
-  prisma-client-6f5ae88c45ac326e3703f1e8f31b080c054ebe63193bcfa0d003dda26c1a5612@https://codeload.github.com/topcoder-platform/tc-finance-api/tar.gz/7b01e663bf002385236a5942401f97c47ee5989e#path:packages/finance-prisma-client: false
-  prisma-client-9f97a39eec082d40239c345b858ab2195a94c2a5bbb3ef627ef0c8097ac7ec5d@https://codeload.github.com/topcoder-platform/resource-api-v6/tar.gz/839e585494df48834c02516038e9a7ef79226a47#path:packages/resources-prisma-client: false
+  prisma-client-28f8527186ef540d21e9844cd48bf55dd53d056e1f8caaf440dad58683184288@https://codeload.github.com/topcoder-platform/identity-api-v6/tar.gz/09a78bc809d3ed158d891e8481a13b340524faff#path:packages/identity-prisma-client: false
+  prisma-client-6f5ae88c45ac326e3703f1e8f31b080c054ebe63193bcfa0d003dda26c1a5612@https://codeload.github.com/topcoder-platform/tc-finance-api/tar.gz/48d224ce905c983c52852fae11f585e79ec1b902#path:packages/finance-prisma-client: false
+  prisma-client-9f97a39eec082d40239c345b858ab2195a94c2a5bbb3ef627ef0c8097ac7ec5d@https://codeload.github.com/topcoder-platform/resource-api-v6/tar.gz/b7c10fc42c0f64a8d18e3e0a2ab41cb8ae52360f#path:packages/resources-prisma-client: false
   sharp: true
   tc-identity-service@https://codeload.github.com/topcoder-platform/identity-api-v6/tar.gz/1b34a83edf9382dd16e8289a5704702a6b19b9d6: false
   tc-payments-api@https://codeload.github.com/topcoder-platform/tc-finance-api/tar.gz/e5322a5b39f519573934264551ec2ca6a86f88ea: false
