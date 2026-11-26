@@ -7,24 +7,24 @@ const {
 const config = require('config')
 const {
   PrismaClient: FinancePrismaClient
-} = require('@topcoder/tc-finance-api/packages/finance-prisma-client')
+} = require('@topcoder/tc-finance-api')
 const {
   PrismaClient: SkillsPrismaClient
-} = require('@topcoder/standardized-skills-api/packages/skills-prisma-client')
+} = require('@topcoder/standardized-skills-api')
 const {
   PrismaClient: ResourcesPrismaClient,
   Prisma: ResourcesPrisma
-} = require('@topcoder/resource-api-v6/packages/resources-prisma-client')
+} = require('@topcoder/resource-api-v6')
 const {
   PrismaClient: ChallengesPrismaClient,
   Prisma: ChallengesPrisma
-} = require('@topcoder/challenge-api-v6/packages/challenge-prisma-client')
+} = require('@topcoder/challenge-api-v6')
 const {
   PrismaClient: AcademyPrismaClient
-} = require('@topcoder/learning-paths-api/packages/academy-prisma-client')
+} = require('@topcoder/learning-paths-api')
 const {
   PrismaClient: EngagementsPrismaClient
-} = require('@topcoder/engagements-api-v6/packages/engagements-prisma-client')
+} = require('@topcoder/engagements-api-v6')
 
 const skillsDbUrl = process.env.SKILLS_DB_URL
 const challengesDbUrl = process.env.CHALLENGES_DB_URL || process.env.CHALLENGE_DB_URL
@@ -69,7 +69,7 @@ const getSkillsClient = () => {
     }
     skillsClient = new SkillsPrismaClient({
       ...clientOptions,
-      datasources: { db: { url: skillsDbUrl } }
+      adapter: createPostgresAdapter(skillsDbUrl, 'SKILLS_DB_URL')
     })
   }
   return skillsClient
@@ -85,7 +85,7 @@ const getChallengesClient = () => {
     }
     challengesClient = new ChallengesPrismaClient({
       ...clientOptions,
-      datasources: { db: { url: challengesDbUrl } }
+      adapter: createPostgresAdapter(challengesDbUrl, 'CHALLENGES_DB_URL')
     })
   }
   return challengesClient
@@ -99,7 +99,7 @@ const getAcademyClient = () => {
     }
     academyClient = new AcademyPrismaClient({
       ...clientOptions,
-      datasources: { db: { url: academyDbUrl } }
+      adapter: createPostgresAdapter(academyDbUrl, 'ACADEMY_DB_URL')
     })
   }
   return academyClient
@@ -132,7 +132,7 @@ const getResourcesClient = () => {
     }
     resourcesClient = new ResourcesPrismaClient({
       ...clientOptions,
-      datasources: { db: { url: resourcesDbUrl } }
+      adapter: createPostgresAdapter(resourcesDbUrl, 'RESOURCES_DB_URL')
     })
   }
   return resourcesClient
@@ -153,7 +153,7 @@ const getFinanceClient = () => {
     }
     financeClient = new FinancePrismaClient({
       ...clientOptions,
-      datasources: { db: { url: financeDbUrl } }
+      adapter: createPostgresAdapter(financeDbUrl, 'FINANCE_DATABASE_URL')
     })
   }
   return financeClient

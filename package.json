@@ -7,7 +7,7 @@
   "scripts": {
     "postinstall": "pnpm run prisma:generate",
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma --generator client && prisma generate --schema=prisma/identity-schema.prisma --generator identityClient && prisma generate --schema=prisma/challenge-schema.prisma --generator challengeClient",
-    "build": "nest build",
+    "build": "tsc -p tsconfig.build.json && cp -R --parents docs src/fonts src/images prisma/generated dist/",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
@@ -37,8 +37,8 @@
   "license": "none",
   "devDependencies": {
     "@eslint/js": "^9.18.0",
-    "@nestjs/cli": "^11.0.0",
-    "@nestjs/schematics": "^11.0.0",
+    "@nestjs/cli": "12.0.15",
+    "@nestjs/schematics": "12.0.16",
     "@types/express": "^5.0.0",
     "@types/node": "^26.1.1",
     "@types/pg": "^8.15.5",
@@ -54,25 +54,26 @@
     "prettier": "^3.6.2",
     "ts-loader": "^9.5.2",
     "ts-node": "^10.9.2",
-    "typescript": "5.9.3",
+    "@typescript/native": "npm:typescript@7.0.2",
+    "typescript": "npm:@typescript/typescript6@6.0.2",
     "typescript-eslint": "^8.20.0"
   },
   "dependencies": {
-    "@nestjs/common": "^11.1.8",
-    "@nestjs/core": "^11.1.8",
-    "@nestjs/platform-express": "^11.1.8",
-    "@prisma/adapter-pg": "7.8.0",
-    "@prisma/client": "7.8.0",
-    "@prisma/client-runtime-utils": "7.8.0",
+    "@nestjs/common": "12.6.3",
+    "@nestjs/core": "12.6.3",
+    "@nestjs/platform-express": "12.6.3",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "@prisma/client-runtime-utils": "7.10.1",
     "@aws-sdk/client-s3": "^3.1090.0",
     "@react-pdf/renderer": "^3.4.4",
-    "@topcoder/challenge-api-v6": "github:topcoder-platform/challenge-api-v6#master",
-    "@topcoder/engagements-api-v6": "topcoder-platform/engagements-api-v6.git#master",
-    "@topcoder/learning-paths-api": "github:topcoder-platform/learning-paths-api#master",
-    "@topcoder/resource-api-v6": "topcoder-platform/resource-api-v6.git#master",
-    "@topcoder/standardized-skills-api": "topcoder-platform/standardized-skills-api.git#master",
-    "@topcoder/tc-finance-api": "topcoder-platform/tc-finance-api.git#master",
-    "@topcoder/tc-identity-service": "topcoder-platform/identity-api-v6.git#master",
+    "@topcoder/challenge-api-v6": "github:topcoder-platform/challenge-api-v6#8c2bc0d9e1e879bd750d160bd57a041496e075fb&path:packages/challenge-prisma-client",
+    "@topcoder/engagements-api-v6": "github:topcoder-platform/engagements-api-v6#dbace635cd68f708704871f16160659d72f22254&path:packages/engagements-prisma-client",
+    "@topcoder/learning-paths-api": "github:topcoder-platform/learning-paths-api#ba3e7e91a284e5173e22f8ef6170347fce22ee08&path:packages/academy-prisma-client",
+    "@topcoder/resource-api-v6": "github:topcoder-platform/resource-api-v6#839e585494df48834c02516038e9a7ef79226a47&path:packages/resources-prisma-client",
+    "@topcoder/standardized-skills-api": "github:topcoder-platform/standardized-skills-api#ef728059815b869b90b7b78b92f9bf22ffe76110&path:packages/skills-prisma-client",
+    "@topcoder/tc-finance-api": "github:topcoder-platform/tc-finance-api#7b01e663bf002385236a5942401f97c47ee5989e&path:packages/finance-prisma-client",
+    "@topcoder/tc-identity-service": "github:topcoder-platform/identity-api-v6#7576802a1bb1d156f42d9e77362a0ef8d2bc218a&path:packages/identity-prisma-client",
     "axios": "^1.20.0",
     "bluebird": "^3.5.1",
     "body-parser": "^1.20.9",
@@ -96,7 +97,7 @@
     "moment-timezone": "^0.5.43",
     "mysql2": "^3.23.1",
     "pg": "^8.16.3",
-    "prisma": "7.8.0",
+    "prisma": "7.10.1",
     "qs": "^6.16.1",
     "react": "^18.3.1",
     "react-pdf-html": "^2.1.5",
@@ -110,9 +111,9 @@
     "yamljs": "^0.3.0"
   },
   "engines": {
-    "node": "26.x"
+    "node": "26.13.1"
   },
   "volta": {
-    "node": "26.x"
+    "node": "26.13.1"
   }
 }

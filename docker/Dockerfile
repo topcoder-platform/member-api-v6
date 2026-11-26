@@ -21,9 +21,7 @@ RUN pnpm lint && pnpm build \
     && rm -f "dist/docs/Member API.postman_collection.json" \
         dist/tsconfig.build.tsbuildinfo \
     && find dist -type f -name '*.d.ts' -delete
-RUN sh docker/prune-internal-api-packages.sh \
-    && rm docker/prune-internal-api-packages.sh \
-    && pnpm prune --prod \
+RUN pnpm prune --prod \
     && find node_modules -type f \
         \( -name yarn.lock -o -name package-lock.json -o -name pnpm-lock.yaml \
         -o -name npm-shrinkwrap.json \) -delete \

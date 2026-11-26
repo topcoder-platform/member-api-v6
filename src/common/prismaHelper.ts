@@ -478,7 +478,7 @@ function buildMemberSkills (skillList) {
     return []
   }
   // Detect standardized shape (UserSkill records) vs legacy (memberSkill with nested levels)
-  const isStandardized = !!_.get(skillList, '[0].userSkillLevel') || !!_.get(skillList, '[0].userSkillDisplayMode')
+  const isStandardized = !!_.get(skillList, '[0].level') || !!_.get(skillList, '[0].displayMode')
 
   if (!isStandardized) {
     return _.map(skillList, item => {
@@ -503,8 +503,8 @@ function buildMemberSkills (skillList) {
     ret.createdAt = first.createdAt
     ret.updatedAt = first.updatedAt
     ret.category = _.pick(first.skill.category, ['id', 'name'])
-    if (first.userSkillDisplayMode) {
-      ret.displayMode = _.pick(first.userSkillDisplayMode, ['id', 'name'])
+    if (first.displayMode) {
+      ret.displayMode = _.pick(first.displayMode, ['id', 'name'])
     }
 
     if (first.skill && first.skill.skillEvents && first.skill.skillEvents.length) {
@@ -518,7 +518,7 @@ function buildMemberSkills (skillList) {
     }
 
     const levels = _.uniqBy(
-      _.map(items, (i) => _.pick(i.userSkillLevel, ['id', 'name', 'description'])),
+      _.map(items, (i) => _.pick(i.level, ['id', 'name', 'description'])),
       'id'
     )
     if (levels.length > 0) {
@@ -1013,9 +1013,9 @@ const currentMaxRatingStatsSelect = {
 // include parameters used to get all member skills
 // Standardized skills schema: userSkill has singular level and display mode
 const skillsIncludeParams = {
-  userSkillLevel: true,
+  level: true,
   skill: { include: { category: true } },
-  userSkillDisplayMode: true
+  displayMode: true
 }
 
 /**

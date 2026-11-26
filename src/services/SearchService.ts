@@ -163,7 +163,7 @@ function computeSkillScoreForCandidate (candidate, skillsByUser, skillIds) {
     if (!matches.length) {
       continue
     }
-    const best = _.max(matches.map(m => levelWeight(_.get(m, 'userSkillLevel.name')))) || 0
+    const best = _.max(matches.map(m => levelWeight(_.get(m, 'level.name')))) || 0
     baseSum += best
   }
 
@@ -753,7 +753,7 @@ async function fillMembers (prismaFilter, query, fields, skillSearch = false) {
           skillId: { in: skillIds }
         },
         include: {
-          userSkillLevel: true
+          level: true
         }
       })
       const skillsByUser = _.groupBy(userSkills, 'userId')
