@@ -20,22 +20,18 @@ chai.should()
  */
 function createChallengeClient (onFindMany) {
   return {
-    $queryRaw: async (strings) => {
-      const sql = Array.isArray(strings) ? strings.join('') : String(strings)
-      if (sql.includes('"ChallengeTrack"')) {
-        return [
-          { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: 1 },
-          { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: 2 }
-        ]
-      }
-      if (sql.includes('"ChallengeType"')) {
-        return [
-          { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: 3, isTask: false },
-          { id: 'type-code-id', name: 'Code', abbreviation: 'CODE', legacyId: 4, isTask: false },
-          { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: 5, isTask: false }
-        ]
-      }
-      return []
+    challengeTrack: {
+      findMany: async () => [
+        { id: 'track-dev-id', name: 'Development', abbreviation: 'DEV', legacyId: 1 },
+        { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: 2 }
+      ]
+    },
+    challengeType: {
+      findMany: async () => [
+        { id: 'type-ch-id', name: 'Challenge', abbreviation: 'CH', legacyId: 3, isTask: false },
+        { id: 'type-code-id', name: 'Code', abbreviation: 'CODE', legacyId: 4, isTask: false },
+        { id: 'type-mm-id', name: 'Marathon Match', abbreviation: 'MM', legacyId: 5, isTask: false }
+      ]
     },
     challenge: {
       findMany: onFindMany

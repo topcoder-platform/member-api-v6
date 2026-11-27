@@ -476,21 +476,14 @@ function createChallengeClient (metadataById) {
   ]
 
   return {
-    async $queryRaw (strings) {
-      const sql = Array.isArray(strings) ? strings.join('') : String(strings)
-
-      if (sql.includes('FROM "ChallengeTrack"')) {
-        return [
-          { id: DEVELOP_TRACK_ID, name: 'Development', abbreviation: 'DEV', legacyId: null },
-          { id: DATA_SCIENCE_TRACK_ID, name: 'Data Science', abbreviation: 'DS', legacyId: null }
-        ]
-      }
-
-      if (sql.includes('FROM "ChallengeType"')) {
-        return typeRows.map(cloneRow)
-      }
-
-      throw new Error(`Unexpected challenge lookup query: ${sql}`)
+    challengeTrack: {
+      findMany: async () => [
+        { id: DEVELOP_TRACK_ID, name: 'Development', abbreviation: 'DEV', legacyId: null },
+        { id: DATA_SCIENCE_TRACK_ID, name: 'Data Science', abbreviation: 'DS', legacyId: null }
+      ]
+    },
+    challengeType: {
+      findMany: async () => typeRows.map(cloneRow)
     },
     async $queryRawUnsafe (sql, ...params) {
       const normalizedName = params[0]
