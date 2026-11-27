@@ -359,27 +359,20 @@ function createChallengeClient (metadataById, winnerRows = []) {
   const challengeWinnerRows = winnerRows.map(cloneRow)
 
   return {
-    async $queryRaw (strings) {
-      const sql = Array.isArray(strings) ? strings.join('') : String(strings)
-
-      if (sql.includes('FROM "ChallengeTrack"')) {
-        return [
-          { id: DEVELOP_TRACK_ID, name: 'Development', abbreviation: 'DEV', legacyId: null },
-          { id: DATA_SCIENCE_TRACK_ID, name: 'Data Science', abbreviation: 'DS', legacyId: null },
-          { id: QA_TRACK_ID, name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
-        ]
-      }
-
-      if (sql.includes('FROM "ChallengeType"')) {
-        return [
-          { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
-          { id: CODE_TYPE_ID, name: 'Code', abbreviation: 'CODE', legacyId: null, isTask: false },
-          { id: BUG_HUNT_TYPE_ID, name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
-          { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
-        ]
-      }
-
-      throw new Error(`Unexpected challenge lookup query: ${sql}`)
+    challengeTrack: {
+      findMany: async () => [
+        { id: DEVELOP_TRACK_ID, name: 'Development', abbreviation: 'DEV', legacyId: null },
+        { id: DATA_SCIENCE_TRACK_ID, name: 'Data Science', abbreviation: 'DS', legacyId: null },
+        { id: QA_TRACK_ID, name: 'Quality Assurance', abbreviation: 'QA', legacyId: null }
+      ]
+    },
+    challengeType: {
+      findMany: async () => [
+        { id: CHALLENGE_TYPE_ID, name: 'Challenge', abbreviation: 'CH', legacyId: null, isTask: false },
+        { id: CODE_TYPE_ID, name: 'Code', abbreviation: 'CODE', legacyId: null, isTask: false },
+        { id: BUG_HUNT_TYPE_ID, name: 'BUG_HUNT', abbreviation: 'LBGH', legacyId: 120, isTask: false },
+        { id: MARATHON_MATCH_TYPE_ID, name: 'Marathon Match', abbreviation: 'MM', legacyId: null, isTask: false }
+      ]
     },
     challenge: {
       async findMany (args) {

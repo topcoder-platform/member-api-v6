@@ -268,14 +268,13 @@ describe('search service unit tests', () => {
       ]
       skillsPrisma.userSkill.findMany = async () => []
       prismaManager.getChallengesClient = () => ({
-        $queryRaw: async (query) => {
-          const sql = _.castArray(query).join('')
-          if (sql.includes('"ChallengeTrack"')) {
-            return [
-              { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
-            ]
-          }
-          return [
+        challengeTrack: {
+          findMany: async () => [
+            { id: 'track-ds-id', name: 'Data Science', abbreviation: 'DS', legacyId: null }
+          ]
+        },
+        challengeType: {
+          findMany: async () => [
             { id: 'rating-path-ai-engineering', name: 'AI Engineering', abbreviation: 'AI Engineering', legacyId: null, isTask: false }
           ]
         }

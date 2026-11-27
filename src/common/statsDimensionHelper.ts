@@ -211,14 +211,12 @@ async function loadChallengeDimensionLookup (challengesClient) {
 
   cachedLookupPromise = (async () => {
     const [trackRows, typeRows] = await Promise.all([
-      challengesClient.$queryRaw`
-        SELECT "id", "name", "abbreviation", "legacyId"
-        FROM "ChallengeTrack"
-      `,
-      challengesClient.$queryRaw`
-        SELECT "id", "name", "abbreviation", "legacyId", "isTask"
-        FROM "ChallengeType"
-      `
+      challengesClient.challengeTrack.findMany({
+        select: { id: true, name: true, abbreviation: true, legacyId: true }
+      }),
+      challengesClient.challengeType.findMany({
+        select: { id: true, name: true, abbreviation: true, legacyId: true, isTask: true }
+      })
     ])
 
     return buildChallengeDimensionLookup(trackRows, typeRows)
